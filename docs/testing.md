@@ -142,6 +142,36 @@ does not: `deploy/helm/README.md`, since that gate reaches no cluster, and
 `deploy/observability/README.md`, since that one reaches no Prometheus and does
 not validate rule syntax.
 
+**Running a gate is the other half, and the block above is only the suites.**
+`ci.yml` tests each gate and then runs it — the pattern every gate here
+follows — so a green suite says the gate works and not that this checkout
+passes it. The runs the block above does not already carry:
+
+```bash
+(cd .github/licence-gate && py -3.12 licence_gate.py)    # from its own directory
+py -3.12 .github/pipeline-gate/pipeline_gate.py filters
+py -3.12 .github/pipeline-gate/pipeline_gate.py images
+py -3.12 deploy/canary/canary.py check
+
+HELM=/path/to/helm bash deploy/helm/smoke.sh             # when helm is not on PATH
+```
+
+**`pipeline_gate.py stages` is the one that cannot be run on its own**: it
+reads what the three test steps wrote, so it needs a `dotnet test` per stage
+into `./TestResults/{architecture,unit,integration}` first. Those three
+commands are under *Categories* below, and the gate invocation sits with them.
+
+**The chart gate runs `helm dependency update` itself** before it can render
+anything — `file://` dependencies resolve from disk, so there is no network
+step and no chart repository.
+
+`deploy/canary/README.md` is that tree's operational reference, on
+`deploy/observability/README.md`'s terms: what the gate asserts, and — more
+usefully — the things it does not, of which the load-bearing one is that
+**nothing has established a replica ratio is a traffic ratio**. kube-proxy
+spreads connections rather than requests, and no render-time check reaches
+that.
+
 **`py -3.12`, not `python`.** Every CI job that runs Python pins 3.12, and a
 newer interpreter is the hazard — it accepts APIs 3.12 does not, so the local
 suite goes green on code the runner cannot execute. The scaffold *script* is a
@@ -266,6 +296,15 @@ the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
 on this repository they are **18**, **829** and **205**, summing to the 1,052
 the whole suite runs — which is the arithmetic the callout below asks for.
+
+**The integration figure read 187 for two branches and the arithmetic never
+closed**, which is `CLAUDE.md`'s own rule about restated numbers catching one:
+18 + 649 + 187 is 854 where the suites summed to 855. What settled it was
+**reconciling against the branch's own CI run rather than recomputing** —
+`gh run view <id> --log`, summed over the per-project totals of each stage.
+That is the cheap check whenever a count here and a count elsewhere disagree:
+the run already happened, and it beats arithmetic that would otherwise have to
+guess which side is wrong.
 
 ```bash
 dotnet test Platform.slnx --filter "FullyQualifiedName~ArchitectureTests" \

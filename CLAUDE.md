@@ -2,26 +2,35 @@
 
 Guidance for Claude Code when working in this repository.
 
-**The long half of this file's phase section now lives in
-[`docs/pr-decision-log.md`](docs/pr-decision-log.md).**
-Every landed PR from PR-08 on appended its findings here and nothing was ever
-consolidated,
-so a file loaded into every session's context had grown to 3,161 lines — of
-which the per-PR changelog alone was 1,132. Those blocks moved out **verbatim
-in their arguments**: not one was shortened, because a summary of an argument
-is how a rule gets "corrected" back. The log's own header lists what *was*
-edited on the way out. The rest of what left went for a different reason —
-duplication of Appendix D and of `.claude/commands/*.md`, argued below — and
-the changelog was the largest single part of it. **No line count of this file
+**Four long sections of this file now live beside it under `docs/`.** Every
+landed PR appended its findings here and nothing was ever consolidated, so a
+file loaded into every session's context had grown past three thousand lines.
+Those blocks moved out **verbatim in their arguments**: not one was shortened,
+because a summary of an argument is how a rule gets "corrected" back. Each
+destination's own header lists what *was* edited on the way out.
+
+| | |
+|---|---|
+| [`docs/pr-decision-log.md`](docs/pr-decision-log.md) | What each PR from PR-08 on decided — the long half of the phase section |
+| [`docs/lessons.md`](docs/lessons.md) | The lessons that generalise past the PR that found them, and the measurement behind each |
+| [`docs/harness-boundaries.md`](docs/harness-boundaries.md) | What the harness grants and refuses, and every grant wider than the operation it buys |
+| [`docs/testing.md`](docs/testing.md) | How to run every suite and every gate, and what each needs |
+
+**Read the one that covers what you are about to touch**, before you touch it.
+They are where the traps are recorded. What stayed here is what an agent needs
+in order to *act* whatever it is working on: the repo's shape, the phase, the
+one rule, and the style the prose and the code are written in.
+
+The rest of what left went for a different reason — duplication of Appendix D
+and of `.claude/commands/*.md`, argued below. **No line count of this file
 appears in this paragraph on purpose**: a file that states its own length
 invalidates the claim with the next edit, including the edit that fixes it.
-What stayed is what an agent needs
-in order to *act*: the repo's shape, the phase, the one rule, and the style the
-prose and the code are written in.
 
-**Read the log before working in an area it covers.** It is where the traps are
-recorded; this file keeps only the lessons that generalise past the PR that
-found them.
+**Each of those four is outside the blueprint tree**, so it is in no index,
+behind no nav footer, and reached by neither `/validate-blueprint` nor
+`/check-links` — except `testing.md` and `roadmap.md`, which the first names in
+its scope. The one rule below is what carries the others, and that is all that
+does.
 
 ## What this repo is
 
@@ -80,6 +89,17 @@ docs/backend-architecture/   the blueprint — README index, 01-purpose ..
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
                              half of this file's phase section
+docs/lessons.md              the lessons that generalise past the PR that
+                             found them, and the measurement behind each —
+                             this file's other half again, one level up from
+                             the log: the log says what a PR decided, this
+                             says what the next PR should do about it
+docs/harness-boundaries.md   what the harness grants these commands and what
+                             it refuses them — the deny list, the sandbox and
+                             its residuals, and every grant wider than the
+                             operation it buys. Read it before touching
+                             anything under .claude/, and state a new residual
+                             there rather than in this file
 docs/testing.md              how to run the suites — the commands, the
                              Category=Integration filter, which five projects
                              need Docker, what the coverage figure measures.
@@ -400,6 +420,16 @@ reason.
   check 10, where the log is in the scope of **neither**
   `/validate-blueprint` nor `/check-links`. The one rule below is the only
   thing carrying it.
+- **`docs/lessons.md` and `docs/harness-boundaries.md`** are the log's
+  position exactly, and they arrived there the same way — sections of this file
+  that grew past the point where every session should be paying for them. In
+  the scope of neither command, so the one rule carries them too. **Their
+  subjects differ in what falsifies them**, which is the thing to know before
+  editing either: a lesson is falsified by a *measurement*, so it is amended
+  when the code it describes changes and never because it reads oddly; a
+  harness boundary is falsified by *running the offending form*, and every
+  entry in that file was found that way rather than by reasoning. Neither
+  takes a correction argued from the file alone.
 - **`docs/testing.md`** is outside the tree on the same terms and lands
   between the two: named in `/validate-blueprint`'s scope like the roadmap,
   reached by no link check like the log. It needs **no check of its own** —
@@ -597,11 +627,14 @@ summed a local `dotnet test Platform.slnx` the same way, which is the same
 arithmetic over an artefact one machine older.
 
 **PR-11 was where a second suite and a second runner first appeared**, and
-there are several more now — see *The commands* below, which is where the
-current set lives, and which no longer states a count either — this sentence
-used to give the figure two sections above the one that owned it, and the two
-disagreed the moment a ninth suite landed; the owner has since dropped its own
-figure for the same reason. That first one: `py -3.12 -m unittest` in
+there are several more now — see [`docs/testing.md`](docs/testing.md), which is
+where the current set lives, and which no longer states a count either — this
+sentence used to give the figure two sections above the one that owned it, and
+the two disagreed the moment a ninth suite landed; the owner has since dropped
+its own figure for the same reason. **The owner is now a different file,
+which makes the point rather than weakening it**: a count restated across a
+file boundary goes stale on the far side's clock and reads as authoritative on
+this one. That first one: `py -3.12 -m unittest` in
 `tools/new-service` runs 84, and CI has a `scaffold` job for them beside
 `licence-gate` — plus `scaffold-build`, which compiles what they only read.
 
@@ -688,758 +721,22 @@ mapper, not after.**
 
 ### Lessons that travel
 
-These generalise past the PR that found them.
+**These moved to [`docs/lessons.md`](docs/lessons.md), verbatim.** Each entry
+generalises past the PR that found it and carries the measurement it was bought
+with; together they were a quarter of this file, and each one is load-bearing
+only while you are working in the area it covers.
 [`docs/pr-decision-log.md`](docs/pr-decision-log.md) carries the full argument
-and the measurement behind all but one of them; the exception says so on its
-own line rather than sending a reader to a file that does not hold it.
+behind all but one of them, and is worth reading beside it.
 
-- **A gate that silently stops covering the newest surface is this
-  repository's most-repeated failure.** The only defence is a test whose
-  subject is *what the gate is looking at*, not what it found.
-- **Do not write down an ordering claim a test is not making.** Middleware- and
-  behaviour-order rules are testable case by case, and which ones are has to be
-  measured: `UseAuthentication` deleted breaks nothing a test catches, while
-  `UseForwardedHeaders` moved does. Keep the line; do not believe a test is
-  watching it.
-- **A middleware acting on the *response* decides below everything under it.**
-  Reasoning about what it "sees" from the position of its `Use` call is
-  reasoning about the wrong moment.
-- **The fix that lands in code and not in the sample it came from re-arms the
-  defect for the next reader.** After fixing a line that came from a sample,
-  grep the blueprint for *the line you replaced*, not for the topic.
-- **A `ProjectReference` — and a linked `.proto` — is a `COPY` line in a
-  Dockerfile.** Forgetting it breaks the images silently until someone runs
-  one; `dotnet build Platform.slnx` cannot see it and neither can the
-  path-filtered compose smoke.
-- **Blank counts as missing.** An environment variable set to the empty string
-  reaches `Configuration` as `""`, not null, so `GetRequiredSection` proves
-  only that a section exists. Guard on the bound values.
-- **A premise about who calls a method is falsified by the next PR that calls
-  it.** Both `EfUnitOfWork`'s tracker and the `No_client_secret_is_committed`
-  rule were correct until a second caller existed.
-- **"A test that would pass" is a claim about a run nobody performed.** Measure
-  the counterfactual — three such claims in one PR were all the opposite of
-  what happens. **And a counterfactual that does not rebuild is the same
-  claim wearing the evidence of a measurement**: patching a file to its old
-  behaviour with a script that normalised the line endings failed IDE0055, so
-  `--no-build` ran the stale assembly and reported six passes where the same
-  six fail. Read the build result before reading the test result — a green
-  counterfactual is the outcome that should be checked hardest, because it is
-  the one that says the tests are worthless.
-- **A measurement says what the code *does*; it never says what it *may* do.**
-  Fetch the specification section and paste the sentence.
-- **A field a caller chooses cannot answer a question about provenance**,
-  however strongly its values correlate with one. §9.6's saga needed to tell
-  its own echo of a cancellation from somebody else's, and
-  `OrderCancelled.Reason` looked like the discriminator because the saga's
-  four reasons and the customer's one partition the vocabulary — until you
-  read §11.4, whose endpoint parses **all five** codes. The correlation was
-  real and the inference was not. What closed it was a field written as a
-  literal at the entry point that knows the answer and never bound from a
-  request, which is the same rule `CommandOrigin` one layer out already
-  states. **Ask what would be true if the caller were hostile, or merely
-  unusual** — the two give the same answer here, and only the second has to
-  be plausible for the branch to be wrong.
-- **A rule whose stated test is a string match will be enforced as one**, by a
-  reviewer or by whoever greps next. State the rule, not the grep. This one's
-  argument is the `.ToArray()` narrowing in the C# style section below, not the
-  log.
-- **`ASPNETCORE_ENVIRONMENT=Development` leads every host-run block naming an
-  authority.** No project ships a `launchSettings.json`, so `dotnet run`
-  selects Production, where `RequireHttpsMetadata` is on and a plain-HTTP local
-  authority is never reached. Containers set it, which is why the Compose path
-  never shows it. **And it is the wrong variable for half the hosts here**: a
-  `*.Migrator` is a generic host — `Host.CreateApplicationBuilder` — which
-  binds its environment from `DOTNET_ENVIRONMENT` and ignores the
-  `ASPNETCORE_` one entirely. Measured, because the failure is silent in the
-  safe-looking direction: a guard written on `IsDevelopment()` there is not
-  merely
-  fail-closed, it is permanently closed, and the person debugging it goes
-  looking at the feature rather than the variable. Two more measurements sit
-  beside it. `GetValue<bool>` **throws** on an environment variable set to the
-  empty string rather than returning false, so a blank value blocks a
-  pre-upgrade hook instead of disabling a flag — `bool.TryParse` on the raw
-  string is what refuses `""`, `null`, `"1"` and `"yes"` alike. And a blank
-  environment name leaves `IsProduction()` false as well as `IsDevelopment()`,
-  so `!IsProduction()` fails **open** on exactly the value a templating mistake
-  produces. Name the environment you want, never the one you do not.
-- **A registration nothing resolves at startup fails at the first message, and
-  the suite that catches it reports the symptom.** `ValidateOnBuild` never
-  constructs an open generic and no host resolves a scheduler while it boots, so
-  the service connects, declares and reports ready. The test then times out
-  saying what did not happen, never why. Assert the registration itself where
-  the container can still be enumerated.
-- **Drive `TestServer` for what the *application* decides and a real server for
-  what the *server* decides.** `ConfigureKestrel` is a silent no-op under
-  `TestServer`, and the two are indistinguishable from the test.
-- **A measurement taken through a tool that normalises reports the absence of
-  the defect it was taken to find.** A CRLF Helm template renders a `\r` onto
-  every line, and `deploy/helm/smoke.sh` went green against it here — MSYS
-  `grep` strips the CR before matching, where the Linux runner does not. The
-  first run said the hazard did not exist. Reading the bytes said it did. When
-  a measurement clears a platform-specific hazard, check what the measuring
-  tool did to the evidence.
-- **A gate cannot fail on a file that is not there.** "The gateway renders no
-  migration Job" passed against a gateway declaring `image.migrator`, because
-  that chart carries no migration template — so the values key the comment
-  credited was never consulted. This is the gate-coverage lesson at its
-  earliest point: not a gate that stopped covering a surface, but one whose
-  subject never existed. Assert the **agreement** between the two halves, which
-  fails from either side.
-- **A path the shell created is not necessarily a path the built-in readers
-  resolve.** Under MSYS the two halves of this session disagree: `mktemp -d`
-  prints a POSIX path, `Read`/`Grep`/`Glob` and every subagent resolve
-  host-native ones, and on this host `/tmp` is `D:\tmp\alexa` for the shell and
-  `C:\tmp` for the readers — different directories, both populated. Ask a
-  tool that already knows the host spelling rather than converting one:
-  `git worktree list --porcelain` prints `worktree D:/tmp/alexa/secsweep-nlPuf1`
-  for a root the shell called `/tmp/secsweep-nlPuf1`, is usually already
-  granted, and has no flag that takes a path. It is a **labelled record**, so
-  compare the `worktree `-prefixed lines and strip that prefix before anything
-  uses the value — and select the line that *appeared*, never the first one,
-  which is the caller's own worktree and would pass a named-file proof against
-  a snapshot nobody pinned. Take `--porcelain` and not the default: the aligned
-  form repads every row when a longer path joins, so a set difference over it
-  reports them all as new. `cygpath -m` is the obvious answer and the
-  wrong one — a prefix grant of it also buys `cygpath -f <file>`, which prints
-  an arbitrary file, so the
-  translation smuggles in a shell reader. Keep both spellings in named variables
-  and never leave the reader-side one unset: unbound, it turns the next absolute
-  path into a workspace-relative one, which is how a check passes against the
-  caller. The failure is silent in the direction that matters: a
-  `Glob` **pattern** under an unresolvable root returns `No files found`, which
-  is exactly what a clean scope returns. Only the `path=` form errors. The
-  divergence was already diagnosed twice in-tree for *subprocesses*
-  (`git-worktree-drop.sh`, `grok-review.sh`'s `host_path()`) and never for the
-  readers.
-- **The same host re-parses an argument on its way into `bash.exe`, so a `"`
-  inside an argv element does not arrive.** A test that passed a regex
-  containing `"` as an argument found nothing and reported the pattern under
-  test as broken when the pattern was fine — silent in the direction that
-  matters, because "matched nothing" reads exactly like "the input carried
-  nothing". **Environment variables and stdin are not re-parsed**; use them for
-  anything whose bytes matter and keep argv for values with no shell
-  metacharacters. This is the divergence above one layer down: the argument,
-  not the path.
-- **One tool's "valid" is not the next tool's, and the gap is where a value
-  crosses between them.** PR-23 hit this three times in one file: `Release_1`
-  is a legal OCI tag and an illegal Job name; `https://shop.example.com:443` is
-  a legal URI and never matches `WithOrigins`; and `010.0.0.0/8` is legal to
-  `IPNetwork.Parse`, which reads it as **octal** and silently yields
-  `8.0.0.0/8`. A value validated against the alphabet of the system it comes
-  from, and then handed to a system with a narrower one, fails at the far end —
-  after the deploy has started. Validate against the **intersection**, and say
-  in the guard which system each rejection is for.
-  **The argv guard is the same shape with the systems one step apart**, and it
-  is worth carrying because the value was not exotic: `git commit -m '<body>'`
-  hands git one element that git reads as a *message*, and a guard written for
-  *flags* read it as an argument list — so a commit body arguing about a
-  forbidden transport was indistinguishable from a command using it, and a
-  message reading `--output is bad` matched a prefix check. **A guard that
-  inspects argv has to know which flags take a value**, because everything
-  after one of those is data and no amount of care about the flag list fixes
-  it. It refused its own commit, which is the loud version; the quiet version
-  is a guard that has been silently reading somebody's prose as commands.
-  **And the quiet version happened too, in the same file, on the same
-  premise about position**: `git -C <dir> push …` puts `-C` where the
-  subcommand goes, so a check written as `segment[0] != "push"` never fired and
-  every refspec rule was bypassed. Nothing reported anything; it was found only
-  because pushing a worktree's branch *is* a `git -C` command, so the guard's
-  own branch happened to exercise it. **A subcommand has to be found, not
-  assumed to be first** — and the general form is the one worth carrying: a
-  parser that assumes a position is a parser that a prefix argument walks past.
-  **Then it refused a second commit, on the other end of the same mistake**:
-  `shlex` is a word splitter and not a shell, so it knows nothing about
-  heredocs, and `git commit -F - <<'EOF'` with an apostrophe in the body is
-  unbalanced to it and perfectly valid to bash. The guard had been written to
-  refuse anything it could not tokenise — fail-closed, and wrong, because
-  *unparseable* is not *hostile* and the reasoning behind it ("bash would fail
-  on this too") was simply false about the parser actually in use. **When a
-  guard cannot read its input, ask what the real consumer would do with it
-  before deciding the failure direction**; here the answer was to degrade to
-  the weaker check the settings deny already performs, which is never worse
-  than the status quo and never a silent pass.
-- **A validator must check the value it emits.** A CORS origin was trimmed,
-  validated, and then written out untrimmed, so a trailing space passed every
-  check and failed the host's own comparison. A check on one string and a write
-  of another is worse than no check, because the check reads as authoritative.
-- **A list drifts exactly as a number does.** PR-23 lost count of the same
-  inventory three times — the source files its chart gate reads — and each fix
-  was a copy that went stale again. What ended it was declaring the list once,
-  beside the code that reads it, and asserting the other copy matches. The
-  prose then carries the argument for each entry rather than the entries.
-- **A registered name is not a live signal, and the registration is what makes
-  the absence invisible.** §13.2 registers the HybridCache meter and
-  `Microsoft.Extensions.Caching.Hybrid` 10.0.0 **publishes no meter at all** —
-  it reports through `HybridCacheEventSource` with `PollingCounter`, which is
-  EventCounters. A reviewer asking "is the meter registered" gets a yes, the
-  dashboard is empty, and empty reads as healthy. The same shape reaches
-  further than metrics — a declared dependency, a mounted config key, a bound
-  endpoint. **Ask what writes to it, not whether it exists.**
-- **"What is it owed" is a question to answer by reading, not by inferring
-  from what is absent.** The same alert was first diagnosed as owed a
-  *consumer*, because at the time nothing called `AddRedisConnections` — true,
-  visible from this repository, and not the reason. A gate was written against
-  that premise, observed red and removed once the package was read: gating on a
-  consumer would have gone green→red the day Redis was wired and moved a
-  silent alert into the loaded file. **A plausible cause you can see beats an
-  actual cause you have not looked for, which is what makes it dangerous.**
-  **PR-28 wired Redis into both services and the alert did not move**, which is
-  the counterfactual arriving rather than being argued: the removed gate would
-  have fired that day, and the meter still publishes nothing.
-- **A list of things known to be missing needs a gate asserting they are still
-  missing.** PR-24's four unloaded alerts would otherwise become four alerts
-  nobody ever turned on: the gate that says "these metrics are published by
-  nothing" is what turns the list into a red build on the day one of them
-  lands. A TODO nothing re-checks is a decision, not a deferral.
-- **A filter that names a state the system does not have excludes nothing and
-  therefore matches everything.** §13.6 excludes a saga "awaiting despatch";
-  the state is called `Confirmed`, so `state!="AwaitingDespatch"` would have
-  paged on every healthy confirmed order. Prose describing a state and code
-  selecting one are different acts — **read the enum, not the sentence.**
-- **A test that asserts on which exception wins a race is a test that fails on
-  a loaded runner and nowhere else.** `WebApplicationFactory` drives a
-  top-level-statements `Program` through `DeferredHostBuilder`, so when
-  `ValidateOnStart` throws, `app.Run()` disposes the host while the deferred
-  host is still resolving from it — and the loser gets `ObjectDisposedException`
-  with the real exception **destroyed rather than wrapped**. No assertion can
-  recover it afterwards. Split the claim instead: the host-level test asserts
-  that it refused, and a second test asserts *why*, against the options
-  pipeline where nothing races. Measured on this repository: intermittent on a
-  two-core CI runner, never once locally.
-- **Fixing the instance of a race that failed leaves every other instance
-  armed, and per-site discipline is what makes them instances.** The saga
-  suite's flake (#107) was closed by interleaving waits into the one test that
-  had failed; twenty unfenced publishes remained across fourteen of the
-  twenty-seven harness tests that file held then, and **the CI run of the merge
-  commit that closed
-  it went red on the next one**. A publish returns when the message reaches the
-  transport, not when the consumer has handled it — so the failure surfaces at
-  the next waiting assertion, which bills the inactivity bound and reports a
-  command the saga did not send. **Move the barrier into the helper every test
-  already calls.** It leaves nothing to forget, which is the argument
-  `Common.Web.Tests`' assembly-wide parallelisation attribute won over a shared
-  collection, and it costs nothing on a green run. Fence on the **message's own
-  id**: a type-level wait matches the first delivery and silently fences
-  nothing wherever a suite delivers one type twice. And give the barrier a test
-  whose subject is the barrier — every other test stays green without it on any
-  machine a developer has, which is exactly why one is owed.
-- **A declared-inputs list checks itself against the workflow, never against
-  the reads — so an omission is invisible from inside the gate.** The Helm
-  tree's `SOURCE_INPUTS` pattern was adopted twice more and then failed a third
-  time in the obvious way: `canary.py` declared two paths and opened three, and
-  its "both triggers cover every entry" assertion stayed green throughout,
-  because a list can only be compared for the entries it already contains. **A
-  gate cannot see a read it was never told about.** The fix is a test whose
-  subject is the *reads* — the same shape as asserting a parser found anything
-  at all — and it was owed by every copy of this pattern rather than by the one
-  that was caught. **All three have it now**: `canary.py`'s in its suite,
-  `check.py`'s as a check of its own, and `smoke.sh`'s over its own `$ROOT/…`
-  literals. Each was observed red against a removed entry. A fourth copy of
-  `SOURCE_INPUTS` arrives owing the same test.
-- **A `helm upgrade --install` of a new release inherits nothing.** A second
-  release of the same chart takes the chart's defaults for every value the
-  environment overlay would have supplied — authority, OTLP endpoint, database
-  — unless it is given them. Only one chart here failed loudly (the gateway
-  refuses an empty `ingress.trustedNetworks`); the other three would have
-  installed and been quietly wrong. Drive a sibling release from
-  `helm get values` of the one it is a sibling of.
-- **A tool that changes where it writes when you ask it for something else is
-  a premise you did not know you had.** `domain_coverage.py` asserted exactly
-  one Cobertura file per run, correctly, until `--logger trx` was added for an
-  unrelated gate — and the TRX logger makes the collector leave one partial
-  attachment per test project beside the merged one. Nothing about the flag
-  says so. **When a step's output feeds another step, adding a flag to the
-  first is a change to the second.**
-- **Floating point is wrong at the input a ladder starts from, not at the
-  exotic ones.** The canary's weight arithmetic read
-  `ceil(stable * f / (1 - f))`, and at 5% against 19 replicas `19 * 0.05 / 0.95`
-  is `1.0000000000000002` — so it bought two pods and served 9.5% under a label
-  reading 5%. Every quantity was a count of pods or a whole percentage, so the
-  exact answer was available the whole time. **Where the inputs are integers,
-  the float route is not merely imprecise, it is available to be wrong.**
-- **Two functions deriving one number will disagree, and the test that pairs
-  them is cheaper than the one that finds out later.** `required_stable` named
-  the replica count the step needs and `plan` refused it — not because of the
-  arithmetic above, but because the two had been written to different rules,
-  one taking the smallest canary at or above the weight and the other the
-  largest at or below. The bug was the rule, and only asserting the round trip
-  said so.
-- **A pattern that is one token too strict silently covers less than it
-  claims.** The observability gate's instrument reader required `Create…<T>(`
-  and found every histogram and counter while missing all three observable
-  gauges, because `CreateObservableGauge` infers its type argument. It reported
-  four correct alerts as having no signal — loudly, this time. The quiet
-  version of the same bug is what the gate-coverage lesson at the top of this
-  list is about.
-- **A hand-written double is a second specification, and only the real provider
-  can falsify it.** `StubCatalog` had drifted from Catalog in four places and
-  the suite it serves stayed green throughout, because a double cannot disagree
-  with itself. The consequence is sharper than a stale stub: a guard written
-  *for* the provider's real behaviour becomes untestable, since the double never
-  produces the input the guard exists for. Measured here — the BFF's
-  case-insensitive currency comparison could be tightened to `Ordinal` with all
-  62 of that suite's container-free tests still passing — the fast half of the
-  66 it ran before this PR, not the 77 it runs now — over a change that
-  answers 500 to every lower-case currency in production. **Ask what would
-  falsify the double, not whether its suite is green.**
-- **A library's way of saying "this does not apply" may be to throw, and a
-  comment saying it is harmless does not make it so.** §9.6's saga was
-  documented as idempotent against a redelivered event because "the transition
-  is simply not applicable" — true of the state machine, and MassTransit's
-  spelling of it is `UnhandledEventException`, so a duplicate that reached the
-  machine was retried six times into the error queue the design depends on
-  staying empty. **Not "every routine duplicate", which is how this lesson was
-  first written**: §9.5's inbox suppresses the completed redelivery, because
-  the outbox persists the event's message id and restores it on every publish.
-  What gets through is the delivery whose inbox row was never written — the
-  filter records it only after the consumer returns, so a crash between the
-  saga state committing and that write is the window. Narrow, and it was the
-  whole justification for an `OnUnhandledEvent(x => x.Ignore())` catch-all.
-  **And naming it exactly was still not exact enough**: the in-memory outbox
-  flushes inside that window, so half of it is a crash with the instance
-  advanced and its commands unsent — not a duplicate, but the last delivery
-  that could notice. **A window named to one boundary can still contain a
-  second one.**
-- **A catch-all answers every arrival the same way, so it is only ever as
-  right as its worst case.** The callback above was written, defended over
-  several review rounds, given a log line, and then removed. Three things
-  reach it and it cannot tell them apart: a post-flush duplicate (quiet is
-  right), a pre-flush crash that lost the instance's commands (quiet is
-  permanent loss), and a misroute (a configuration fault). The log line was
-  not a rescue — §13.6 pages on the **error queue**, which is exactly what
-  ignoring keeps the event out of, so it moved the case from silent to
-  searchable and no further. **What replaced it is enumeration**: every
-  legitimate arrival written out with its own `Ignore`, and a structural test
-  partitioning the machine's declared next-events so a new one cannot be
-  forgotten. The measurement that had justified the catch-all was a test
-  republishing an event rather than anything observed in production, which is
-  its own lesson: **check whether the traffic a mitigation removes is traffic
-  that actually occurs.**
-  The suite was green throughout, because `harness.Consumed` records a delivery
-  whether the pipeline returned or threw: "no transition ran" is what a fault
-  looks like from every assertion in a saga test. **Assert the absence of the
-  exception, not the absence of the effect** — and ask what the library does
-  with the case your comment calls benign.
-- **A tool a plan names may not reach the case the plan made it conditional
-  on.** Appendix C made Pact conditional on a consumer relationship becoming
-  contentious; the relationship that did is gRPC, and PactNet ships HTTP and
-  message pacts only — gRPC is a plugin whose .NET binding has been an open pull
-  request since September 2025. The plan was written against the tool's
-  reputation rather than its surface. **Check the binding, not the ecosystem**:
-  a capability present in a project's Rust core, its JVM binding and its
-  marketing is not thereby present in the one language this repository compiles.
-- **A bound whose two halves are two commands is not a bound.** `/ship`'s
-  twelve-check Grok cap was specified as prose — reserve, then invoke the review
-  helper — over two separately granted commands, and neither half was enforced:
-  the review helper never touched the ledger, and `release` was accepted for any
-  slot at any time with no skip behind it. So a run that invoked without
-  reserving spent a check that left no record, and a resumed run ran past
-  twelve against a paid API. **Accounting and the thing it accounts for have to
-  be one operation**, and where they are, the *placement* of the write becomes
-  the accounting rule: reserving immediately before the model call makes a slot
-  spent by no path that refuses earlier, which is what deleted the release path
-  rather than merely tidying it. **Not "spent if and only if the review ran"** —
-  the ledger settles its election *after* posting, so a failed read there leaves
-  a slot spent with nothing launched. That case is kept deliberately, because
-  after a failed read the state is what is not known; the point is that a claim
-  has to be the ordering the code guarantees, not the tidier one beside it. **And one operation is not enough if the
-  operation can be aimed elsewhere** — the first version of that fix took the
-  pull request number as an argument while cloning the *current branch*, so a
-  typo or a substituted number spent someone else's slot and left this branch's
-  cap re-armed, with both halves looking correct in isolation. Resolve the
-  subject from the thing being acted on rather than accepting it:
-  `gh pr list --head "$branch"` beside the clone of `$branch`, the same way
-  `gh-label-ensure.sh` resolves the repository from the checkout.
-- **A boundary on one side of a pattern is not a boundary, and the fix for one
-  side is where the next hole appears.** One usage-limit regex took three
-  corrections across three review rounds, each finding the side the previous fix
-  had not covered: `402` matched inside `47402`, so it became `\b402\b`; that
-  matched `"input_tokens": 402`, because a quote and a space are word boundaries
-  too, so it became a status *context*; and that matched `status 4021`, because
-  nothing stopped the code alternative at the third digit. The same false
-  positive three times, walking from the middle of the number to its front to
-  its back. **When you constrain one end, write the case for the other end in
-  the same change** — and note that each round's negatives looked thorough while
-  testing only the end that had just been fixed.
-- **Never edit a shell script while it is running.** `bash` reads a script
-  incrementally, by byte offset, rather than parsing it whole — so an edit that
-  shifts the offsets makes the still-running process resume at the wrong place.
-  Measured here rather than reasoned about: editing `grok-review.sh` during a
-  live review produced `line 376: ing: command not found` — the tail of a word
-  the new offset landed inside — and then re-executed a region that had already
-  run, posting a **second** ledger reservation for a slot ten minutes after the
-  first. The helpers in `.claude/scripts/` are long-running by nature, so this
-  is a live hazard here and not a curiosity: hold an edit until the run ends, or
-  copy the script and edit the copy.
-- **A concurrency control is only ever proved by a collision you did not
-  intend.** The duplicate above is the only real contention the ledger's
-  election has ever seen, and it behaved as written: the second claim lost to
-  the first and exited 4, `grok-review.sh` turned that into exit 13 and refused
-  to run, and `count` folded the two rows for that slot into one spend. A
-  deliberate test can show the arithmetic; only an accident shows the whole
-  mechanism under load.
-- **A run whose integrity is in doubt is a run that did not happen**, whatever
-  its artefacts look like. That corrupted review left no `suggestions.md`, which
-  is the same evidence a clean pass leaves — and reading it as clean would be
-  the exact fail-open the stop-reason allow-list exists to refuse, arriving
-  through the script rather than through the model. Spend the next slot and run
-  it again.
-- **A multi-target edit that aborts has applied a *prefix* of its changes, and
-  the targets after the failure are silently absent rather than wrong.** A
-  three-file substitution script wrote the first file, failed an assertion on
-  the second, and never attempted the third; the follow-up was then derived from
-  the *error message*, so it covered the file that had errored and not the one
-  that had never been reached. The two files named in the failure were verified
-  to agree and the third was never re-read. **Resume from the original list,
-  never from the error**, and re-grep every target before claiming the batch
-  landed — the absent change leaves no trace to grep for, which is why only the
-  list finds it.
-- **An `exit` in the last stage of a pipeline ends a subshell, and the consumer
-  on the other side has already answered.** The ledger's trust check bailed with
-  `exit 3` inside `gh api … | while …`; the `awk` on the other side of
-  `ledger_rows | awk` saw EOF, ran its END block and printed `0` — "nothing
-  spent", re-arming the cap — and only *then* did `pipefail` abort with 3. A
-  caller reading stdout had its answer before the failure existed. **Buffer, and
-  check the status while nothing has been written**: command substitution hands
-  back the status, a pipe hands the reader an EOF it cannot tell from empty
-  input. Worse, the empty case was legitimate and documented, which is exactly
-  what made the two indistinguishable — so the separation has to happen upstream
-  of the fold, never inside it.
-- **A deny-list of terminal states passes every state nobody listed, including
-  the ones the next version invents.** The Grok verdict check refused
-  `cancelled|refusal|error*` and passed everything else, so a reviewer that
-  exhausted its output or turn budget exited 0, wrote JSON, left no
-  `suggestions.md`, and had that absence read as a clean review. No attacker is
-  required — a long branch is the ordinary way there, and a long branch is when
-  review matters most. **Enumerate what is acceptable**: one accepted value,
-  every other value and the field's absence refused, pinned like a version so a
-  bump must re-verify the string.
-- **A regex over a serialised structure answers a different question from the
-  one being asked.** Inverting that deny-list to an allow-list of `end_turn` was
-  still not enough, because a pattern cannot tell a ROOT field from a nested
-  one: `{"modelUsage":{"stopReason":"end_turn"}}` matched exactly once, matched
-  the accepted value, and was read as a finished turn — a document whose turn
-  never ended, passing the check that exists to notice. A regex also cannot
-  establish that the input is well-formed at all, so a truncated write reads as
-  a verdict. **Parse it and name the field**: `.stopReason` on the root settles
-  shape, nesting and well-formedness together, where three greps could not
-  settle any of them. The general form — *if the thing you are matching has
-  structure, matching is the wrong tool* — is worth more than the instance,
-  and it took three rounds to reach: deny-list, allow-list, parse, each fix
-  blind in the way the next one found.
-- **Pinning a version is not pinning an artefact.** The review sandbox pinned
-  the grok *client version* and refetched `https://x.ai/cli/install.sh` on every
-  build, executing it unverified inside the one image built to be a security
-  boundary. Pinning the installer's digest is half the fix: reading the
-  installer showed it performs **no** checksum or signature check on the 163 MB
-  binary it downloads, so the larger artefact was still arriving unchecked over
-  the same channel. Pin every artefact that crosses, and make an unrecorded
-  platform **fail** rather than build unverified — the scaffold's rule, that a
-  tool refusing input it has never been shown beats one that guesses.
-- **A verification that runs after the thing it verifies has already executed
-  does not verify anything.** Pinning both artefacts above was *still* not
-  enough while the installer stayed: it smoke-runs the binary before the hash
-  can be taken, as a user with the network and a writable `$HOME`, so a
-  malicious artefact gets one execution in which to put the expected bytes where
-  the check will read them — and the check then passes. That was written down as
-  a "narrow, stated residual" and was the whole property. **Naming a residual is
-  not bounding it**: the bound has to be argued against someone who gets to run
-  first, and where it cannot be, move the execution after the check rather than
-  the check after the execution.
-- **`?` in a bash `case` matches `/`.** A `case` performs no pathname expansion,
-  so `"$tmproot"/secsweep-??????` accepted `$tmproot/secsweep-a/bbbb` as readily
-  as `$tmproot/secsweep-abc123` — a guard whose comment called it a direct-child
-  check for as long as it was not one. Compare `dirname` against the root and
-  match the *basename*, which cannot be talked past because a basename contains
-  no `/`. The general form: **a glob's alphabet is not the shell's, and a
-  pattern is not a parser.**
-- **A program has more than one name on this platform, and every guard here
-  was written with one of them.** The argv hook matched the literal `git` and a
-  `/git` suffix; `git.exe push origin +HEAD:main` is the same command to
-  Windows and walked straight past it, as did `bash.exe -c`. Measured rather
-  than assumed — `git.exe --version` prints `git version 2.45.1.windows.1` on
-  this host. It is the POSIX-spelling divergence already recorded for paths and
-  for argv, arriving a third time at the *program name*, and the general form is
-  worth more than the instance: **a comparison against a name is a comparison
-  against a spelling**, so normalise to what the operating system resolves —
-  basename, both separators, executable suffix, case — before matching. The
-  tell is that every test in the file agreed with the code, because both had
-  been written by someone thinking in POSIX on a machine that answers to both.
+**Read it before working in an area an entry covers.** The entries are bold
+lead-ins, so grep the file for the subject rather than the PR.
 
-- **A guard that models another parser needs ONE model of it, in one place.**
-  The argv hook keeps being defeated by one shape: a function that knew a rule
-  and a neighbouring function that did not. **No count here on purpose** — the
-  first draft of this bullet said five and was made false twice in the same
-  branch, which is this file's own restated-total failure appearing inside a
-  lesson about carefulness. The enumeration is the checkable part. A heredoc
-  opener was recognised inside a comment; a paren counter balanced quoted
-  characters; the parse-failure fallback scanned the raw string the parse path
-  had stripped; the substitution extractor ran ahead of the stripper with a
-  quote tracker of its own; `shlex`'s `commenters` disagreed with bash about
-  where a comment starts; the escape handling in `_closing_paren` covered
-  double quotes and not the unquoted state; and the `DATA_ONLY_COMMANDS`
-  boundary was applied to the `git` scan and not to the evaluator pass one
-  function below it. Each fix was correct, and each left the next copy of the
-  model standing. **Several were fail-open** — a force push to `main` admitted,
-  more than once — because a model that merely *differs* from the shell's is
-  wrong in whichever direction the difference falls, and only one of those
-  directions is loud. Where a tool has to agree with another parser, make every
-  caller share one implementation of the part that disagrees, and pin the
-  agreement with cases in both directions.
+One is kept here, because its subject is every other rule in this repository
+and it is the failure this repository repeats most:
 
-- **`git checkout <commit> -- <path>` writes the INDEX as well as the working
-  tree, and a green suite says nothing about what is staged.** Taking a
-  counterfactual means swapping an older file in, running the new cases against
-  it, and putting the current one back — and putting it back with `cp` restores
-  the working tree only. The reverted version stays staged. It is harmless for
-  as long as the next commit happens to `git add` that same path, which is why
-  it survived a dozen counterfactuals here before the one commit that added
-  only a test file shipped a guard eleven fixes old beside it. **The suite that
-  ran before that commit read the working tree and passed**, so nothing about
-  the run was a warning. Restore with `git checkout HEAD -- <path>`, which
-  moves both, and read `git show --stat` after committing rather than the test
-  output before it — a green run and a correct commit are two claims, and only
-  one of them was checked. CI went red, which is the gate earning its keep, and
-  is also the reason this is a lesson rather than a defect that shipped.
-
-- **Every exemption owes an exact boundary; a guard with no exemption owes
-  none.** The argv hook was over-refusing `echo git push …`, so a data-only
-  exemption was added — correctly, and it immediately produced two bypasses
-  that the guard without it did not have. `shlex(punctuation_chars=True)` emits
-  a maximal run of punctuation as ONE token, so `);` matched no separator by
-  name and `git log -1; (echo ok);git push origin +HEAD:main` left the push
-  inside a run still led by `echo`; and `<(…)` is executed *before* the command
-  it is an argument to, so `echo <(git push …)` put the push inside a printer's
-  run that never runs it. Both measured with a `git` shim — the second needed a
-  marker file, because a process substitution's output goes into a FIFO nobody
-  can read from the terminal. **The exemption was the right fix and it cost two
-  rounds**, which is the trade to price in rather than avoid: narrowing a guard
-  to stop refusing honest traffic moves the difficulty from "what do I refuse"
-  to "where exactly does the thing I am exempting end", and the second question
-  has more edges. Where a guard gains an exemption, write the boundary cases in
-  the same change as the exemption.
-
-- **A gate built on `git ls-files` is blind to `.git` itself.** This is the
-  MSBuild auto-import lesson one directory over and it arrived from the same
-  reviewer two rounds later: `Directory.Build.targets` was invisible because it
-  did not exist, and `.git/config` is invisible because git never tracks it.
-  With an unrestricted `Edit`, a command could set `diff.external` there and
-  take host execution out of its own approved `git diff` — measured in a
-  scratch repository, the external command runs. **Ask what an inventory's
-  SOURCE cannot see, not only what the inventory is missing**; and note that a
-  worktree's `.git` is a file rather than a directory, so a boundary drawn at
-  it needs both spellings.
-
-- **An abbreviation is a spelling, and this repository has now missed it
-  twice.** #23 recorded that git accepts `--for` for `--force-with-lease`, and
-  that argument is what turned the push check into an allow-list. The forbidden
-  *flag* check beside it stayed a canonical-prefix test for six review rounds
-  after that — and `git fetch --upl=<cmd> origin` runs `<cmd>`, measured
-  against a real remote. Only `--u` is refused, for being ambiguous rather than
-  unknown. **The lesson landing in one function and not its neighbour is the
-  bullet above; what this one adds is that a rule you have already written down
-  is not thereby applied.** When a fix rests on how a tool parses its input,
-  grep for every other place that parses the same input, in the same change.
-- **A helper whose stdout is its return value owes every subcommand a
-  redirection.** `git worktree add` writes "Preparing worktree" to stderr and
-  `HEAD is now at <sha> <subject>` to *stdout*, so a helper that printed a path
-  after calling it returned a commit subject followed by a path, and the caller
-  failed later with a `not an existing directory` naming a whole commit message.
-  Found by running the round trip, not by reading it — which is the reusable
-  half: **a helper's contract is its stdout, so test what a caller captures,
-  never what the code appears to print.**
-- **A cheaper fix can be *unreachable* rather than merely weaker, and from
-  inside the issue the two read alike.** #125 offered two closures: a second
-  `ReleaseStock` from the saga's `Compensating` state, "reachable today", and
-  an Inventory tombstone, "the better shape and the more expensive". They were
-  ranked by cost while the question beside them — #130, does a release of
-  nothing publish anything — was still open, and answering it deleted the cheap
-  one: the no-op release publishes, so the exit has already finalised the
-  instance and the branch that would send the second release is one nothing
-  enters. (**Still true after #124 made that exit conditional**, and it is
-  worth knowing why rather than re-deriving it: a late `StockReserved` can only
-  reach `Compensating` through the `AwaitingStock` door, which never sent an
-  `AuthorisePayment`, so no verdict is ever outstanding on the one path this
-  argument is about.) **Two open questions were being weighed independently and one decided
-  the other.** Before ranking options by cost, ask whether each can still run
-  once its neighbours are settled. **It has now happened twice, which is what
-  makes it a rule rather than an anecdote**: #141 ranked "make `ReleaseStock`
-  the only trigger" as its cleanest option while #143 was open beside it, and
-  answering #143 deleted that option — the second producer #141 would remove
-  is the only evidence #143's fix reads.
-- **Where two mechanisms answer one question and only one of them is editable,
-  the editable one is where the lie lives.** GitHub honours closing keywords in
-  a PR body and in a commit body independently, and
-  `gh pr view --json closingIssuesReferences` reports the **body** only — so
-  withdrawing a closure from the description reads as sufficient and is not,
-  and the discrepancy is invisible from the one place a reviewer would check.
-  **A field whose name is the question is not thereby the answer to it.**
-  Reconcile toward the record that cannot be edited, and gate the two against
-  each other rather than trusting the half that is easy to look at. The same
-  shape reaches past issue closure: a version in a tag and a version in a
-  manifest, a threshold in prose and a threshold in a rule file.
-- **An in-tree comment calling a gap deliberate is not a control, and the
-  comment is usually the thing that is wrong.** §13.4's redactor documented
-  that it does not read log scopes and argued the two the platform opens are
-  safe, naming `CorrelationId` as "a trace ID or a GUID" — which is the
-  *fallback* branch, one file over from a middleware that adopted a
-  client-supplied header verbatim. The channel named as provably safe was the
-  one already carrying attacker-controlled data. **Read the code the comment
-  is vouching for, not the comment**, and where a gap is genuinely accepted,
-  file it rather than reasoning about it in place — this repository's own rule
-  that a TODO nothing re-checks is a decision, applied to prose.
-- **The API surface decides the layer, so read it before designing the fix.**
-  The obvious repair for that gap is to walk `record.ForEachScope(...)` in the
-  processor. Measured against OpenTelemetry 1.17: `LogRecord` exposes
-  `ForEachScope` and **no settable scope provider**, so a processor can read a
-  scope and can never rewrite or suppress one — the repair would have let the
-  type notice a secret it had no way to remove. The fix had to sit one layer
-  lower, at the `IExternalScopeProvider` the logger factory hands every
-  provider, which is also what makes it cover scopes opened by EF Core and
-  MassTransit. One probe settled it; a plausible design would have shipped.
-- **Match the shape the caller produces, not the one the framework's own type
-  happens to implement.** That scope wrapper first matched
-  `IReadOnlyList<KeyValuePair<string, object?>>` — which is what MEL's
-  `FormattedLogValues` is, and what a `Dictionary` is **not**. Every scope this
-  platform actually opens comes from `BeginScope(new Dictionary<,>)`, so all of
-  them fell through unredacted while the unit tests over the list shape stayed
-  green. The interface a sample implements is not the interface the call site
-  hands you.
-- **A negative assertion about an endpoint is also an assertion that the
-  endpoint exists, and only the positive half carries it.** Once authorization
-  is deny-by-default, "this path answers 401 to an anonymous caller" is
-  satisfied by a path that has stopped existing, by a host that no longer maps
-  it, and by a document that no longer generates. Pair every such assertion
-  with one from a caller who gets through — which is what cost this PR a second
-  test factory rather than a second assertion.
-- **A fallback in the building block and a test in one service's suite are not
-  alternatives, and the distance from the request is why.** §11.4 proposed an
-  `EndpointDataSource` test asserting every endpoint carries a policy; it
-  reaches the services §4.5's scaffold has already rendered and fails at test
-  time. A fallback policy reaches every host that will ever compose
-  `AddCommonWebDefaults` and fails at the request. Where a rule has to survive
-  code nobody has written yet, put it where that code cannot avoid it.
-- **Two processes that derive a filename from the same value race on the FILE,
-  not on the thing the value names.** Testcontainers writes a Dockerfile build
-  context to a tar named after the image, so two test hosts building one image
-  name collide on that tar — not on Docker, which handles concurrent builds of
-  a tag perfectly well. The loser dies with "the process cannot access the
-  file" on Windows and `Cannot locate specified Dockerfile` on Linux, reading a
-  tar the winner has not finished writing.
-  **The unit is the PROCESS, and getting that wrong cost a second round.** The
-  first fix gave each *fixture class* its own image name, was measured green
-  locally, and failed on CI — because one fixture class had two consumers,
-  `Catalog.Api.Tests` and `Catalog.Application.Tests`, which `dotnet test` runs
-  as separate hosts. A per-class name is per-process only while the class has
-  one caller, which is a premise about callers rather than a property.
-  What ended it was not building at all where the build was not needed:
-  Catalog needs the broker's *configuration*, not ADR-021's plugin, so it maps
-  the two files onto the stock image and no tar exists to race for.
-  **The symptom named neither the file nor the fixture**: the second host to
-  start failed *every* test in tens of milliseconds while each passed alone. A
-  failure count equal to the suite's size, at a duration too short to have run
-  anything, is a fixture fault — read the duration before the message.
-- **A runtime capture shows what RAN, not what CAN run.** The broker topology
-  behind ADR-036's permissions was read off a live stack with both services
-  connected and an order placed — and still missed two resources, in opposite
-  ways. `MassTransit:ReceiveFault` is declared only when a consumer faults, so
-  no capture of a *healthy* system contains it; `payments-commands` is reached
-  only after a stock reservation that no Inventory service exists to answer.
-  Both are in `Endpoints.cs` and in the framework's contract, where a reader
-  can find them. **The code is the inventory and the broker is a sample of
-  it** — so derive the list from source and use the running system to falsify
-  the derivation, never as the derivation.
-- **A negative test that cannot observe the negative reports the property as
-  absent.** The probe that attempted #44's exploit reported all four forbidden
-  publishes ACCEPTED while the broker's own log showed four refusals:
-  `basic_publish` on AMQP 0-9-1 is fire-and-forget, so the refusal arrives as a
-  channel exception after the call returns and a probe that publishes and
-  closes never sees it. One line — `confirm_delivery()` — is the difference
-  between a measurement and a rumour. It failed in the loud direction here,
-  which is luck rather than design: the same blindness in a test asserting a
-  publish SUCCEEDS would have passed. **Ask what the tool does with the answer
-  before believing either outcome**, and pair the negative with a positive
-  control so "refused everything" and "credential is broken" cannot read alike.
-- **A rule is reversed everywhere it is stated, or nowhere — and do not
-  write down how many places that is.** §10.2 said three times that naming no
-  authorization policy was the only correct way to declare a route public, and
-  the claim had been copied into chapters, appendix rows, a compose README, a
-  k6 comment, source comments and the tests that gave it as their reason.
-  Deny-by-default reverses it. The reversal is cheap; finding the copies is
-  not, and a copy left behind is a rule that is now actively wrong rather than
-  merely stale. This bullet carried a count of four while the decision-log
-  entry beside it was retiring that very number for being wrong twice — the
-  restated-total failure appearing inside the lesson about it.
-  [`docs/pr-decision-log.md`](docs/pr-decision-log.md) keeps the inventory;
-  this bullet keeps the rule.
-- **A change that makes a transaction longer, wider or stricter is a change to
-  every lock ordering it participates in**, and the test fixture is where that
-  surfaces first. ADR-032 turned one endpoint's consume into a three-table
-  `Serializable` transaction; Respawn's `ResetAsync` deletes every row in the
-  schema in its own dependency order while a consumer from the previous test may
-  still be committing, and two multi-table transactions taking locks in opposing
-  order deadlock. It surfaced as an intermittent error 1205 in a
-  command-endpoint test *with nothing to do with sagas*, and passed on re-run,
-  so it read as a flake. **Capturing the exception is what named it; re-running
-  until green would never have.**
-- **Removing one participant from a race is not removing the race, and the
-  tidier story is the one to distrust.** The same change also registered a
-  background writer, and taking that out of the test host was right on its own
-  merits — a writer nothing drives makes "the pass never happened" and "the
-  pass spared the row" the same green. It was then written up as the fix, and the
-  bounded retry was deleted on the sentence *there is no second deleter to
-  race*. **A deadlock needs two transactions with opposing lock order, not two
-  deleters.** It reproduced with the writer gone, on the second of six runs.
-  Both changes are right and only one of them was the fix — and the sentence
-  that got it wrong was written while deleting the code that contradicted it,
-  which is the most expensive moment to reason instead of run. Six runs cost
-  twelve minutes.
-- **An API name nobody has run travels further than a number nobody has
-  recomputed.** #128's fix was recorded as `AddEntityFrameworkOutbox` with
-  `UseBusOutbox`, and that name reached §9.6's callout, two entries in
-  `docs/pr-decision-log.md`, and — the one that matters —
-  `OrderFulfilmentSaga.cs`'s own comment. `UseBusOutbox()` is a bus-side option
-  that never touches a receive endpoint; the call that closes the defect is
-  `UseEntityFrameworkOutbox<T>(context)`. They agreed with each other for
-  months because agreeing is free and compiling is not. **A restated
-  identifier is a claim to reconcile exactly as a restated total is** — and it
-  is worse in one way, because a wrong number looks wrong to somebody
-  eventually and a plausible method name never does.
-  **A name sitting in a source comment is not thereby checked**, which is the
-  half a reader is most likely to assume: the compiler reads the code beside it
-  and nothing reads the comment, so the site that looks most authoritative is
-  the one with the least behind it.
-  **The sites are named here and not counted, because the first draft of this
-  bullet counted them and got it wrong twice in one sentence** — it said three
-  decision-log entries where two carry it, then said four after listing five
-  things, and omitted the source comment entirely. The restated-total failure,
-  inside the lesson about restated identifiers, in the pull request that added
-  it. A reviewer caught it.
-- **An exemption stated with a condition expires silently, because nothing
-  re-reads the condition when the fact changes.** `.claude/hooks/**` was off the
-  deny list on the written grounds that "no hook is configured here" — true when
-  written, and false the moment #30's argv guard landed, with no signal in
-  between. The dangerous half is that the sentence still *reads* as reasoned:
-  it gives its condition, so a reviewer checks the logic rather than the fact.
-  Where an exemption has a condition, the condition needs a test, exactly as a
-  list of things known to be missing needs a gate asserting they are still
-  missing.
-- **A replacement narrower than the thing it replaces is a regression wearing a
-  fix's clothes.** The argv guard was written to close what
-  `Bash(git *--output*)` could not, and its first form matched a flag exactly or
-  with `=` — which admitted `--exec-path=<dir>`, a directory of binaries for git
-  to run, that the crude substring deny had been catching all along. A precise
-  mechanism replacing a blunt one has to be checked against the blunt one's
-  catches, not only against the case that motivated it.
-- **A stub that hands back post-filter data cannot test the filter.** The
-  ledger's `gh` stub supplied rows *after* the jq shape filter, so four
-  behavioural cases written to guard a migration of that very filter passed
-  against a deliberately narrowed one; a single pattern assertion caught it.
-  The tell is that the fixture's shape matches the code's *output* rather than
-  its *input*. Feed the stage its real input, or state in the test that the
-  stage is not under test — the stub said so, and four cases were written past
-  the sentence anyway.
+> **A gate that silently stops covering the newest surface is this
+> repository's most-repeated failure.** The only defence is a test whose
+> subject is *what the gate is looking at*, not what it found.
 
 ### The commands
 
@@ -1453,200 +750,38 @@ dotnet test  Platform.slnx         # needs a running Docker daemon
 dotnet test  Platform.slnx --filter "Category!=Integration"   # 847 of 1,052, no daemon
 ```
 
-`docs/testing.md` is the operational reference — the filters, what needs
-Docker, the coverage run. This block is the short form.
+**[`docs/testing.md`](docs/testing.md) is the operational reference and this is
+the short form.** It carries every other runner — the scaffold's, the chart
+gate's and the Python gates' — what each one needs, how to run a gate as
+opposed to its suite, which five projects need Docker, the three CI stages and
+what the coverage figure is measured over. **§12 wins where the two disagree**,
+exactly as Appendix C wins over the roadmap.
 
 **Three runners, and only one of them is `dotnet test`.** The scaffold's tests
 are Python, the chart gate is bash over `helm template`, and the licence gate,
 the secret scan, the observability gate, the pipeline gate, the coverage
-reporter's suite, the canary's, the closure gate's and the review helpers' are
-Python again; none is in `Platform.slnx`, so a green solution says nothing about
-any of them. **Each of them is tested and then run**, which is the pattern every
-gate here follows — the licence gate was once left out of this list on the
-reasoning that a gate is not a suite, and it is both.
+reporter, the canary, the closure gate and the review helpers are Python again;
+none is in `Platform.slnx`, so a green solution says nothing about any of them.
+**Each of them is tested and then run**, which is the pattern every gate here
+follows — the licence gate was once left out of this list on the reasoning that
+a gate is not a suite, and it is both.
 
-**The count that used to open this paragraph is gone.** It said seven, then ten,
-and #61's secret scan made it eleven inside the pull request that was correcting
-the sentence around it — the fourth restated total in this file to rot, after
-the callout counts, the residual grants and this file's own line count. What a
-reader can check is whether the enumeration above matches the block below and
-the jobs in `ci.yml`; that check needs no numeral in front of it.
+**No count opens that sentence, and its removal is the fix rather than a
+recount.** It said seven, then ten, and #61's secret scan made it eleven inside
+the pull request that was correcting the sentence around it. What a reader can
+check is whether that enumeration matches `docs/testing.md`'s block and the
+jobs in `ci.yml`; that check needs no numeral in front of it.
 
-```bash
-(cd tools/new-service && py -3.12 -m unittest)  # 84 tests, no Docker, no SDK
-python tools/new-service/new_service.py <Name> --port <51xx>
+**`py -3.12`, not `python`.** Every CI job that runs Python pins 3.12 and the
+default interpreter here is 3.14 — a *newer* one is the hazard, because it
+accepts APIs 3.12 does not, so the local suite goes green on code the runner
+cannot execute. `Path.read_text(newline=…)` is 3.13 and cost a CI round exactly
+that way. The scaffold *script* is a different matter: running it is not a test
+of the floor, so plain `python` is fine there.
 
-bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SDK
-HELM=/path/to/helm bash deploy/helm/smoke.sh    # when it is not on PATH
-
-py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
-py -3.12 -m unittest discover -s deploy/compose/rabbitmq   # then check_permissions.py
-py -3.12 deploy/compose/rabbitmq/check_permissions.py   # ADR-036's broker ACL
-
-(cd .github/licence-gate && py -3.12 -m unittest)  # then licence_gate.py
-
-(cd .github/secret-scan && py -3.12 -m unittest)
-py -3.12 .github/secret-scan/secret_scan.py       # from the repo root
-
-py -3.12 -m unittest discover -s .github/pipeline-gate
-py -3.12 .github/pipeline-gate/pipeline_gate.py filters
-py -3.12 .github/pipeline-gate/pipeline_gate.py images
-py -3.12 -m unittest discover -s .github/coverage
-py -3.12 -m unittest discover -s deploy/canary
-py -3.12 deploy/canary/canary.py check
-
-py -3.12 -m unittest discover -s .github/closure-gate
-gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
-    py -3.12 .github/closure-gate/closure_gate.py
-
-py -3.12 -m unittest discover -s .claude/scripts   # needs bash, grep, git, jq; no network
-```
-
-**The review helpers' suite is the only one whose subject is `.claude/`.** `test_grok_helpers.py` covers the judgements `/ship`
-and the two sweeps rest on: what the usage-limit preflight calls a limit, what
-counts as a review that finished, that the ledger publishes no answer on its
-trust check's error path, that every usage-limit skip happens before a slot is
-reserved, and that the sweeps' worktree shape check is the
-direct-child check it claims, and whether the label helper leaves a free
-parameter a finding could steer. **Five of those six shipped wrong, so each is
-reproduced as a case that fails against the old behaviour** — the sixth is a
-grant closed by moving it into a helper, and the suite is what keeps it closed.
-
-**Issues have added subjects since, and they are of the first kind rather than
-the sixth — regression cases, each failing against behaviour that shipped.**
-**No count opens this paragraph**, for the reason the list above gives about
-itself: it said four in the pull request that made it nine, which is the fourth
-restated total in this file to rot.
-An earlier revision of this paragraph classified them the other way, as a
-closed hole kept closed like the label helper's, and that was wrong on the
-evidence: #56's stranger case fails against the unfiltered helper, #33's deny
-assertions were *observed* red against the old settings file before the rule
-was added, #52's transcript check fails against the `cat` it replaced, and
-#57's retired-rule case fails against `main`'s copies of both sweeps. Calling a
-case weaker evidence than it is understates the suite, which is the opposite of
-this file's usual error and no better.
-
-**#56** — what a feed helper admits, what it reports about
-what it dropped, and that no command reaches those feeds outside the helpers.
-**#33** — which paths the harness denies itself, and that the worktree root is
-not among them. **#52** — that the reviewer's transcript reaches no stream, and
-that the one bounded read of it cannot be widened. **#57** — that both sweeps
-still state who may suppress a finding, and that neither has drifted back to
-the unconditional rule.
-
-**More arrived together, and they are the first entries whose subject is a
-BOUND rather than a feed. No count opens this paragraph**, for the reason the
-one above it gives about itself — this sentence said five, two files over from
-two others that had just dropped their own numerals for going stale. Raised in
-review. **#140** — that the Grok ceiling is one declared
-number, that a slot above it is refused by both helpers, that `grok-review.sh`
-*derives* it rather than restating it, and — the load-bearing half — that a row
-posted under the old ceiling is still read as spent. **#60** — that the two
-commands stating editing boundaries now path-scope `Edit` away from every
-tracked tree, and that each command's own subject stays editable. **#30** and
-**#23** — the argv guard: the `--output` write primitive in every spelling
-including the quoted one, `ext::`, command substitution, and — since the push
-check became an ALLOW-list — every push that is not one remote, one refspec
-naming a destination, and options from a fixed set. **#150** — that what
-suppresses a sweep finding is decided by a helper, and that **no sweep GRANT**
-can choose the field it would decide with.
-
-**That last clause moved three times in one branch, each time one grant along
-from the one just closed, and it is the clearest instance of #56 this
-repository has.** `gh repo view` went when the suppression helper resolved the
-owner itself. `gh issue view` went when a reviewer observed it returns `author`
-to the same session. `gh issue list` survived both rounds and returns `author`
-**and every issue body** at once. Each fix cited the same rule — a helper that
-fixes its field set does not bind a caller who still holds the raw grant — and
-each left the next grant standing. **The gate now asserts on the grant rather
-than on the instruction line**, because a listing line naming four fields is a
-rule a reader follows and a prefix grant beside it is what the session can
-actually run.
-
-**Two of the five are worth knowing for how their counterfactual had to be
-taken**, because "observed red" meant something different in each. #140's
-read-side cases are green against `main` and *must* be — `main` reads the old
-shape natively — so their counterfactual is the **naive migration**, a
-deliberately narrowed filter, and against that four of them fail. #60's is a
-tree removed from the deny list. Neither is the ordinary "revert the file and
-watch it go red", and a case whose counterfactual is not the previous commit
-needs saying so or the next reader assumes it was never taken.
-
-**`.github/workflows/ci.yml` and `docs/testing.md` enumerate the same subjects
-and are reconciled in the same change** — all three used to open the
-list with a count, and all three have dropped it, because that numeral said
-four, then five, then six, and was stale again inside the pull request that
-added these two. The feed cases drive `copilot_partition` directly — a
-stranger dropped, every Copilot spelling and the owner admitted, a near-miss
-login refused, and
-the load-bearing one, that a dropped item's body reaches *neither* stdout nor
-stderr. Beside them sit structural cases whose subject is the call sites: that
-all three helpers source the one allow-list and none restates a login, that
-each resolves that list *before* fetching its feed, and that
-`review-copilot.md`'s frontmatter grants the three helpers and no longer grants
-`Bash(gh pr view:*)`. The deny-list cases read `settings.json` and assert every
-control-surface path in both spellings, that no rule is spelled `Write(`, that
-the worktree root is never denied, and — the positive control — that the deny
-list was found at all. **The number of paths is not written here**, because the
-first draft of this sentence said five and a review of the same pull request
-made it six.
-
-Paired with
-positive controls, which are not decoration: a negative that passes because the
-pattern matches *nothing* is this repository's most-repeated failure wearing a
-test's clothes, so the accepted values and the limit pattern's status anchor are
-pinned alongside. **It shells out to the same `grep -E` the scripts call**
-rather than restating the patterns in Python's `re` — a re-implementation is a
-second specification, and a double cannot disagree with itself.
-
-**The closure gate is the only one whose *runner* needs the
-network**, and the suite is deliberately not: the deciding takes JSON on stdin
-and the fetching is one `gh` call, which is `deploy/canary/canary.py`'s split
-one artefact over. So `unittest` runs anywhere, and the second line is the only
-part that needs a token and a PR to point at. The review helpers' suite is the
-same split taken further — it needs no network at all, because the `gh` the
-ledger calls is replaced by a stub on `PATH`.
-
-**`pipeline_gate.py stages` is the one that cannot be run on its own**: it
-reads what the three test steps wrote, so it needs a `dotnet test` per stage
-into `./TestResults/{architecture,unit,integration}` first. `docs/testing.md`
-carries those three commands.
-
-`deploy/canary/README.md` is that tree's operational reference, on
-`deploy/observability/README.md`'s terms: what the gate asserts, and — more
-usefully — the things it does not, of which the load-bearing one is that
-**nothing has established a replica ratio is a traffic ratio**. kube-proxy
-spreads connections rather than requests, and no render-time check reaches
-that.
-
-The chart gate needs `helm dependency update` before it can render anything,
-and runs it itself — `file://` dependencies resolve from disk, so there is no
-network step and no chart repository. `deploy/helm/README.md` is its
-operational reference.
-
-The observability gate needs nothing at all — it reads text, like the licence
-gate, which is why it can run before a restore. `deploy/observability/README.md`
-lists what it asserts and, more usefully, the two things it does not: it
-reaches no Prometheus and does not validate rule syntax.
-
-**`py -3.12`, not `python`, and the block above is written that way on
-purpose.** Every CI job that runs Python pins 3.12 — **every one, without
-counting them here**, which is `docs/testing.md`'s form and is the fix for a
-number that had already gone stale twice: PR-22 made it three and PR-24's
-observability gate made it four. The predicate is checkable and the count was
-not. The default interpreter here is 3.14.
-A newer one is the hazard, not an older one — it accepts APIs 3.12 does not, so
-the local suite goes green on code the runner cannot execute.
-`Path.read_text(newline=…)` is 3.13 and cost a CI round exactly that way. The
-scaffold *script* is a different matter: running it is not a test of the floor,
-so plain `python` is fine there. 3.12 is installed here, so **every** Python
-suite can be run against it — the set is the one *The commands* lists, plus
-`.github/licence-gate`, and it is not enumerated a second time here for the
-reason that sentence gives.
-
-**`dotnet test` requires Docker from PR-08**, and the container tests are still
-never *skipped* when it is absent: a skip on a missing daemon **fails open**, so
-CI would go green on a runner whose Docker broke. ADR-010 already made real
+**`dotnet test` requires Docker from PR-08, and the container tests are never
+*skipped* when it is absent**: a skip on a missing daemon **fails open**, so CI
+would go green on a runner whose Docker broke. ADR-010 already made real
 infrastructure non-optional. Without a daemon they fail on `Failed to connect
 to Docker endpoint`, which is a true statement about the machine and not a
 defect in the branch.
@@ -1657,47 +792,6 @@ category runs a smaller suite and says which. `Category!=Integration` is 847 of
 the 1,052 and starts no container — measured with `docker events`, not
 inferred — and `Category=Integration` is the other 205, needing the daemon
 exactly as before.
-
-**The integration half read 187 for two branches and the arithmetic never
-closed**, which is this file's own rule about restated numbers catching one:
-18 + 649 + 187 is 854 and the suites summed to 855. The figure was reconciled
-against the branch's own CI run rather than recomputed — `gh run view <id>
---log`, summed over the per-project totals of each stage — which is the check
-this file names for exactly this case.
-
-**Since PR-25 CI runs three stages rather than one pass**: architecture gates
-(18), unit (829) and integration (205), which is the 847 above split at the
-seam §15.1 draws. Separate *steps* in one job, not separate jobs — a job
-boundary would mean shipping the build output between runners to keep
-`--no-build` honest, and the coverage figure is the union of the last two.
-**Three stages are three new ways to select nothing**, since `dotnet test`
-exits zero on a filter that matches no test, which is what
-`.github/pipeline-gate/` exists for.
-
-**The trait is declared on the `[CollectionDefinition]`, not per test class**,
-so joining the container collection *is* carrying the category — there is
-nothing to forget and therefore no reflection gate guarding it. xUnit v3's
-propagation was measured before the design was trusted.
-
-**Five projects need Docker**: `Catalog.Api.Tests`, `Catalog.Application.Tests`,
-`Common.Infrastructure.Tests`, `Ordering.Api.Tests` and `Web.Bff.Tests` — each
-with its own collection and therefore its own container set (§12.4's stated
-price). The last is the odd one: most of its tests need no container, one class
-needs a Keycloak, so the suite is fast and then pays for an identity provider
-once — 77 tests of 81 on the fast side, which is the clearest case in the repo
-for categorising a collection rather than a project. (Measured, not counted by
-eye, and wrong twice for two different reasons: first three short on both
-halves of the same split, then left on the previous measurement while the
-solution totals beside it were updated in the same change. The four that need
-the identity provider are the constant; the fast half moves whenever the suite
-grows.)
-`Ordering.Application.Tests` is deliberately not among them — its handler
-tests moved to `Ordering.Api.Tests`, because `ICurrentUser` is
-`HttpContextCurrentUser` and a handler resolved in a bare scope has no
-principal to bind a subject from. Since PR-21 it holds §12.5's saga suite
-instead, which is the same property from the other side: a state machine driven
-over the in-memory harness needs no infrastructure at all, and homing it in the
-API suite would have bought it a container set for nothing.
 
 Adding a migration needs the pinned tool and a startup project:
 
@@ -1792,9 +886,14 @@ a retry count in `Program.cs` and nowhere else. From then on:
 - Where the blueprint is genuinely wrong, fix the blueprint. It is a
   specification, not a historical record — but ADRs are the exception and are
   superseded, never rewritten.
-- **This file and `docs/pr-decision-log.md` are inside the rule too.** Neither
-  is reached by `/validate-blueprint` or `/check-links`, so nothing structural
-  will catch their drift.
+- **This file and the three it delegates to are inside the rule too** —
+  `docs/pr-decision-log.md`, `docs/lessons.md` and
+  `docs/harness-boundaries.md`. None is reached by `/validate-blueprint` or
+  `/check-links`, so nothing structural will catch their drift, and the
+  delegation makes that sharper rather than softer: a rule that used to sit in
+  one file now sits in two, so **the change that moves it has to reach both**.
+  A pointer here and an argument there is one claim in two places, which is the
+  shape this rule exists for.
 
 Run `/validate-blueprint` after any substantive edit.
 
@@ -2554,583 +1653,41 @@ Delivery:
 
 ### What cuts across them
 
-**File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
-covers every file-editing tool, `Write` included; a `Write(path)` rule matches
-nothing and Claude Code **refuses to start** until it is removed:
-
-```
-Permission deny rule (.claude\settings.json): Write(.remember/**) is not matched
-by file permission checks — only Edit(path) rules are.
-```
-
-So `Edit(.remember/**)` and `Edit(./.remember/**)` are the whole of the
-`.remember/` protection, and the absence of a `Write` twin is correct rather
-than a gap. This has been "fixed" twice by adding the twin back, and both times
-it broke startup. **A reviewer who has not run the harness cannot see this;
-check a permission claim against the harness before acting on it.**
-
-**The `Edit` denies bind the agent's own tooling**, in both spellings each:
-`.claude/scripts/**`, `.claude/sandbox/**`, `.claude/commands/**`,
-`.claude/agents/**`, `.claude/settings.json` and `.claude/settings.local.json`.
-Read the list, do not count it here — it has already grown twice, once inside
-the pull request that introduced it. The review loops grant those
-helpers by name, so a session that could rewrite one before invoking it would
-make every fixed endpoint a fiction. The sandbox `Dockerfile` is on the list
-for the same reason at one remove: it is a *build input to the security
-boundary*, so a session able to edit it could add an entrypoint reading the
-credentials the following `docker run` mounts in.
-
-**The last three arrived with #33, and the argument for them is the first two's
-applied one level up.** `commands/`, `agents/` and `settings.json` are the
-files that *grant* what the first two protect. Ten commands carry an
-unrestricted `Edit` or `Write` and three of them read untrusted input by
-design, so a single applied edit could append a grant to a command's
-`allowed-tools`, remove a line from this deny list, or rewrite
-`.claude/agents/security-auditor.md` — whose read-only guarantee is precisely
-its `Read, Grep, Glob` tool list, as `/security-sweep` says outright: read-only
-there "is a property of the agent's tool grant, not a word in its prompt".
-
-**`settings.json`'s own entry self-locks, and that is a working constraint, not
-a curiosity.** Once it denies itself, the session cannot edit it again —
-including to undo the edit. So a change to it is one edit that lands complete,
-and it goes **last** in any PR that also touches `commands/` or `scripts/`;
-split across two edits, the second is refused and whatever the first omitted
-ships missing.
-
-**The lock is not instantaneous, and the gap is a trap rather than a
-convenience.** Measured on Claude Code 2.1.247, in the session that restored
-these denies for the harness-bounds PR: immediately after writing
-`Edit(.claude/scripts/**)` back, a `Write` creating a file under
-`.claude/scripts/` **still succeeded**; minutes later an `Edit` under
-`.claude/hooks/` and an `Edit` of `settings.json` were both refused. The file
-is re-read, but not at the instant it is written.
-
-So **a probe taken right after the restore reports the deny as inert and is
-simply early** — and an agent that treats that reading as the answer will
-conclude it still has access it is about to lose. Verify a restore by reading
-the file, never by trying the thing it forbids.
-
-**The practical consequence is an ordering rule for the human doing the
-lifting**: restore the lines only when the work is genuinely finished, because
-the window closes on its own schedule and a defect found afterwards needs the
-lift granted again. That happened on the PR that added the argv guard — the
-guard shipped refusing its own commit message, and the fix needed a second
-lift.
-
-**`.claude/settings.local.json` was the gap a review found**, and it is the
-enumeration lesson in miniature: an exact-file rule cannot cover a sibling, and
-Claude Code loads both files. Denying `.claude/**` wholesale was considered and
-refused — `.claude/worktrees/` is where `/branch` puts working checkouts, so
-that blanket would deny editing the repository itself while a worktree run is
-live. A test pins both halves: every loaded settings file denied, and the
-worktree root never denied.
-
-Changing any of them is a human's edit, made with the deny lifted. Like the
-push denies it is defence in depth — `Bash` redirection can still write a file
-— but it removes the quiet path.
-
-**`.claude/hooks/**` joined the list when the first hook landed, and the way it
-joined is the lesson.** It had been excluded on a stated condition — "no hook is
-configured here" — which was true, and which is the kind of exemption that
-expires without anyone noticing, because nothing re-reads the condition when
-the fact changes. #30's argv guard made it false. A hook is the sharpest case
-on the list: it grants nothing, but it **runs on every Bash call**, so a session
-able to rewrite one could delete its own guard and then act. `settings.json`
-denies it, and a case in `test_grok_helpers.py` asserts the deny, so the next
-hook arrives behind a control rather than behind a sentence that used to be
-true.
-
-**The external review runs in a container over a disposable clone — not a
-worktree — and it has TWO residuals, which are not independent.** The boundary
-is `.claude/sandbox/Dockerfile`; a worktree could not be the thing mounted,
-because a worktree's `.git` is a file pointing back into this checkout, which
-is the one path the container must not reach. No `gh` token, no SSH keys, no
-host filesystem beyond the clone, non-root inside, and `bypassPermissions` is
-no longer the risk it was because the blast radius is the box.
-
-**Egress is not restricted** — the container reaches the network, and confining
-it to `api.x.ai` needs an allow-list proxy Docker cannot supply alone. **And
-the credential half is narrowed rather than closed**, which this paragraph
-asserted as settled until #58: where `XAI_API_KEY` is unset or unusable,
-`grok-review.sh` copies `~/.grok/auth.json` in, and that file carries a
-refresh-token-bearing OAuth session for the x.ai account. The three things
-enumerated as absent genuinely are; a fourth was never enumerated. **The open
-residual is what makes the crossing one exploitable** — anything inside can
-read the session and post it anywhere — so listing them as two independent
-bullets is precisely what let the second read as finished. Prefer
-`XAI_API_KEY`, which is scoped, revocable and crosses no file; on this host it
-authenticates against a team with no credits, so the fallback is the path that
-actually runs.
-
-Stated here as well as in the script because `/ship` and both
-sweeps cite this file as where the boundary and its residuals are recorded. The
-reviewer also has **no .NET SDK**, so `dotnet test` is this host's gate and
-never the review's.
-
-**A grant is not a whitelist, and this is the trap under every row below.**
-`allowed-tools` is an **auto-approval list**: the harness documents that it
-"does not restrict which tools are available: every tool remains callable, and
-your permission settings still govern tools that are not listed". So *omitting*
-a tool from a command's frontmatter withholds nothing — it only decides
-whether the call prompts. Refusing a capability takes a **deny**:
-`permissions.deny` in `.claude/settings.json` for the repository, or the
-`disallowed-tools` frontmatter key for one command, which removes the named
-tools from the pool while it runs. Precedence is **deny → ask → allow**,
-first
-match wins, so a deny beats every allow including a frontmatter one.
-Measured, not read: a `general-purpose` subagent spawned fine under
-`--allowedTools "Agent(Explore)"`, and was refused under
-`--disallowedTools "Agent(general-purpose)"` with `Agent type 'general-purpose'
-has been denied by permission rule 'Agent(general-purpose)' from cliArg` — and
-again, from a command's own frontmatter, `from command`.
-
-**A helper is the answer whenever a git grant is wider than the operation it
-buys**, because **an allow rule is a prefix and cannot exclude a flag**. Each
-of these was confirmed by running the offending form rather than reasoning
-about it:
-
-| Raw grant | What it also bought |
-|---|---|
-| `Bash(git switch:*)` | `--discard-changes` and `-C` — and the flags **combine**, so `git switch -fC <name> <start>` defeats any `Bash(git switch -C:*)` deny |
-| `Bash(git worktree add:*)` | `-B`, which resets an existing branch rather than creating one |
-| `Bash(git checkout -b:*)` | the trailing flag — `git checkout -b <name> -f origin/main` discards tracked modifications |
-| `Bash(git branch:*)` | `git branch -fd <name>` — force and delete behind a spelling the `-d`/`-D`/`--delete` denies do not match |
-| `Bash(git reset HEAD:*)` | `git reset HEAD --hard` — the `--hard` deny matches the other word order |
-| `Bash(git log:*)`, `Bash(git diff:*)`, `Bash(git show:*)` | `--output=<path>`, which is an arbitrary file write with `--format=` choosing the bytes. Reproduced: `git log -1 --format=%s --output=<scratch>` wrote the commit subject, silently |
-| `Bash(git fetch:*)`, `Bash(git pull --ff-only:*)` | a URL in the repository position, and `ext::<cmd>` is a git transport that **runs its argument as a command** |
-
-**The reset grant does not narrow, and the attempt is the sharpest lesson
-here.** It was "fixed" to `Bash(git reset HEAD --:*)` on the reasoning that
-`--` turns a later flag into a pathspec. True of *git*, irrelevant to the
-*rule*: an allow rule is a prefix match, and `git reset HEAD --hard` starts
-with `git reset HEAD --`, so the narrowed grant admitted the exact command it
-excluded — while the commit message said the hole was closed. **The git
-behaviour was verified and the matching was not.** Anything whose safety
-depends on what follows a token needs a helper, or a **deny**, not a cleverer
-allow.
-
-**A deny is the thing an allow cannot be: `*` matches at any position in it,
-including the middle.** `Bash(git *--output*)` refuses `git log`, `git diff`
-and `git show` carrying `--output` anywhere in the argument list, and leaves
-plain `git log` alone — both halves measured, because a deny that blocked the
-command outright would read the same from the failing side. Removing the three
-read grants instead would have bought nothing: the harness treats read-only
-forms of `git` as promptless built-ins whatever the allow list says, and its
-own note is that "to require a prompt for one of these commands, add an `ask`
-or `deny` rule".
-
-**"Including the middle" is the measurement; the documented rule is wider, and
-the two are worth keeping apart.** What was measured here is a wildcard between
-two literals. The harness's own reference says a Bash rule's wildcards "can
-appear at any position in the command, including at the beginning, middle, or
-end" — so a pattern *starting* with `*`, which this repository had no precedent
-for, is supported rather than merely untested. That was read out of the docs
-after a branch shipped two such denies and flagged them as an unverified guess,
-which is the right order: **write down which half you measured and which half
-you looked up.** Two neighbouring constraints came from the same page and
-match what is recorded above — the `:*` form is recognised only at the end of a
-pattern, and a trailing `*` preceded by a space enforces a word boundary, so
-`Bash(ls *)` misses `lsof` where `Bash(ls*)` catches it.
-
-**It raises the cost of the naive spelling and it is not a boundary**, and the
-distinction is the whole of the reset-grant lesson one paragraph up. A
-permission rule matches the command *string*; the shell reassembles adjacent
-quoted fragments before `exec`, so `--out''put=<path>` reaches `git` as
-`--output=<path>` while never presenting contiguous `--output` to the matcher.
-Copilot raised this against the rule as shipped and it is accepted. **The
-concatenation is now MEASURED**, where this paragraph used to say it was not:
-`printf '%s' --out''put=/tmp/x` prints `--output=/tmp/x`, and so does
-`--"out"'put'=`. It had rested on documented quote-removal semantics because
-the earlier probe was refused by the classifier layer — a second net worth
-noting and not evidence. It is evidence now, and it says the deny was genuinely
-defeatable rather than theoretically so.
-
-**What closed it is the second of the two things named here as owed: a rule
-over the executed argv rather than the typed string.**
-`.claude/hooks/guard-git-argv.py`
-is a `PreToolUse` hook on `Bash` that `shlex.split`s the command — the same
-quote removal the shell performs — and judges the resolved argv, so the
-fragments are rejoined before anything is compared and the dodge stops working.
-**It reaches further than any rule could**, and that is the part worth carrying:
-hooks run on every tool call in the loop, including the read-only `git` forms
-the harness waves through as promptless built-ins, where no allow or deny rule
-is consulted at all. Measured, not read — the docs do not say so, and a
-`git log --out''put=` probe was refused by the hook with no file written.
-
-The deny stays beside it as defence in depth. **A substring deny over a shell
-command string can never be more than a speed bump**, which is still the
-generalisation worth carrying past this one flag — what changed is that the
-speed bump is no longer the only thing there.
-
-**The hook's own residual, stated rather than left to be found:** `shlex`
-resolves quoting and not expansion, so a flag assembled at run time —
-`F=--output=x; git log $F` — arrives as the token `$F` and is not seen. Closing
-that needs the argv after expansion, which no hook is given.
-
-**This paragraph once claimed more than that, and a reviewer was right to say
-so.** "Every spelling a caller can type literally" was false while
-`git log "$(git push origin +HEAD:main)"` was one `shlex` token and two commands
-to the shell — a command substitution is *executed*, not quoted away, and
-calling it inert because it survived tokenisation intact is the same mistake as
-reading a heredoc body as an argument list.
-
-**That sentence then said both were closed, and they were closed in two
-functions that disagreed with each other.** The stripper knew a heredoc body
-was data; the extractor ran on the raw string ahead of it, with a quote tracker
-of its own and no notion of heredocs or comments. So a substitution inside a
-`<<'EOF'` body was refused although the shell never expands one there, and a
-substitution inside a bare `<<EOF` body was **admitted** although it does — an
-apostrophe in the body being an opening quote to the extractor and an ordinary
-character to bash. Raised in review; both directions verified against the guard
-as shipped, and the bash behaviour measured rather than argued.
-
-**A second one was found while fixing it, one layer down and the same shape.**
-`shlex.shlex` sets `commenters = "#"` and honours it at any character position,
-where bash starts a comment only where `#` begins a word — so
-`git log --grep=#x ; git push origin +HEAD:main` tokenised to three tokens, the
-push left with the comment, and the hook reported no offence at all. Measured
-under bash with a `git` shim: both invocations run.
-
-Both are closed by giving the guard **one** model of where the shell expands
-things — `expandable_regions`, over the quote-and-comment-aware scanner the
-heredoc opener already used — rather than a second model per function. Command
-substitution is now judged wherever bash would perform it and nowhere else.
-
-**And then the bound was wrong for a fourth reason, which had nothing to do
-with the shell at all.** Every version of this paragraph has named the residual
-in shell terms — quoting, then expansion — while `git -c` sat one layer up:
-`git -c "alias.x=!echo PWNED" x` runs the echo, and git executes a long list of
-config keys besides — `core.pager`, `core.editor`, `core.sshCommand`,
-`core.hooksPath`, `diff.external`, `credential.helper`. Measured in a scratch
-repository. The hook admitted every one of them, because they are ordinary
-arguments to an ordinary `git`, and nothing about the SHELL is involved. The
-option is refused outright now, in the global position only, since `-c` after
-`commit` means "reuse this message" and breaking that is how a guard gets
-turned off. Enumerating the executing keys would be the deny-list this file
-already refuses twice over.
-
-**So state the bound as what has been looked for, not as what is left.** The
-residual named today is what the shell **computes** rather than what a caller
-writes, and it has two measured shapes: a flag or command assembled from a
-variable (`F=--output=x; git log $F`), and a substitution whose OUTPUT becomes
-the command line (`sh -c "$(echo 'git push origin +HEAD:main')"`). Closing
-either needs the argv after expansion, which no hook is given. Both are pinned
-as **admitted** in the suite, on the same argument as the degraded-check case:
-a residual nobody can run is one the next reader assumes was closed.
-
-Three earlier versions of that sentence were each falsified by a spelling
-nobody had gone looking for, and the pattern is that the bound gets narrower
-every time somebody probes rather than reasons. **It is a claim about the last
-search, not a proof.**
-
-**The `::` in a value collides with the `:*` suffix syntax, and the collision
-fails silent in one direction and loud in the other.** `Bash(git *ext::*)`
-passes settings validation and then matches nothing, because the trailing `:*`
-is consumed as the prefix-wildcard form and the literal becomes `git *ext:` —
-a probe of `git log -1 ext::foo` ran clean under it. Writing `Bash(git
-*ext::**)` to dodge that is rejected at startup: *"The `:*` pattern must be at
-the end."* So **`ext::` cannot be expressed in a Bash rule at all**, and the
-transport is closed on the allow side instead — **and the two grants do it by
-two different mechanisms, which an earlier revision of this paragraph ran
-together.**
-
-**Since #30 it is also closed on a third mechanism, and that one is not a
-rule.**
-`.claude/hooks/guard-git-argv.py` refuses an argv element containing `ext::` on
-a git subcommand that takes a **repository** — `fetch`, `clone`, `pull`,
-`push`, `remote` and their neighbours. **Not every element after `git`**, which
-is what this sentence said until the scoping landed and did not reconcile it:
-the transport is only meaningful where git expects a repository, and judging it
-everywhere made a branch name or a path carrying the sequence indistinguishable
-from a use of it — a commit body arguing about the transport included. A hook
-is not bound by the pattern grammar at all,
-which is why it can express what `Bash(...)` provably cannot — and the whole
-argument below about which grant pins what remains worth reading, because a
-hook is one file and defence in depth is the reason the allow side was narrowed
-in the first place.
-
-`Bash(git fetch origin:*)` **pins the remote**: a literal remote name occupies
-the repository position, so a URL never reaches it. That is the control the
-sentence describes, and it is real.
-
-`Bash(git pull --ff-only)` pins **nothing** — no remote name appears in it at
-all. What it does is drop the `:*`, so the grant is the documented
-no-argument invocation and nothing else. Whether that closes
-`git pull --ff-only ext::<cmd>` turns on the prefix-match rule stated in the
-reset-grant paragraph above — **an allow rule is a prefix match** — which has
-never been measured for the no-wildcard case. (Named rather than counted: a
-numbered offset inside a section still being edited is how this repository's
-callout totals used to rot.) If that holds for a grant without `:*` as well, the
-pull side is still open and belongs in the residual inventory rather than in
-this paragraph. Nobody has run the probe. Until someone does, treat the pull
-grant as *narrowed, not proven* — the two words this repository keeps having to
-tell apart.
-
-**The probe that would settle it is not available from inside a session, and
-that is a property of the question rather than a lack of trying.** Every exact
-grant in `.claude/settings.json` — `Bash(git branch)`, `Bash(git remote -v)`
-and the rest — is a **read-only** git form, and the harness treats those as
-promptless built-ins whatever the allow list says. So a trailing argument on
-one of them runs cleanly and demonstrates nothing about prefix matching: it
-would have run either way. `git remote -v --verbose` was tried and is exactly
-that null result. A decisive probe needs an exact grant on a command the
-harness does not already wave through, which means adding a rule to a file the
-session reads at startup — so it cannot be arranged from within the session it
-would govern.
-
-**A command's frontmatter is a grant like any other, and it is the one nobody
-reads twice.** The first five rows above were all found in command frontmatter,
-and for a while that supported a second claim — that the global file had it
-right all along. **It did not, and the sixth row is where that broke**: the
-`--output` write primitive sat in `.claude/settings.json`'s own allow list,
-reachable from every command in the repository, and it had been read past for
-as long as the frontmatter rows had. The lesson survives with its converse
-attached: frontmatter is the grant nobody reads twice, and the global file is
-the one everybody assumes somebody else already read.
-
-**This paragraph is the inventory of grants wider than the operations they buy,
-and no command file keeps a second total** — `ship.md`'s callout carried one,
-and it went stale the moment a branch pinned that file's fetch grant.
-
-**The entries are numbered and the numbering is stable; the headline count that
-used to open this paragraph is gone on purpose.** It read "six" and was made
-false by #56 closing the fourth, which is the third time a restated total in
-this file has rotted — the callout totals and the test count went the same way,
-and the fix that held there was to drop the number and keep the named entries.
-Ordinals are kept even where an entry is closed, so a cross-reference to "the
-fourth" still lands, and each entry says its own state. Read the entries; do
-not count them here.
-
-Two are `/ship`'s:
-`Bash(git worktree remove:*)` admits the `-f` that discards work, and
-`Bash(gh pr merge --merge:*)` admits a trailing `--admin` that merges past
-failing checks. Helpers are owed for both; until someone with the
-`Edit(.claude/scripts/**)` deny lifted writes them, `/ship` carries them by
-reporting its literal invocations, flags and all.
-
-**Two more sat in the sweep command files rather than in this paragraph, and
-both are now closed — which is worth recording because they were closed the
-same way.** `Bash(mktemp:*)` took an arbitrary template, so it was a filesystem
-write primitive able to create an empty directory or file anywhere the session
-could write; `git-worktree-detach.sh` makes the directory itself now and prints
-it, and both sweeps dropped the grant. `Bash(gh label create:*)` was
-create-*or-overwrite* — `--force` updates an existing label's colour and
-description, and `-R` put that write in any repository — and it was held as two
-prose rules; `gh-label-ensure.sh` leaves no free parameter, taking one name out
-of a fixed six-entry case and resolving the repository from the checkout. **The
-root cause both shared is the one that generalises**: each was documented by the
-operation it was added for rather than by what its prefix admits, and reading
-the tool's own `--help` found something every time it was done. That they were
-inventoried in a command file and not here is the same drift this paragraph
-warns about, running the other way.
-
-The third is `Bash(git fetch origin:*)`, which no longer admits a URL but still
-admits a trailing flag; `--upload-pack`, `--receive-pack` and `--exec` are
-denied by name, so what is left is the flag nobody has enumerated yet. The
-honest fix is the helper the transport issue asked for — a
-`git-fetch-origin.sh` taking a branch name and nothing else.
-
-The fourth **was** `/review-copilot`'s three unfiltered comment feeds, and #56
-closed it. It is kept here in the past tense rather than deleted, because what
-made it survive three revisions is worth more than the fix: each revision
-narrowed the claim and none of them narrowed it to something enforceable.
-
-**What landed.** All three feeds are behind helpers — `pr-review-bodies.sh`,
-`pr-review-comments.sh`, `pr-issue-comments.sh` — filtering on one allow-list
-declared once in `copilot-authors.sh` and each printing an admitted/dropped
-count. `Bash(gh pr view:*)` is gone from `review-copilot.md`'s frontmatter,
-which is the half that makes it enforcement rather than courtesy: that command
-used `gh pr view` for nothing but the two GraphQL feeds, and `settings.json`
-carries no `gh` allow, so a raw call prompts — a stall in the unattended loop
-instead of a silent pass.
-
-**One file was not enough, and the review of the PR that closed this is what
-established it.** `/ship` invokes `/review-copilot` as a skill while holding
-its own frontmatter grants, and `allowed-tools` entries are cumulative
-auto-approvals rather than a whitelist — so a grant removed in one file and
-kept in its caller withholds nothing on the unattended path, which is the path
-the issue was about.
-
-**And `gh pr view` was not the only door, which took a third review round to
-find.** `gh pr list --json reviews,comments` returns the same review bodies and
-issue comments for every pull request at once — measured here, a 2,457-character
-Copilot review body out of `gh pr list --state all --limit 1 --json
-number,reviews`. Three commands kept that grant for the harmless job of finding
-a branch's pull request, and it was a complete bypass of all three filtering
-helpers. **No command grants `Bash(gh pr view:*)` or `Bash(gh pr list:*)` any
-more**: `ship.md` reads state through `pr-state.sh`, `pr.md` feeds the closure
-gate through `pr-closure-input.sh`, all three resolve a branch's PR through
-`pr-for-branch.sh`, and every one fixes its field set, because a caller that
-chooses fields can choose `reviews`.
-
-**The gate that pins this is an ALLOW-list of `gh` subcommands, and it is the
-second one in this repository to be rewritten that way.** Its first version
-banned `gh pr view` by name and passed while three files still granted
-`gh pr list` — a deny-list passing every spelling nobody thought of, which is
-exactly what the Grok verdict check did before it was inverted.
-
-**This paragraph used to name `gh issue view` and `gh issue list` as still
-admitted, and #150 removed both.** The measurement it rested on is unchanged
-and was never the thing in question — `gh issue view <pr-number> --json
-comments` does return an empty array, because `gh` keeps issues and pull
-requests distinct even though GitHub's model does not. Membership of the
-allow-list is a different fact, and it moved: `gh issue view` returns `author`
-to the same session, and `gh issue list` returns `author` **and every issue
-body** at once. Both went, and `gh repo view` with them.
-
-**Two paragraphs in this file disagreed about one gate, and the stale one was
-the dangerous half** — a reader reconciling a new grant against "stay admitted"
-would have put back exactly what #150 closed. Raised in review, against the
-branch that closed it: the record of the removal was written a thousand lines
-earlier, and the rule nobody re-read was not.
-
-**The set itself is deliberately not written here**, which is the fix rather
-than an omission — it is `GH_GRANTS_THAT_CANNOT_REACH_A_FEED` in
-`test_grok_helpers.py`, beside the assertion that reads it, and a copy in this
-file is what went stale. This paragraph carries the argument for why a
-subcommand joins or leaves that set; the set carries the membership.
-
-`ship.md`'s review-body and inline
-reads go through the same feed helpers `/review-copilot` uses, so the two
-commands share one list instead of holding two prose rules that disagreed.
-
-**`pr.md` was the third holder and was found by a test, not by reading.** The
-issue named two commands; the case whose subject is *every* command's
-frontmatter caught the third. That is the gate-coverage lesson paying for
-itself inside the change that added the gate.
-
-**Three things the fix deliberately does not do.** It admits the repository
-owner alongside Copilot's three logins, because the decision table has three
-rows and dropping the owner would take away the input for the middle one —
-measured on PR #147, 21 of 43 inline comments and 21 of 33 review bodies are
-the owner's. It reports a dropped item's author and location but **never its
-body**, since printing the text one stream over would put the injection vector
-back into the transcript the filter exists to keep it out of — which narrowed
-the *Anyone else* row from "report what it asked for" to a count and a
-location, a deliberate loss of detail. And it is **not authentication**: a
-GitHub login is not verified, so the filter refuses the ordinary stranger and
-would not refuse a takeover of one of the four admitted logins.
-`grok-ledger.sh`'s collaborator-permission check is the stronger form and is
-not reached for, because Copilot is not a collaborator and a permission check
-would drop the whole review.
-
-**The measured logins, which the fix did not change.**
-`copilot-pull-request-reviewer[bot]` is REST's spelling, from
-`/pulls/{n}/reviews` — an endpoint no helper here calls. The one REST endpoint
-in play, `/pulls/{n}/comments`, reports `Copilot`; the two GraphQL feeds report
-the bare `copilot-pull-request-reviewer`. An earlier revision of this paragraph
-called the issue-comment login REST's; `gh pr view` loads `reviews` and
-`comments` through one exporter, so that could never have been true. All three
-spellings stay admitted, because admitting one that never arrives costs
-nothing and missing one that does is the direction that fails open.
-
-**The issue-comment feed's Copilot login is still unobserved**, and a revision
-of this paragraph once asserted it as measured. Seven PRs have now been checked
-— #112, #101, #100, #99, #98, #94 and #147, the last through the new helper
-itself — and none carries a Copilot-authored issue comment. So the shared
-exporter says what the login *must* be and nothing has seen it. Not evidence:
-an asserted measurement that never happened stops the next reader checking.
-
-The fifth is **`git push` under the two sweeps**, and it is the one that looks
-closed and is not. Both commands state a read-only boundary, and both used to
-close it with "no `git push` is granted either, so the branch cannot move" —
-which reads an *absence* as a control, the exact rule the sentence beside it
-had just retired. `.claude/settings.json` **allows** `Bash(git push origin:*)`
-and `Bash(git push -u origin:*)` globally, so a push of the current branch does
-not prompt at all; only force-pushes and pushes to `main` are denied. Naming
-`git push` in each sweep's `disallowed-tools` is the obvious fix and is
-**unverified**: that key's `Bash(...)` form has never been measured here — the
-`Agent(...)` form is what was — and a nested `claude -p` probe could not
-separate a rejected pattern from a command that failed to load. Both files now
-state the residual instead of claiming the control.
-
-The sixth **was** the `--output` deny itself — the inventory's one entry that
-is a *deny* rather than an allow, listed because a deny over a command string
-is defeated by shell quoting. **#30 closed it, and not by improving the rule.**
-`.claude/hooks/guard-git-argv.py` judges the resolved argv, so the quoted
-spelling is refused too, and it fires on the promptless read-only `git` forms
-no rule is consulted for. The deny stays as defence in depth and the three read
-grants stay with it, because removing them still buys nothing against a
-built-in. What survives as residual is one line rather than a grant: a flag the
-shell *computes* — `F=--output=x; git log $F` — is not visible to a hook that
-resolves quoting but not expansion.
-
-**A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
-command to one subagent type is a **deny list of every other type**, because
-the harness has no "only this type" allow — so `security-sweep.md` and
-`bug-sweep.md` each enumerate the registered types that hold a shell, an editor
-or the network, and **a newly added agent under `.claude/agents/` is admitted
-by default** until someone adds it to both lists. That is the shape this
-repository already knows rots; it is taken here because the alternative on
-offer is prose.
-
-**The eighth was the push deny-list (#23), and it closed the way the sixth
-did.** Two broad allows — `Bash(git push origin:*)` and the `-u` form — paired
-with a list of exact spellings, so `git push origin +HEAD:main` was a force push
-to `main` carrying neither `--force` nor the literal `origin main`, and five
-more slipped alongside it: `origin :branch` deletes where the `--delete` deny
-does not look, `origin HEAD:refs/heads/main` is the fully-qualified spelling,
-`origin feature --force` puts the flag where a leading-flag deny cannot reach.
-**Adding four more denies was refused.** Deny-list enumeration trails git's
-refspec grammar forever, and the grammar keeps growing — which is the issue's
-own conclusion — and judging three *properties* instead was not enough either.
-Two review rounds took that apart: `--force-with-lease=<ref>` is not equal to a
-set entry, git accepts `--for` as an abbreviation, `-fv` bundles, `--branches`
-and `--all` and `--mirror` carry no refspec to inspect, `refs/heads/*` includes
-`main` while equalling nothing, and bare `git push origin` names no destination
-at all. That is the deny-list trailing the grammar in parser form. **The
-question is inverted now**: a push is refused unless every part of it is
-recognised, so the spelling nobody has listed is refused for being
-unrecognised rather than admitted for being unlisted. Its suite carries the
-six the issue listed and six it did not, plus the three pushes `/ship`
-actually makes, because over-reach here breaks the delivery chain and would
-be found at the worst moment.
-
-**The ninth is `/review-branch`'s pair of `dotnet` grants, and what makes it
-worth its own entry is that the enumeration guarding it could never have
-worked.** That command holds `Write` and held `Bash(dotnet build:*)` and
-`Bash(dotnet test:*)`; its `disallowed-tools` denies every tracked root file,
-read from `git ls-files` by a test so a new one is a red build. But MSBuild
-imports `Directory.Build.targets` into every build of every project beneath it,
-and that file **does not exist in this repository** — so it is on no list read
-from what exists, and no care about that test could have put it there. Write it,
-run the build the command already had, and an `Exec` in it runs. Measured, in a
-scratch tree: the target fires and `dotnet build` reports success. Raised in
-review.
-
-`dotnet build` was a grant the command never used — its body names
-`dotnet test` alone — and `dotnet test:*` bought two things beyond the run it
-was added for: any project path, and `/p:CustomBeforeMicrosoftCommonTargets=`,
-which imports whatever file it names, `suggestions.md` among them. Both are
-gone, replaced by `dotnet-test.sh`, whose only variable is one word out of two.
-**The helper closes the executor and not the import**, so the auto-imported
-names are denied as well — in **both** commands that state editing boundaries,
-because the artefact outlives the command that writes it and only one of the
-two had an executor. A `Directory.Build.targets` written by
-`/validate-blueprint` is executed by the next thing that builds.
-
-**Which half is measured is recorded rather than rounded up.** The exact
-filenames are the spelling both files already used and the suite reads. The
-`**/*.targets`-style globs beside them are the documented gitignore syntax and
-are **not** measured in a `disallowed-tools` value — belt to the names' braces,
-and not the control.
-
-**The two sweeps are one shape asking two questions**, split by what makes a
-finding rather than by where they look. `/security-sweep` files what an
-attacker can reach; `/bug-sweep` files what is wrong on its own terms. Both
-fork a detached worktree, verify every subagent claim before filing,
-de-duplicate against the whole issue set, never fail open, and file without
-fixing. Three things differ: the threshold, the fan-out cut, and what
-confirmation can mean — **`/bug-sweep` executes none of the snapshot it
-audits**, because building a tree executes it (MSBuild targets, source
-generators, analysers, and under `dotnet test` the tree's own test code) and
-the audited repository is prompt-injection input. So a defect claim there is
-confirmed by reading, and the class of bug only execution catches is named as
-the residual.
-
-**Both sweeps' worktrees carry the `secsweep-` prefix**, and the second is
-borrowing. `git-worktree-detach.sh` and `git-worktree-drop.sh` refuse any path
-that is not `secsweep-` plus six characters under the canonical temp root —
-the shape check that stops a poisoned finding from naming a sibling PR worktree
-and having it deleted. Renaming the prefix would have to move in both helpers
-and both callers at once, so it stands; what is lost is attribution.
+**This moved to [`docs/harness-boundaries.md`](docs/harness-boundaries.md),
+verbatim.** It is the inventory of what the harness grants these commands and
+what it refuses them: the `Edit`/`Write` rule, the `.claude/` deny list and its
+self-lock, the review sandbox and its two residuals, the numbered inventory of
+grants wider than the operation they buy, the argv hook that closed the ones a
+pattern could not, and what separates the two sweeps.
+
+**Read it before touching anything under `.claude/`** — a command's
+frontmatter, a helper script, `settings.json`, a hook or a subagent profile.
+**State a new residual there rather than here**, and read the file before
+claiming a grant is narrow: every entry in it was found by running the
+offending form, not by reasoning about it.
+
+Four of its rules reach every session whatever it is doing, so they stay:
+
+- **File permission rules take `Edit(...)`, never `Write(...)`.** `Edit(path)`
+  covers every file-editing tool, `Write` included; a `Write(path)` rule
+  matches nothing and Claude Code **refuses to start** until it is removed.
+  This has been "fixed" twice by adding the twin back, and both times it broke
+  startup. **A reviewer who has not run the harness cannot see this** — check a
+  permission claim against the harness before acting on it.
+- **A grant is not a whitelist.** `allowed-tools` is an **auto-approval list**,
+  so omitting a tool from a command's frontmatter withholds nothing — it only
+  decides whether the call prompts. Refusing a capability takes a **deny**, in
+  `permissions.deny` or the `disallowed-tools` frontmatter key. Precedence is
+  **deny → ask → allow**, first match wins.
+- **An allow rule is a prefix match and cannot exclude a flag.** Anything whose
+  safety depends on what follows a token needs a **helper** or a **deny**,
+  never a cleverer allow — `Bash(git reset HEAD --:*)` admitted the exact
+  `--hard` it was narrowed to exclude, while its commit message said the hole
+  was closed.
+- **`.claude/settings.json` self-locks, and not instantaneously.** Once it
+  denies itself the session cannot edit it again, so a change to it is one edit
+  that lands complete and goes **last** in any PR that also touches
+  `commands/` or `scripts/`. The lock takes effect on the harness's own
+  schedule, so **verify a restore by reading the file, never by trying the
+  thing it forbids** — a probe taken right after the write reports the deny as
+  inert and is simply early.
