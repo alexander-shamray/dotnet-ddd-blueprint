@@ -12,16 +12,16 @@ services:
       MSSQL_SA_PASSWORD: "${SQL_PASSWORD:-Local_Dev_Pa55w0rd!}"
       MSSQL_PID: Developer
     # Every mapping in this file is published on 127.0.0.1 rather than on
-    # 0.0.0.0, and the argument is made once here rather than per service.
-    # The credentials below are deliberate development defaults (§14.1), so
-    # the interface is the control standing in front of them: Compose's short
+    # 0.0.0.0, and the argument is made once here rather than per service. The
+    # credentials below are deliberate development defaults (§14.1), so the
+    # interface is the control standing in front of them: Compose's short
     # syntax with no host-IP prefix binds every interface, which offers sa,
-    # two passwordless Redis instances, guest/guest and Keycloak's admin
-    # console to every peer on a shared network. Docker Desktop pre-authorises
-    # its own backend through the Windows firewall, so no prompt stands in the
-    # way of that either. deploy/compose/README.md addresses all of it as
-    # localhost already, so the prefix takes nothing from the documented
-    # workflow and closes the shared-Wi-Fi case.
+    # two passwordless Redis instances, both broker service accounts and
+    # Keycloak's admin console to every peer on a shared network. Docker
+    # Desktop pre-authorises its own backend through the Windows firewall, so
+    # no prompt stands in the way of that either. deploy/compose/README.md
+    # addresses all of it as localhost already, so the prefix takes nothing
+    # from the documented workflow and closes the shared-Wi-Fi case.
     ports: [ "127.0.0.1:1433:1433" ]
     volumes: [ sql-data:/var/opt/mssql ]
     healthcheck:
