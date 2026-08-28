@@ -1621,8 +1621,17 @@ every argument at column 7). If you find one, it is a leftover — convert it.
   edit. **It does not require a commit to repeat a closure the description
   makes** — that pairing is deliberately absent and a test pins the absence.
 - **Every issue carries a kind label and a severity label, whatever filed
-  it.** `security` or `bug`, plus one of `critical`, `high`, `medium`, `low` —
-  the six `.claude/scripts/gh-label-ensure.sh` will create, and no others. Both
+  it.** The severity is exactly one of `critical`, `high`, `medium`, `low`, and
+  that half is already true of the whole tracker — measured, 93 issues and 93
+  severities. The kind is `security`, `bug` or `documentation`, and **the
+  vocabulary is wider than the helper**:
+  `.claude/scripts/gh-label-ensure.sh` creates six labels and `documentation`
+  is not among them, because it is one of GitHub's own defaults and was already
+  in use — 11 issues carry it. So "the six the helper will create, and no
+  others" is the rule this bullet first stated and it was **false against the
+  tracker on the day it was written**, which is the restated-inventory failure
+  arriving inside a rule about keeping two statements reconciled. Count the
+  labels before writing down which ones exist. Both
   sweeps make this step 4 of their loop, so the route that has been getting it
   wrong is the other one: an issue filed by hand out of a review triage or a
   measurement taken mid-PR, where no command's checklist is being followed.
