@@ -18,8 +18,18 @@ namespace Common.Application;
 /// ADR-037: it postpones the replay of an outcome that was never stored, where
 /// it used to postpone the duplicate. A release would no longer permit the
 /// second commit — <see cref="CommandAlreadyCommittedException"/> is what
-/// refuses that now — so what holding buys is the caller meeting one refusal
-/// rather than two.
+/// refuses that now.
+/// </para>
+/// <para>
+/// <b>So the two options differ in how many answers the caller gets, and
+/// holding is the one that gives more.</b> Held, a retry meets this exception
+/// until the claim expires and
+/// <see cref="CommandAlreadyCommittedException"/> after it — two answers over
+/// time. Released, the next retry claims the free key, meets the marker inside
+/// §6.3's transaction and gets that second answer straight away. What holding
+/// buys is not fewer refusals but a claim that is never handed on while the
+/// outcome of committed work is unknown; what it costs is up to a retention of
+/// the less precise of the two answers.
 /// </para>
 /// </remarks>
 public sealed class ConcurrentRequestException(Guid commandId)

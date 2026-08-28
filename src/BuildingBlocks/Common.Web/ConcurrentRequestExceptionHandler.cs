@@ -58,7 +58,15 @@ internal sealed class ConcurrentRequestExceptionHandler(IProblemDetailsService p
                 // echoing it tells them nothing they did not send, and the key
                 // it forms carries the subject segment (§8.5) — a detail no
                 // response should be describing.
-                Detail = "A request with this command identifier is already in progress. Retry."
+                Detail = "A request with this command identifier is already in progress. Retry.",
+                // §10.5's machine-readable half. `detail` is human-readable by
+                // RFC 9457, so a client that switches on it is parsing English —
+                // and this status now carries instructions that CONTRADICT each
+                // other across its three producers, where before they all said
+                // retry. `code` is where §10.5 already says a client switches;
+                // the Error path has carried one since PR-18 and the exception
+                // path had none.
+                Extensions = { ["code"] = "request.in_progress" }
             }
         });
 

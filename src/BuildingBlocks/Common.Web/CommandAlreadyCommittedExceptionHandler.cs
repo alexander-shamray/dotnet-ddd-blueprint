@@ -71,7 +71,13 @@ internal sealed class CommandAlreadyCommittedExceptionHandler(IProblemDetailsSer
                 // commoner path.
                 Detail =
                     "This command has already been applied and its result is no longer " +
-                    "available; read the resource rather than retrying."
+                    "available; read the resource rather than retrying.",
+                // The discriminator that matters most on this status, because
+                // this is the producer whose instruction is the opposite of the
+                // other two. RFC 9457 makes `detail` human-readable, so a
+                // client told apart from "retry" only by English prose is a
+                // client that retries on a translation or a reword.
+                Extensions = { ["code"] = "command.already_committed" }
             }
         });
 

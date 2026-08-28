@@ -72,12 +72,16 @@ public sealed record RetentionPolicy
     /// <remarks>
     /// <b>It has a floor the other two do not, and the floor is
     /// <see cref="IdempotencyRetention.Window"/>.</b> The marker is what refuses
-    /// a retry of a command that committed, and the Redis claim it backs up
-    /// expires after that window — so purging markers sooner leaves a stretch
-    /// in which the key is claimable again and nothing remembers the commit.
-    /// The duplicate write §8.5 exists to prevent would then arrive at a
-    /// boundary set by a retention number, which is the least visible place a
-    /// correctness property could be lost.
+    /// a retry of a command that committed, and the order the two expire in is
+    /// the whole of the constraint. While the Redis claim is alive the key is
+    /// not claimable at all, so a purged marker costs nothing yet; the gap
+    /// opens when that claim expires with the marker already gone, and the
+    /// next retry then claims a free key and runs the command a second time.
+    /// The gap is exactly the difference between the two windows, so a marker
+    /// window below the claim's own is the only way to open one — and the
+    /// duplicate write §8.5 exists to prevent would arrive at a boundary set by
+    /// a retention number, which is the least visible place a correctness
+    /// property could be lost.
     /// <para>
     /// Read rather than restated, for the reason
     /// <see cref="IdempotencyRetention"/> exists: two 24s in two files agree
@@ -187,9 +191,12 @@ public sealed record RetentionPolicy
                 member,
                 value,
                 $"{member} must be at least {floor}, which is how long §8.5's Redis claim " +
-                "survives. A shorter window deletes the marker that refuses a duplicate while " +
-                "the key it backs up is still claimable, so the write this platform guarantees " +
-                "happens once happens twice — at a boundary set by a retention setting.");
+                "survives, and the order of the two expiries is the whole of why. A shorter " +
+                "window purges the marker first; the claim then expires with nothing left to " +
+                "remember the commit, so the next retry claims a free key and runs the command " +
+                "a second time. The gap is the difference between the two windows, and the " +
+                "write this platform guarantees happens once happens twice at a boundary set " +
+                "by a retention setting.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

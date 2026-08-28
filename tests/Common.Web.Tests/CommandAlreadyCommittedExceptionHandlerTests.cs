@@ -99,6 +99,37 @@ public class CommandAlreadyCommittedExceptionHandlerTests
     }
 
     [Fact]
+    public async Task The_three_409s_carry_distinct_machine_readable_codes()
+    {
+        // `detail` is human-readable by RFC 9457, and this status now carries
+        // instructions that contradict each other: two of its producers say
+        // retry and this one says do not. A client that can only tell them
+        // apart by prose retries on a reword — so §10.5's `code` extension is
+        // what it switches on, and these are pinned because a discriminator
+        // nothing asserts is one that drifts back into agreement.
+        string committed = await CodeOfAsync(new CommandAlreadyCommittedException(Key));
+        string inProgress = await CodeOfAsync(new ConcurrentRequestException(Guid.CreateVersion7()));
+
+        committed.ShouldBe("command.already_committed");
+        inProgress.ShouldBe("request.in_progress");
+        committed.ShouldNotBe(inProgress);
+    }
+
+    private static async Task<string> CodeOfAsync(Exception exception)
+    {
+        using IHost host = await StartThrowingAsync(exception);
+        using HttpClient client = host.GetTestClient();
+
+        HttpResponseMessage response = await client.GetAsync("/orders", TestContext.Current.CancellationToken);
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+
+        using JsonDocument body = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+        return body.RootElement.GetProperty("code").GetString()!;
+    }
+
+    [Fact]
     public async Task Any_other_exception_still_falls_through_to_the_500()
     {
         // The half that establishes the handler is selecting rather than
