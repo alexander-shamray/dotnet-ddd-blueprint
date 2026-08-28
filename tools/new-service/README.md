@@ -90,8 +90,8 @@ registration — a scaffolded host refuses to start without
 scheme, both Dockerfiles, the Compose pair, and the architecture gates of
 [§4.2](../../docs/backend-architecture/04-solution-structure.md).
 
-The service builds and its seventy-eight tests pass before you have written a
-line, and thirty-five of them run against real SQL Server and RabbitMQ
+The service builds and its seventy-nine tests pass before you have written a
+line, and thirty-six of them run against real SQL Server and RabbitMQ
 containers:
 the migrator's exit code, §7.1's two-key boundary, the readiness probe — 200
 only once the bus connects — `EfUnitOfWork`'s commit, rollback and retry
@@ -103,13 +103,13 @@ cap and loud failure on a `Local` row with no registered handler.
 Those two counts are measured rather than estimated, and they move whenever a
 PR adds to the template — they read forty-one and sixteen until PR-18
 recounted them against a rendered service, three PRs after they stopped being
-true, fifty-six until PR-22 did it again, and sixty until PR-32 rendered a
+true, fifty-six until PR-22 did it again, and seventy-eight until PR-32 rendered a
 service carrying §8.5's marker suite.
 
 **Adding to the number is not recounting it.** PR-22 put three tests into the
 template and the total moved by four, so the only way to know this pair is to
 render `Yankee` at 5199 and run all three of its suites — which is what PR-32
-did: 1, 18 and 59. The thirty-five is the `Category=Integration` count now,
+did, twice: 1, 18 and 60. The thirty-six is the `Category=Integration` count now,
 which is a filter anyone can rerun rather than a tally somebody kept.
 
 **The outbox arrives wired and empty**, which is the state to expect: the

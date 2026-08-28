@@ -1583,11 +1583,11 @@ be a second implementation of which substring each rule matches — and a
 fingerprint matching nothing is a stale entry that fails the build. Where
 `.github/secret-scan/` is absent it writes nothing and says nothing, which is
 the case in the scaffold suite's own synthetic root. The new service
-builds and its **seventy-eight** tests pass before a line of it is written,
-**thirty-five** of them against real SQL Server and RabbitMQ containers —
+builds and its **seventy-nine** tests pass before a line of it is written,
+**thirty-six** of them against real SQL Server and RabbitMQ containers —
 counts measured against a rendered service, by PR-18 when they read forty-one
 and sixteen three PRs after they stopped being true, again by PR-22 when they
-read fifty-six, and again by PR-32. The thirty-five is the
+read fifty-six, and twice by PR-32. The thirty-six is the
 `Category=Integration` count of §12.4, which is a filter rather than a tally.
 
 **Arithmetic is not a remeasurement, and the two rules that follow from that
@@ -1596,7 +1596,9 @@ total moved by four, so whoever changes what the scaffold copies renders
 `Yankee` and runs it rather than adding to the number here — which is what
 PR-32 did when ADR-037's marker suite joined the template: rendered, built, and
 run as `Yankee.Domain.Tests` (1), `Yankee.Application.Tests` (18) and
-`Yankee.Api.Tests` (59). The second rule is that this is the only figure in
+`Yankee.Api.Tests` (60) — **twice**, because the first render predated a test
+that the same pull request later added to the template, and the figures were
+stale between one commit and the next. The second rule is that this is the only figure in
 this section a reader cannot check from the tree, so it is the one to distrust
 first — a number three PRs stale here looks exactly like a number taken
 yesterday.

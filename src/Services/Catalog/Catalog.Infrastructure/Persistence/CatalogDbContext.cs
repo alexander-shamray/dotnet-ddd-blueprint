@@ -37,7 +37,7 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     /// reaches the entity through <c>Set&lt;InboxMessage&gt;()</c>, which is
     /// what lets one filter serve every service. The property is here so this
     /// context states its whole model, and so §12.4's tests can read the table
-    /// the way they read the other one.
+    /// the way they read the other two.
     /// </summary>
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
 
@@ -65,11 +65,14 @@ public sealed class CatalogDbContext(DbContextOptions<CatalogDbContext> options)
     }
 
     /// <summary>
-    /// §7.2's global conventions. They cover a model with no properties today,
-    /// which is the argument for landing them now: an unbounded
+    /// §7.2's global conventions. They landed while the model had no properties
+    /// at all, and that timing was the argument: an unbounded
     /// <c>NVARCHAR(MAX)</c> is cheap to prevent and expensive to migrate, and a
     /// convention introduced after the first entity silently changes a column
-    /// that already exists.
+    /// that already exists. They now govern every row this context maps —
+    /// named rather than listed, because an inventory here is a second copy of
+    /// the <c>DbSet</c>s above and it was already false of three technical
+    /// tables before §8.5's marker made it four.
     /// </summary>
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {

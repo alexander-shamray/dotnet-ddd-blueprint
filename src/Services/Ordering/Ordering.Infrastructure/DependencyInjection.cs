@@ -248,15 +248,14 @@ public static class DependencyInjection
         // registers it. The fixture adds that singleton itself, for the one
         // reason it needs one: driving a single pass with no timer to race.
         //
-        // Registered after the bus, and the order is a shutdown decision
-        // rather than a startup one: hosted services stop in reverse, so the
-        // last one registered is the first one stopped. With the dispatcher
-        // last it stops first, and the transport it publishes through is
-        // still up while it drains. Registered before the bus, every
-        // deployment would stop the broker underneath a dispatcher still
+        // Registered after the bus and before the purge, and the order is a
+        // shutdown decision rather than a startup one: hosted services stop in
+        // reverse, so the dispatcher stops while the transport it publishes
+        // through is still up and drains into it. Registered before the bus,
+        // every deployment would stop the broker underneath a dispatcher still
         // claiming rows — publish failures and backoff on a healthy service,
         // once per deploy. Startup runs the other way for the same reason:
-        // validator, bus, dispatcher.
+        // validator, bus, dispatcher, purge.
         services.AddHostedService<OutboxDispatcher>();
 
         // §9.4's, §9.5's and §8.5's retention, in the one hosted service §9.5

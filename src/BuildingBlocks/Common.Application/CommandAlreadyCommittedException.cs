@@ -1,8 +1,10 @@
 namespace Common.Application;
 
 /// <summary>
-/// The command under this key has already committed, and its outcome was never
-/// recorded. Nothing ran.
+/// The command under this key has already committed, and its outcome is not
+/// available to hand back. Nothing ran on <em>this</em> attempt — §6.3 refuses
+/// before the handler — and the earlier one may well have run to completion;
+/// the two paths are in the remarks.
 /// </summary>
 /// <remarks>
 /// <b>This is the answer §8.5 owed and could not give.</b> Its release table

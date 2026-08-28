@@ -46,7 +46,7 @@ public sealed class OrderingDbContext(DbContextOptions<OrderingDbContext> option
     /// reaches the entity through <c>Set&lt;InboxMessage&gt;()</c>, which is
     /// what lets one filter serve every service. The property is here so this
     /// context states its whole model, and so §12.4's tests can read the table
-    /// the way they read the other one.
+    /// the way they read the other two.
     /// </summary>
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
 

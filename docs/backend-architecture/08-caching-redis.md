@@ -712,9 +712,13 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 > `Result.Failure<T>(e)` all throw `InvalidOperationException` carrying the
 > accessor's own message. So the naive body fails on the ordinary success path
 > rather than under an unusual fault, and it fails *after* §6.3 has committed:
-> the caller sees 500 for an order that exists, and a retry of the same
-> `CommandId` places a second one. **A protection that produces the duplicate
-> write it was added to prevent.**
+> the caller sees 500 for an order that exists. **What the retry then does is
+> the one thing in this trap the marker changed.** `Capture` still runs after
+> `next()` returns, so the throw is still after the commit — but the marker
+> committed with it, so the retry claims a free Redis key and meets
+> `CommandAlreadyCommittedException` instead of placing a second order. The
+> naive body still turns a succeeded command into a 500 and still loses the
+> result; it no longer produces the duplicate write it was added to prevent.
 >
 > Adding a `[JsonConstructor]` and non-throwing accessors to `Result` is the
 > other way out and is refused — though not for the reason that suggests

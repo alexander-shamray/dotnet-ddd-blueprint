@@ -14,8 +14,12 @@ namespace Common.Application;
 /// — an attempt that claimed the key and then failed to record what happened.
 /// That entry stays in progress until the retention expires, so this exception
 /// is what every retry meets until then. §8.5's release table argues why
-/// holding is the right answer there: the work may be durable, and releasing
-/// would permit the duplicate write outright rather than postponing it.
+/// holding is still the right answer there, and the reason moved with
+/// ADR-037: it postpones the replay of an outcome that was never stored, where
+/// it used to postpone the duplicate. A release would no longer permit the
+/// second commit — <see cref="CommandAlreadyCommittedException"/> is what
+/// refuses that now — so what holding buys is the caller meeting one refusal
+/// rather than two.
 /// </para>
 /// </remarks>
 public sealed class ConcurrentRequestException(Guid commandId)

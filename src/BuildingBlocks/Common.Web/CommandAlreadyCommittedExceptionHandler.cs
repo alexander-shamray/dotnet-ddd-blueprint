@@ -23,11 +23,14 @@ namespace Common.Web;
 /// duplicate write back, one release later.
 /// <para>
 /// <b>409 and not 200, which is the tempting answer.</b> The work committed, so
-/// answering success reads as tidy — and there is nothing to answer with: the
-/// attempt that committed threw before it returned a result, so §8.5's store
-/// never recorded an outcome to replay. A 200 with no body would be a
-/// success-shaped response to a request whose result this service cannot
-/// produce, which is worse than a conflict the client can act on.
+/// answering success reads as tidy — and there is nothing to answer with. On
+/// the lost acknowledgement the attempt threw before returning, so §8.5's store
+/// never recorded an outcome; on the commoner path it recorded one that has
+/// since expired under a longer-lived marker. Either way the result is gone,
+/// which is why the <c>Detail</c> below says <i>no longer available</i> rather
+/// than naming a cause. A 200 with no body would be a success-shaped response
+/// to a request whose result this service cannot produce, which is worse than
+/// a conflict the client can act on.
 /// </para>
 /// <para>
 /// <b>It is distinguishable from its neighbour only by <c>Detail</c>, and that
