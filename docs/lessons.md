@@ -35,15 +35,23 @@ of these disagrees with a blueprint chapter, the chapter wins and the
 disagreement is a bug report against one of them.
 
 > **This file is outside the blueprint tree, so nothing structural catches its
-> drift.** It is in no index and behind no nav footer, like every document
-> under `docs/` that is not the blueprint tree. `/check-links` does not reach
-> it and `/validate-blueprint` does not name it — `testing.md` and
-> `roadmap.md` are the only two of those siblings it does. The one rule in
-> `CLAUDE.md` covers this file, and that is all that does.
+> drift.** `/check-links` checks `docs/backend-architecture/` and the root
+> README's entry point into it, so a file anywhere else is outside its scope
+> whatever links it, and `/validate-blueprint` does not name this one —
+> `testing.md` and `roadmap.md` are the only two of those siblings it does. The
+> one rule in `CLAUDE.md` covers this file, and that is all that does.
 >
 > **The siblings are described rather than listed on purpose.** Three copies of
 > this callout named three different sets the moment two new files arrived,
 > which is what a list with no code to check it against does.
+>
+> **A predicate is only better than a list if it is true.** These three
+> callouts first said this file is in no index “like every document under
+> `docs/` that is not the blueprint tree”, which is false twice over:
+> `docs/runbooks/README.md` is an index of the runbooks beside it, and the
+> root `README.md` links `docs/roadmap.md`. Scope is the durable fact and
+> being unindexed never was — a false predicate is a stale list with an
+> argument in front of it.
 
 ---
 
