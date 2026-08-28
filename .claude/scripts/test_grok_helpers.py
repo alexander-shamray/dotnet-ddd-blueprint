@@ -2384,7 +2384,7 @@ class SafeTokenActuallyReduces(unittest.TestCase):
     reimplemented here: *the engine under test is the engine that ships*, which
     is the rule this file was written to. Inputs go in through the environment,
     because this host re-parses argv on its way into bash.exe and a `"` inside
-    an argument does not arrive — a divergence CLAUDE.md records, and the
+    an argument does not arrive — a divergence docs/lessons.md records, and the
     reason a test that passed a quoted pattern once reported the pattern as
     broken when it was fine.
     """
