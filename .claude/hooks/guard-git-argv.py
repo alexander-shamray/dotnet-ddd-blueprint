@@ -221,24 +221,42 @@ def heredoc_spans(command):
     for index, in_quotes, in_comment in shell_positions(command):
         if in_quotes or in_comment:
             continue
-        if command.startswith("<<", index) and (not openers or index >= openers[-1][1]):
+        if command.startswith("<<", index) and (not openers or index >= openers[-1][0]):
             match = HEREDOC.match(command, index)
             if match:
                 openers.append((match.end(), match.group(1), match.group(2)))
 
-    spans, cursor = [], 0
-    for start, quote, delimiter in openers:
-        if start < cursor:
+    spans, pending = [], 0
+    for intro_end, quote, delimiter in openers:
+        # An introducer sitting inside an earlier body is body text, not an
+        # opener. Containment, not "before the cursor" — two heredocs stacked on
+        # ONE line both introduce before either body starts, so an ordering test
+        # discards the second.
+        if any(start <= intro_end < end for start, end, _ in spans):
             continue
-        after = command[start:]
-        closing = re.search(rf"^\s*{re.escape(delimiter)}\s*$", after, re.MULTILINE)
+
+        # **A body begins on the NEXT LINE, and taking it to begin at the
+        # introducer was a third admitted force push.** Everything between the
+        # introducer and that newline is still command line, so
+        # `cat <<'A' ; git push origin +HEAD:main` had the push swallowed as
+        # data and the hook returned nothing. Verified under bash: it runs.
+        newline = command.find("\n", intro_end)
+        if newline == -1:
+            # An introducer with no line after it opens no body at all.
+            continue
+
+        # Stacked bodies queue: the second starts where the first terminated,
+        # which is past its own line break.
+        start = max(newline + 1, pending)
+        closing = re.search(
+            rf"^\s*{re.escape(delimiter)}\s*$", command[start:], re.MULTILINE)
         if closing is None:
             # Unterminated: the whole tail is body. Treating it as one is right
             # — an unterminated heredoc is not a command line either.
             spans.append((start, len(command), not quote))
             break
-        cursor = start + closing.end()
-        spans.append((start, cursor, not quote))
+        pending = start + closing.end()
+        spans.append((start, pending, not quote))
     return spans
 
 

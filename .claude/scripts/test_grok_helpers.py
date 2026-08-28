@@ -3761,6 +3761,62 @@ class TheGitArgvGuard(unittest.TestCase):
             f"git commit -F - <<EOF{NEWLINE}\\$(git push origin +HEAD:main){NEWLINE}EOF"
         )
 
+    def test_a_heredoc_body_begins_on_the_next_line(self):
+        # **A third admitted force push, and the oldest of them.** The stripper
+        # took a body to begin at the introducer, so everything between the
+        # introducer and the line break went with it —
+        # `cat <<'A' ; git push origin +HEAD:main` had the push swallowed as
+        # data and the hook returned no offence at all. Verified under bash with
+        # a `git` shim: `cat` prints the body and the push then runs.
+        #
+        # Found by probing the shapes adjacent to a fix rather than by review,
+        # which is the only reason it is in this commit and not the next one.
+        self.assertRefused(
+            f"cat <<'A' ; git push origin +HEAD:main{NEWLINE}hello{NEWLINE}A"
+        )
+        self.assertRefused(
+            f"cat <<A && git push origin +HEAD:main{NEWLINE}hello{NEWLINE}A"
+        )
+
+        # The control: with nothing after the introducer the body is the whole
+        # of the next line, and a push named in it is still data.
+        self.assertAdmitted(
+            f"git commit -F - <<'A'{NEWLINE}git push origin +HEAD:main{NEWLINE}A"
+        )
+
+    def test_two_heredocs_on_one_line_stack(self):
+        # `cat <<A <<B` introduces both bodies before either starts: A's body
+        # begins on the next line and B's begins where A terminated. Two
+        # separate defects sat here, and neither was reachable with one heredoc.
+        #
+        # **The hook CRASHED** on this input for one commit — a refactor moved
+        # the introducer's end from tuple slot 1 to slot 0 and the
+        # opener-in-a-body test kept reading slot 1, which is now the delimiter
+        # quote. `int >= str` is a TypeError, and 206 tests passed anyway
+        # because none of them used two.
+        #
+        # And an ordering test discarded the second opener, because B
+        # introduces BEFORE A's body starts. Containment is the right test.
+        self.assertAdmitted(
+            f"cat <<'A' <<'B'{NEWLINE}$(git push origin +HEAD:main){NEWLINE}A"
+            f"{NEWLINE}$(git push origin +HEAD:main){NEWLINE}B"
+        )
+        self.assertRefused(
+            f"cat <<A <<B{NEWLINE}quiet{NEWLINE}A"
+            f"{NEWLINE}$(git push origin +HEAD:main){NEWLINE}B"
+        )
+
+    def test_process_substitution_is_a_command(self):
+        # `<(…)` and `>(…)` are executed by the shell, and the guard reaches
+        # them through the tokeniser rather than through `substitutions` —
+        # `punctuation_chars` splits the parens off, so the inner `git` stands
+        # alone as its own segment. Pinned because that is a property of the
+        # lexer configuration, not of anything this file says out loud, and the
+        # commit that switched `commenters` off is exactly the kind of change
+        # that could take it away.
+        self.assertRefused("git log <(git push origin +HEAD:main)")
+        self.assertRefused("git log >(git push origin +HEAD:main)")
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an
