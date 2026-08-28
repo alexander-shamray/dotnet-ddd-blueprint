@@ -38,6 +38,13 @@ public static class ProblemDetailsExtensions
         // mechanism working correctly.
         services.AddExceptionHandler<ConcurrentRequestExceptionHandler>();
 
+        // §8.5's durable refusal, the third producer of that same 409 and the
+        // one the marker made reachable. §6.3 raises it when a command's key
+        // already carries a committed marker, so without a line here a retry of
+        // work that is already done is reported as a 500 — which invites the
+        // retry the exception exists to refuse.
+        services.AddExceptionHandler<CommandAlreadyCommittedExceptionHandler>();
+
         return services.AddProblemDetails(options =>
             options.CustomizeProblemDetails = context =>
             {

@@ -1,3 +1,4 @@
+using Common.Application;
 using Common.Infrastructure.Messaging;
 using Shouldly;
 using Xunit;
@@ -21,6 +22,8 @@ namespace Common.Infrastructure.Tests;
 /// </remarks>
 public class RetentionPolicyTests
 {
+    private static readonly TimeSpan OneSecond = TimeSpan.FromSeconds(1);
+
     [Fact]
     public void The_defaults_are_the_documented_ones()
     {
@@ -28,6 +31,7 @@ public class RetentionPolicyTests
 
         policy.OutboxWindow.ShouldBe(TimeSpan.FromDays(7));
         policy.InboxWindow.ShouldBe(TimeSpan.FromDays(7));
+        policy.IdempotencyWindow.ShouldBe(TimeSpan.FromDays(7));
         policy.BatchSize.ShouldBe(5000);
         policy.Interval.ShouldBe(TimeSpan.FromHours(1));
         policy.MaxBatchesPerPass.ShouldBe(20);
@@ -46,6 +50,64 @@ public class RetentionPolicyTests
             () => new RetentionPolicy { InboxWindow = TimeSpan.FromDays(-1) });
         Should.Throw<ArgumentOutOfRangeException>(
             () => new RetentionPolicy { InboxWindow = TimeSpan.Zero });
+    }
+
+    [Fact]
+    public void The_marker_window_cannot_be_shorter_than_the_claim_it_backs_up()
+    {
+        // §8.5's Redis claim expires; the marker is what refuses a retry after
+        // that. Purging markers sooner leaves a stretch in which the key is
+        // claimable again and nothing remembers the commit — the duplicate
+        // write this platform guarantees does not happen, arriving at a
+        // boundary set by a retention number.
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window - OneSecond });
+
+        // MATCHING THE CLAIM EXACTLY IS REFUSED, and this assertion used to say
+        // the opposite — "equal is admitted, and it is the smallest window with
+        // no gap in it". It is not gap-free. `CompleteAsync` re-arms the
+        // claim's expiry at the commit, the same event that stamps
+        // `CommittedAt`, so equality aims both expiries at one nominal instant
+        // and leaves no margin; the two are then counted by different clocks —
+        // Redis's, against the purging pod's clock minus the writing pod's
+        // timestamp, across three replicas — and any skew in the wrong
+        // direction purges the marker first. The floor carries an allowance for
+        // that, so the smallest admissible window is the claim plus it.
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window });
+
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.MarkerFloor - OneSecond });
+
+        // The floor itself is admitted, and is the smallest window that is.
+        new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.MarkerFloor }
+            .IdempotencyWindow
+            .ShouldBe(IdempotencyRetention.MarkerFloor);
+
+        // And the floor does not replace the other checks: a negative window is
+        // still refused as one rather than as a value below the floor, which is
+        // the message an operator reads.
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { IdempotencyWindow = TimeSpan.FromDays(-1) });
+    }
+
+    [Fact]
+    public void The_default_marker_window_satisfies_the_floor_the_init_enforces()
+    {
+        // The floor above is enforced by an `init`, and a field initialiser
+        // does not go through one — which is the shape every window here has,
+        // and harmless for the other two because they answer to nothing. This
+        // one does. Both services register `new RetentionPolicy()`, so the
+        // default IS the shipped value and the only value that never meets the
+        // validator; raising IdempotencyRetention.Window past seven days —
+        // which is the tuning that type exists to make possible — would ship
+        // every service a policy violating its own floor, with the test above
+        // still green because it only ever exercises the explicit path.
+        new RetentionPolicy()
+            .IdempotencyWindow
+            .ShouldBeGreaterThanOrEqualTo(
+                IdempotencyRetention.MarkerFloor,
+                "the default is the one value the init validator never sees");
     }
 
     [Fact]

@@ -214,6 +214,18 @@ test, or in source.
 > That is why the local-development defaults below are enumerated there once
 > per site: rotating one becomes a reconciliation that file lists.
 >
+> **A person is no longer the only thing that writes to it**, and that is worth
+> knowing before you read a block you did not add. §4.5's scaffold runs this
+> scanner over the service it has just rendered and appends one entry per
+> finding under its own paths (#161) — because the equivalent literals for a
+> hand-built service were added by hand the day that service landed, and a
+> rendered one could otherwise not be committed at all. The entries carry the
+> fingerprints the scanner reported rather than any the scaffold computed: a
+> digest worked out independently would be a second implementation of which
+> substring each rule matches, and being wrong at it produces an entry matching
+> nothing — which is the stale-entry failure above, arriving from the tool that
+> exists to prevent it.
+>
 > **A documented control that does not exist is worse than an absent one**,
 > and this callout said exactly that while there was no scanner (#119). It
 > stays here in that form because the sentence is now about the gate's limits

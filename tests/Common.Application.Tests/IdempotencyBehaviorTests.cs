@@ -19,8 +19,9 @@ public class IdempotencyBehaviorTests
 
     private static IdempotencyBehavior<ProtectedCommand, Result<Guid>> Behaviour(
         RecordingIdempotencyStore store,
-        ICurrentUser? user = null) =>
-        new(store, user ?? StubCurrentUser.Authenticated(Caller));
+        ICurrentUser? user = null,
+        IdempotencyContext? idempotency = null) =>
+        new(store, user ?? StubCurrentUser.Authenticated(Caller), idempotency ?? new IdempotencyContext());
 
     [Fact]
     public async Task A_first_attempt_claims_the_key_runs_the_handler_and_records_the_outcome()
@@ -121,7 +122,7 @@ public class IdempotencyBehaviorTests
         int handlerRuns = 0;
 
         IdempotencyBehavior<VoidProtectedCommand, Result> behaviour =
-            new(store, StubCurrentUser.Authenticated(Caller));
+            new(store, StubCurrentUser.Authenticated(Caller), new IdempotencyContext());
 
         Result result = await behaviour.HandleAsync(
             new VoidProtectedCommand(Command),
@@ -164,7 +165,8 @@ public class IdempotencyBehaviorTests
         await Should.ThrowAsync<ConcurrentRequestException>(
             () => new IdempotencyBehavior<ProtectedCommand, Result<Guid>>(
                     vanishing,
-                    StubCurrentUser.Authenticated(Caller))
+                    StubCurrentUser.Authenticated(Caller),
+                    new IdempotencyContext())
                 .HandleAsync(
                     new ProtectedCommand(Command),
                     () => Task.FromResult(Result.Success(Guid.CreateVersion7())),
@@ -393,6 +395,103 @@ public class IdempotencyBehaviorTests
         store.Tokens["claim"].ShouldBe(cancelled.Token);
         store.Tokens["release"].ShouldBe(CancellationToken.None);
         store.Entries.ShouldNotContainKey(ExpectedKey);
+    }
+
+    [Fact]
+    public async Task A_claimed_key_is_published_for_the_transaction_to_mark()
+    {
+        // §6.3 writes the durable marker and cannot build this key: the subject
+        // comes from a principal this behaviour binds and the operation from a
+        // static abstract member reachable only through the IIdempotentCommand
+        // constraint. Carrying it is what keeps one key shape rather than two.
+        // Read from INSIDE next(), because that is the only moment it is true:
+        // §6.3 opens its transaction there, and the key is cleared on the way
+        // out so it cannot outlive the dispatch. Asserting after HandleAsync
+        // returns would be asserting the leak the finally exists to prevent.
+        RecordingIdempotencyStore store = new();
+        IdempotencyContext idempotency = new();
+        string? seen = null;
+
+        await Behaviour(store, idempotency: idempotency).HandleAsync(
+            new ProtectedCommand(Command),
+            () =>
+            {
+                seen = idempotency.Key;
+                return Task.FromResult(Result.Success(Guid.CreateVersion7()));
+            },
+            TestContext.Current.CancellationToken);
+
+        seen.ShouldBe(ExpectedKey);
+    }
+
+    [Theory]
+    [InlineData(nameof(Outcome.Success))]
+    [InlineData(nameof(Outcome.Failure))]
+    [InlineData(nameof(Outcome.Throws))]
+    public async Task The_key_does_not_outlive_the_dispatch_that_claimed_it(string outcome)
+    {
+        // A DI scope is not promised to serve one command — an endpoint or an
+        // integration-event handler may dispatch twice — and a key left
+        // standing is captured by the NEXT command's transaction. That command
+        // then meets this command's marker and is refused with
+        // CommandAlreadyCommittedException having never been protected by
+        // anything; where this attempt FAILED, it is worse, because the next
+        // command commits and writes a marker naming this command's work.
+        //
+        // All three exits, because the clear is in a finally and a finally is
+        // exactly the construct whose absence is invisible on the path the
+        // author was thinking about. Nothing in this platform dispatches twice
+        // per scope today, which is what makes this the premise a later caller
+        // falsifies rather than a bug anybody would hit first.
+        RecordingIdempotencyStore store = new();
+        IdempotencyContext idempotency = new();
+
+        Task<Result<Guid>> dispatch = Behaviour(store, idempotency: idempotency).HandleAsync(
+            new ProtectedCommand(Command),
+            () => outcome switch
+            {
+                nameof(Outcome.Success) => Task.FromResult(Result.Success(Guid.CreateVersion7())),
+                nameof(Outcome.Failure) => Task.FromResult(
+                    Result.Failure<Guid>(Error.Rule("test.refused", "The domain said no."))),
+                _ => throw new InvalidOperationException("handler exploded")
+            },
+            TestContext.Current.CancellationToken);
+
+        if (outcome == nameof(Outcome.Throws))
+            await Should.ThrowAsync<InvalidOperationException>(() => dispatch);
+        else
+            await dispatch;
+
+        idempotency.Key.ShouldBeNull();
+    }
+
+    /// <summary>The three ways out of a dispatch, named so the theory reads.</summary>
+    private enum Outcome
+    {
+        Success,
+        Failure,
+        Throws
+    }
+
+    [Fact]
+    public async Task A_replay_publishes_no_key_because_it_opens_no_transaction()
+    {
+        // The claim failed and the stored outcome is returned without next()
+        // ever being called, so there is no transaction to mark — and a key
+        // left on the context would be marked by whatever ran next in the same
+        // scope. Published after the claim rather than beside the key, which is
+        // what makes this hold.
+        RecordingIdempotencyStore store = new();
+        store.Completed(ExpectedKey, $"\"{Guid.CreateVersion7()}\"");
+        IdempotencyContext idempotency = new();
+
+        Result<Guid> result = await Behaviour(store, idempotency: idempotency).HandleAsync(
+            new ProtectedCommand(Command),
+            () => throw new InvalidOperationException("the handler must not run on a replay"),
+            TestContext.Current.CancellationToken);
+
+        result.IsSuccess.ShouldBeTrue();
+        idempotency.Key.ShouldBeNull();
     }
 
     private static string ExpectedKey => $"{Caller}:{ProtectedCommand.OperationName}:{Command}";

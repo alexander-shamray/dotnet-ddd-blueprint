@@ -13,11 +13,11 @@ namespace Catalog.Infrastructure.Persistence.Migrations;
 /// <b>The table ships to every service, including the ones that consume
 /// nothing.</b> Catalog binds no receive endpoint yet (§3.2 gives it one
 /// Consumes cell, owned by a service that does not exist), so nothing writes a
-/// row here — but <c>RetentionPurgeService</c> runs from first boot and purges
-/// both tables, and a purge against a table that is not there logs a failure
-/// every pass. That is the same argument that keeps <c>AddOutbox</c> in the
-/// scaffold's output, inverted: the dispatcher would fail a claim, this would
-/// fail a delete.
+/// row here — but <c>RetentionPurgeService</c> runs from first boot and deletes
+/// from every table it was given, and a purge against a table that is not there
+/// logs a failure every pass. That is the same argument that keeps
+/// <c>AddOutbox</c> in the scaffold's output, inverted: the dispatcher would
+/// fail a claim, this would fail a delete.
 /// <para>
 /// <b><c>Endpoint</c> carries a binary collation because it is half a key.</b>
 /// SQL Server's default is case-insensitive and a broker's queue names are

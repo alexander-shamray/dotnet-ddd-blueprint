@@ -1,10 +1,14 @@
 using System.Runtime.CompilerServices;
+using Common.Application;
 
 namespace Common.Infrastructure.Messaging;
 
 /// <summary>
-/// How long processed outbox rows and handled inbox rows are kept, and how the
-/// purge that deletes them is paced (§9.4, §9.5). A registered value for
+/// How long processed outbox rows, handled inbox rows and §8.5's committed
+/// idempotency markers are kept, and how the purge that deletes them is paced
+/// (§9.4, §9.5, §8.5). Two of those windows are housekeeping and the third is
+/// a correctness setting — see <see cref="IdempotencyWindow"/>, which is the
+/// only one here with a floor. A registered value for
 /// <see cref="Outbox.OutboxTable"/>'s reason one indirection over: the numbers
 /// are a service's to choose, and a <c>const</c> in common code is a choice made
 /// once for everybody.
@@ -41,6 +45,7 @@ public sealed record RetentionPolicy
 {
     private readonly TimeSpan _outboxWindow = TimeSpan.FromDays(7);
     private readonly TimeSpan _inboxWindow = TimeSpan.FromDays(7);
+    private readonly TimeSpan _idempotencyWindow = TimeSpan.FromDays(7);
     private readonly TimeSpan _interval = TimeSpan.FromHours(1);
     private readonly int _batchSize = 5000;
     private readonly int _maxBatchesPerPass = 20;
@@ -57,6 +62,48 @@ public sealed record RetentionPolicy
     {
         get => _inboxWindow;
         init => _inboxWindow = InRange(value, MaxWindow);
+    }
+
+    /// <summary>
+    /// Idempotency markers committed longer ago than this are deleted, and
+    /// this window <em>is</em> §8.5's guarantee rather than a housekeeping
+    /// setting.
+    /// </summary>
+    /// <remarks>
+    /// <b>It has a floor the other two do not, and the floor is
+    /// <see cref="IdempotencyRetention.MarkerFloor"/> — the claim's own window
+    /// plus the margin its expiry has to lead by.</b> The marker is what
+    /// refuses a retry of a
+    /// command that committed, and the order the two expire in is the whole of
+    /// the constraint. While the Redis claim is alive the key is not claimable
+    /// at all, so a purged marker costs nothing yet; the gap opens when that
+    /// claim expires with the marker already gone, and the next retry then
+    /// claims a free key and runs the command a second time — the duplicate
+    /// write §8.5 exists to prevent, arriving at a boundary set by a retention
+    /// number, which is the least visible place a correctness property could be
+    /// lost.
+    /// <para>
+    /// <b>Matching the claim exactly does not close that gap, which is why the
+    /// floor is not simply <see cref="IdempotencyRetention.Window"/>.</b> Two
+    /// independent things reorder the expiries. The windows do not start at the
+    /// same event — <c>CommittedAt</c> is stamped inside the transaction and
+    /// the claim is re-armed after it commits, so the claim's starts later by
+    /// the commit's tail — and they are not counted by the same clock, the
+    /// marker's age being the purging pod's against a timestamp the writing
+    /// pod stamped, across three replicas.
+    /// <see cref="IdempotencyRetention.MarkerLeadAllowance"/> bounds their sum,
+    /// and argues its own width.
+    /// </para>
+    /// <para>
+    /// Read rather than restated, for the reason
+    /// <see cref="IdempotencyRetention"/> exists: two 24s in two files agree
+    /// until one of them is edited.
+    /// </para>
+    /// </remarks>
+    public TimeSpan IdempotencyWindow
+    {
+        get => _idempotencyWindow;
+        init => _idempotencyWindow = AtLeast(InRange(value, MaxWindow), IdempotencyRetention.MarkerFloor);
     }
 
     /// <summary>
@@ -146,6 +193,27 @@ public sealed record RetentionPolicy
                 $"{member} must be positive and at most {maximum}. A retention setting outside " +
                 "that range does not fail where it is set — it deletes rows that were just " +
                 "written, purges nothing at all, or throws where the exception is swallowed.");
+
+    private static TimeSpan AtLeast(
+        TimeSpan value,
+        TimeSpan floor,
+        [CallerMemberName] string member = "") =>
+        value >= floor ? value
+            : throw new ArgumentOutOfRangeException(
+                member,
+                value,
+                $"{member} must be at least {floor} — how long §8.5's Redis claim survives, " +
+                "plus the margin its expiry has to lead by — and the order of the two expiries " +
+                "is the whole of why. A shorter window purges the marker first; the claim then " +
+                "expires with nothing left to remember the commit, so the next retry claims a " +
+                "free key and runs the command a second time. Matching the claim exactly is " +
+                "refused rather than admitted as the exact fit, because two things reorder the " +
+                "expiries: the marker is stamped inside the transaction and the claim re-armed " +
+                "after it commits, so the claim's window starts later by the commit's tail; and " +
+                "the marker's age is the purging pod's clock minus a timestamp the writing pod " +
+                "stamped, so any skew between them moves it again. Either one deletes the marker " +
+                "first, and the write this platform guarantees happens once happens twice at a " +
+                "boundary set by a retention setting.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

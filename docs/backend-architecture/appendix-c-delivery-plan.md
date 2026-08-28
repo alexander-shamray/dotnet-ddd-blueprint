@@ -131,7 +131,7 @@ the thing it defers to is complete.
 
 | PR | Title | Depends | Delivers |
 |---|---|---|---|
-| **28** | `feat(common): §8.5's idempotency behaviour and Redis store` | 12, 18, 10 | The six types §8.5 specifies — `IIdempotencyStore`, `IdempotencyEntry`, `IIdempotentCommand`, `IdempotencyBehavior<,>`, `ConcurrentRequestException`, `RedisIdempotencyStore` — the fourth pipeline seat in both services, and the two commands that opt in. **Four things were found by building it.** `AddRedisConnections` had **no caller anywhere in `src/`**: PR-12 built §8's whole Redis stack and wired it into no host, so the behaviour could not have resolved its store and this PR carries §8's deployment wiring too — Compose, both charts, both API fixtures. `IIdempotentCommand` gained the `static abstract OperationName` §8.5 had argued for and declined, because the argument for declining — that a member on the opted-in interface is a change to the contract every command implements — is true only once the interface *has* implementors, and this is the PR that declares it; deferring it would have meant paying the migration against live keys. The store went to `Common.Infrastructure.Redis` rather than the service's own Infrastructure that §8.5 printed, because `RedisDistributedLockFactory` sits one file over on the same connection with the same keying and two per-service copies of one Redis interaction drift. And the opt-in gate this PR adds **found a defect in this PR**: `PublishProductCommand` had been given the `CommandId` field and not the interface, so it compiled, passed every other test, and was dispatched unprotected — the exact silent state the gate exists for. **Two things are named as owed rather than built.** The SQL-side marker that closes the lost commit acknowledgement is still §8.5's debt, and the stored payload still carries an implicit schema for the retention, so changing an idempotent command's result shape remains a migration |
+| **28** | `feat(common): §8.5's idempotency behaviour and Redis store` | 12, 18, 10 | The six types §8.5 specifies — `IIdempotencyStore`, `IdempotencyEntry`, `IIdempotentCommand`, `IdempotencyBehavior<,>`, `ConcurrentRequestException`, `RedisIdempotencyStore` — the fourth pipeline seat in both services, and the two commands that opt in. **Four things were found by building it.** `AddRedisConnections` had **no caller anywhere in `src/`**: PR-12 built §8's whole Redis stack and wired it into no host, so the behaviour could not have resolved its store and this PR carries §8's deployment wiring too — Compose, both charts, both API fixtures. `IIdempotentCommand` gained the `static abstract OperationName` §8.5 had argued for and declined, because the argument for declining — that a member on the opted-in interface is a change to the contract every command implements — is true only once the interface *has* implementors, and this is the PR that declares it; deferring it would have meant paying the migration against live keys. The store went to `Common.Infrastructure.Redis` rather than the service's own Infrastructure that §8.5 printed, because `RedisDistributedLockFactory` sits one file over on the same connection with the same keying and two per-service copies of one Redis interaction drift. And the opt-in gate this PR adds **found a defect in this PR**: `PublishProductCommand` had been given the `CommandId` field and not the interface, so it compiled, passed every other test, and was dispatched unprotected — the exact silent state the gate exists for. **Two things are named as owed rather than built.** The SQL-side marker that closes the lost commit acknowledgement is §8.5's debt — **paid by PR-32 below, which is the only row in this section a row above it predicted** — and the stored payload still carries an implicit schema for the retention, so changing an idempotent command's result shape remains a migration |
 
 **The second row is the same failure in a different direction, and it is worth
 naming as such.** §8.5 was a mechanism no row delivered; §15.1's secret scan was
@@ -198,6 +198,41 @@ the twenty-seven rows above would have no reason to look for any of that.
 | PR | Title | Depends | Delivers |
 |---|---|---|---|
 | **31** | `fix(messaging): the broker has a per-service identity` | 21, 13 | Two RabbitMQ accounts and their permissions in `deploy/compose/rabbitmq/definitions.json`, imported at broker start by `20-commerce.conf`, plus `check_permissions.py` and a workflow of its own. **`guest` is gone**, and the mechanism is worth naming because it is not a deletion: RabbitMQ seeds the default user only when it boots with an empty database and skips that when definitions are imported — so a stale volume keeps the account, and `down -v` is what makes the removal true. **The permissions are a measurement.** Read off a running broker with both services connected and an order placed, then corrected three times by running it again: `Common.Contracts:IIntegrationEvent` is MassTransit's polymorphic exchange and a `Common\.Contracts\.` pattern misses it by one token; `MassTransit:ReceiveFault` never appears on a healthy stack, so a topology capture cannot show it — **a runtime capture shows what RAN, not what CAN run**, which is why `payments-commands` is derived from `Endpoints.cs` and not from a broker; and `queue.bind` takes `read` on the destination exchange, so sending to a peer's queue needs more than `write`. **The exploit was attempted rather than argued**: as `catalog-svc`, all four of `ConfirmOrder` onto `ordering-commands`, a forged `OrderPlaced`, a `ReserveStock` and a forged `PaymentAuthorised` were refused by the broker, with a positive control publishing Catalog's own contract to prove the credential worked. The first probe reported every attempt ACCEPTED and was wrong — `basic_publish` is fire-and-forget, so a refusal arrives as a channel exception after the close, and only the broker log said otherwise. **Three residuals are stated rather than closed**: `configure` cannot be exclusive, because a consumer declares the exchange it binds; `read` on a peer's command endpoint grants the consume along with the bind, because a RabbitMQ pattern cannot tell a queue from an exchange; and provisioning the accounts on a deployed broker is an obligation this repository states and does not check, on §15.4's own terms |
+
+**The fifth row is the first one another row predicted, and that is what makes
+it a kind of its own.** PR-28, PR-29 and PR-31 were gaps in coverage — a
+mechanism no row delivered, half a node whose other half nobody owned, a control
+the plan never claimed to close — and PR-30 was a correction to a landed row.
+Nothing here is any of those. PR-28's row ends by naming two things it left
+owed, and the first of them is exactly what this row delivers: *the SQL-side
+marker that closes the lost commit acknowledgement is still §8.5's debt*. So
+the gap was neither missing nor mis-specified — it was **declared, in the row
+above, against an issue**
+([#113](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/113))
+that had no row saying who would pay it.
+
+**A named residual is the one kind of debt this section was already tracking,
+and it still needed a row.** The alternative was to leave it in PR-28's
+*Delivers* cell for ever, where a reader finds a sentence about work that is now
+done and cannot tell from the plan whether it ever was. **A row is how a
+residual stops being one**, and the test it has to pass is every other row's:
+whether a rule moved.
+
+[ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)
+moves one, and not a small one. §8.5's guarantee was *at most one commit per key
+within `Retention`, except across a lost acknowledgement*; it is now *at most
+one commit per key while the marker survives* — the exception goes, and the
+bound moves off a Redis TTL onto a retention window this repository sets, which
+is why that window is the only one of the three with a floor.
+[§6.3](06-cqrs.md)'s transaction gains a read before the handler and a write
+before the commit, [§10.5](10-api-gateway.md) gains a third producer of its 409,
+[§9.5](09-messaging.md)'s purge gains a third table, and §4.5's scaffold gains a
+migration, a configuration and a seventh shared file. A reader of the rows above
+would have no reason to look for any of that.
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **32** | `fix(common): §8.5's durable idempotency marker` | 28 | `IIdempotencyMarkerStore`, `IdempotencyContext`, `CommandAlreadyCommittedException` and `IdempotencyRetention` in `Common.Application`; `IdempotencyMarker`, `IdempotencyMarkerTable` and `EfIdempotencyMarkerStore` in `Common.Infrastructure`; `CommandAlreadyCommittedExceptionHandler` in `Common.Web`; and per service a mapped table, a migration, a third registered schema and a third retention purge with `RetentionPolicy.IdempotencyWindow` — the one window with a floor, because purging a marker early re-opens the duplicate at a boundary set by a housekeeping setting. **§6.3 does the reading and the writing**, and each of the three positions is argued rather than convenient: the key is captured **once** before the unit opens, because a nested dispatch would overwrite the scoped carrier mid-transaction; the marker is read **before** `next()`, so a command that already committed does no work rather than losing it to a constraint violation on the way out; and it is written **after** the failure guard and §2.3's aggregate-count check, so a command this transaction is about to refuse leaves nothing behind to refuse its retry with. **Holding the Redis claim was the cheaper alternative and does not work**: §8.5's own release table already says holding *postpones* the duplicate rather than preventing it — every entry has a TTL, so the attempt after expiry claims a free key and runs the command again — and it would cost every ordinary fault its retry for a day to buy that postponement. A row has no TTL. **Three things were found by building it.** The scaffold's `snapshot_from_designer` hard-coded `AddOutboxRetentionIndex` as the last template migration's class name, so a fifth migration made that literal the *second*-to-last and **every anchor in the function missed at once** — the run stopped, loudly, which was luck rather than design: it derives the name from the file the caller already holds now. And the two behaviours' broken forms are refused by the **build**, not by a test — deleting `idempotency.Claim(key)` is CS9113 for an unread primary-constructor parameter, and a `Claim` that assigns nothing is CA2245 or CA1822 — so the counterfactual for *is the key published at all* is the compiler, and the tests that needed a measured counterfactual are the ones about **where** each call sits. And **restoring a file with `shutil.copy2` restores its mtime along with its bytes**, so MSBuild found nothing to rebuild and the next `--no-build` run executed the assembly compiled from the broken version — five tests reported as failing against source that was already correct. That is the converse of this repository's existing rule about a counterfactual that does not rebuild, and it cost the most time of the three. It also closes [#161](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/161), because one pull request is one row: §4.5's scaffold now runs the real secret scanner over what it has rendered and writes one accepted-finding line per distinct finding into `.github/secret-scan/allowed-secrets.txt` — the seventh shared file it edits, and the difference between a service that renders and a service that can be committed. The fingerprints are the gate's own; a scaffold that computed them would be a second implementation of which substring each rule matches, wrong in silence. It degrades to writing nothing where `.github/secret-scan/` is absent, which is the scaffold suite's synthetic root |
 
 ## C.3 Dependency graph
 
@@ -268,11 +303,13 @@ flowchart TD
 **The graph is the plan and stops at PR-27. The *After the plan* rows are
 excluded by rule, not left out.** A row lands in that section only because the
 plan was already complete, so every pull request it depends on has already
-been delivered — PR-28's three, PR-29's one, PR-30's one — and that is
-structural rather than a coincidence of the three rows there today. A node
+been delivered — every entry in every `Depends` cell in that section — and
+that is structural rather than a coincidence of the rows there today. **The
+sentence used to enumerate them PR by PR, and was already a row short of its
+own section before this one landed.** A node
 whose predecessors are all landed cannot tell a reader anything they can act
 on: it can neither free a branch to start nor warn that one is blocked.
-Drawing them would buy a fourth transcription to keep in step, and a fifth
+Drawing them would buy one more transcription to keep in step, and another
 next time, in exchange for no scheduling information at all. **This was filed
 as #137 and closed this way**, rather than by adding the edges the issue
 proposed.

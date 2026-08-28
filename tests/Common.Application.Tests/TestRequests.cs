@@ -116,6 +116,29 @@ public sealed class ApproveHandler : ICommandHandler<Approve, Result>
         Task.FromResult(Result.Success());
 }
 
+/// <summary>
+/// A command whose handler moves the scope's idempotency key out from under
+/// §6.3, which is what a nested dispatch would do: the inner command's own
+/// <c>IdempotencyBehavior</c> claims a key of its own while the outer
+/// transaction is still open.
+/// </summary>
+/// <remarks>
+/// It exists to make §6.3's capture observable. Reading the context after
+/// <c>next()</c> rather than before it is a one-line change that no other test
+/// in this suite notices, and the row it would write carries the wrong
+/// command's key against the right command's rows.
+/// </remarks>
+public sealed record Reclaim(string Key) : ICommand<Result>;
+
+public sealed class ReclaimHandler(IdempotencyContext idempotency) : ICommandHandler<Reclaim, Result>
+{
+    public Task<Result> HandleAsync(Reclaim command, CancellationToken ct)
+    {
+        idempotency.Claim(command.Key);
+        return Task.FromResult(Result.Success());
+    }
+}
+
 public sealed class PingValidator : AbstractValidator<Ping>
 {
     public PingValidator() => RuleFor(x => x.Message).NotEmpty().WithErrorCode("Empty");

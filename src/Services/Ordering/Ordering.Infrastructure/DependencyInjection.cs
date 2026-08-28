@@ -6,6 +6,7 @@ using Ordering.Infrastructure.Observability;
 using Ordering.Infrastructure.Persistence;
 using Common.Application;
 using Common.Contracts;
+using Common.Infrastructure.Idempotency;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
@@ -79,6 +80,26 @@ public static class DependencyInjection
         // connection factory it wraps hands out a connection per use.
         services.AddScoped<IProductPriceReader, ProjectedPriceReader>();
 
+        // §8.5's durable half, beside the unit of work rather than in
+        // AddRedisConnections with its Redis sibling, because the two ports are
+        // backed by different systems and only this one has to land on the
+        // transaction EfUnitOfWork opens. It resolves the DbContext alias
+        // registered above, which is what puts the marker in that transaction.
+        //
+        // This line is TransactionBehavior's other constructor parameter, and
+        // it fails the same way IdempotencyContext would: ValidateOnBuild never
+        // constructs an open generic, so losing it surfaces on the first
+        // command this service dispatches. Its sibling got a descriptor test in
+        // Add<Service>Application's suite and this one deliberately did not —
+        // what covers it is IdempotencyMarkerTests, which resolves this port
+        // from the real container. That is a slower gate rather than an absent
+        // one, and the asymmetry is stated here so the next reader does not
+        // read it as an oversight: a descriptor test over this method needs
+        // four connection strings in configuration, and the fixtures for them
+        // are themselves credential-shaped literals somebody then has to
+        // allow-list.
+        services.AddScoped<IIdempotencyMarkerStore, EfIdempotencyMarkerStore>();
+
         // §7.5's two Infrastructure halves: the collector reads EF's change
         // tracker, the publisher writes the row on the same context. Both
         // scoped, because the context is — a singleton either side would
@@ -86,16 +107,18 @@ public static class DependencyInjection
         services.AddScoped<IDomainEventCollector, EfDomainEventCollector>();
         services.AddScoped<IIntegrationEventPublisher, OutboxPublisher>();
 
-        // The schema the dispatcher's three statements and the purge's two are
-        // composed against. Values rather than literals in
-        // Common.Infrastructure, because that assembly is every service's
-        // (§9.4, §9.5) — and both built from one local, so the two tables
-        // cannot end up naming different schemas.
+        // The schema the dispatcher's statements and the purge's are composed
+        // against. Values rather than literals in Common.Infrastructure,
+        // because that assembly is every service's (§9.4, §9.5, §8.5) — and
+        // every one of them built from one local, so no two of these tables
+        // can end up naming different schemas. No count in this comment: it
+        // said two while there were two, and §8.5's marker made it three.
         const string schema = "ordering";
         services.AddSingleton(new OutboxTable(schema));
         services.AddSingleton(new InboxTable(schema));
+        services.AddSingleton(new IdempotencyMarkerTable(schema));
 
-        // The retention windows of §9.4 and §9.5 at their defaults. Registered
+        // The retention windows of §9.4, §9.5 and §8.5 at their defaults. Registered
         // rather than const, because §9.5 tells the reader to check the inbox
         // window against the broker's configured redelivery limits — and a
         // number a chapter says to check has to be one the service can change.
@@ -225,18 +248,18 @@ public static class DependencyInjection
         // registers it. The fixture adds that singleton itself, for the one
         // reason it needs one: driving a single pass with no timer to race.
         //
-        // Registered after the bus, and the order is a shutdown decision
-        // rather than a startup one: hosted services stop in reverse, so the
-        // last one registered is the first one stopped. With the dispatcher
-        // last it stops first, and the transport it publishes through is
-        // still up while it drains. Registered before the bus, every
-        // deployment would stop the broker underneath a dispatcher still
+        // Registered after the bus and before the purge, and the order is a
+        // shutdown decision rather than a startup one: hosted services stop in
+        // reverse, so the dispatcher stops while the transport it publishes
+        // through is still up and drains into it. Registered before the bus,
+        // every deployment would stop the broker underneath a dispatcher still
         // claiming rows — publish failures and backoff on a healthy service,
         // once per deploy. Startup runs the other way for the same reason:
-        // validator, bus, dispatcher.
+        // validator, bus, dispatcher, purge.
         services.AddHostedService<OutboxDispatcher>();
 
-        // §9.4's and §9.5's retention, in the one hosted service §9.5 asks for.
+        // §9.4's, §9.5's and §8.5's retention, in the one hosted service §9.5
+        // asks for.
         // Registered last, so it is the first stopped: it is pure housekeeping,
         // and a deploy that interrupts a purge loses nothing an hour will not
         // redo — where the dispatcher stopping first is what keeps the

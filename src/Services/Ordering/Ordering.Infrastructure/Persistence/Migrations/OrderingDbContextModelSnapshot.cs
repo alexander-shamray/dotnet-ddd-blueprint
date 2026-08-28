@@ -24,6 +24,24 @@ namespace Ordering.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Common.Infrastructure.Idempotency.IdempotencyMarker", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)")
+                        .UseCollation("Latin1_General_BIN2");
+
+                    b.Property<DateTimeOffset>("CommittedAt")
+                        .HasColumnType("datetimeoffset(7)");
+
+                    b.HasKey("Key");
+
+                    b.HasIndex("CommittedAt")
+                        .HasDatabaseName("IX_Idempotency_CommittedAt");
+
+                    b.ToTable("IdempotencyMarkers", "ordering");
+                });
+
             modelBuilder.Entity("Common.Infrastructure.Inbox.InboxMessage", b =>
                 {
                     b.Property<Guid>("MessageId")

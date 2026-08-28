@@ -3,16 +3,19 @@ using System.Text.RegularExpressions;
 namespace Common.Infrastructure;
 
 /// <summary>
-/// The one place a schema is checked and delimited. Two registered values need
-/// it — <see cref="Outbox.OutboxTable"/> and <see cref="Inbox.InboxTable"/> —
-/// and a second copy of the pattern is a second answer to "what is a legal
-/// schema here", which is not a question that gets to have two.
+/// The one place a schema is checked and delimited. Every registered table
+/// value needs it — <see cref="Outbox.OutboxTable"/>, §9.5's
+/// <see cref="Inbox.InboxTable"/> and §8.5's
+/// <see cref="Idempotency.IdempotencyMarkerTable"/> — and a second copy of the
+/// pattern is a second answer to "what is a legal schema here", which is not a
+/// question that gets to have two. No count in that sentence: it said two while
+/// there were two, and the marker made it three.
 /// </summary>
 /// <remarks>
 /// <b>This is the only identifier in the codebase interpolated into SQL rather
 /// than parameterised</b>, because a schema cannot be a parameter — and a value
 /// that cannot be a parameter has to be a value the type refuses to hold
-/// wrongly. Both callers validate at construction, so a bad schema fails the
+/// wrongly. Every caller validates at construction, so a bad schema fails the
 /// host at registration rather than the first statement composed from it.
 /// </remarks>
 internal static partial class SqlSchema
@@ -41,7 +44,7 @@ internal static partial class SqlSchema
         // Nothing has to be escaped inside them. `]` is the only character that
         // would need doubling, and the pattern has already refused everything
         // but letters, digits and underscore. The table name is a literal
-        // supplied by the two types in this assembly and never by a caller.
+        // supplied by the table types in this assembly and never by a caller.
         return $"[{schema}].{table}";
     }
 

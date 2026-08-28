@@ -334,8 +334,8 @@ command. Order matters — they nest outermost-first.
 Request
   → Logging          (correlation id, timing, outcome)
   → Validation       (FluentValidation; fails fast before any I/O)
-  → Idempotency      (has this command id been processed?)
-  → Transaction      (open, handle, dispatch domain events, commit)
+  → Idempotency      (claim this command id, and hand the key down)
+  → Transaction      (open, refuse a committed key, handle, dispatch, mark, commit)
       → Handler
 ```
 
@@ -524,7 +524,11 @@ public interface IUnitOfWork
 The behaviour depends only on that:
 
 ```csharp
-public sealed class TransactionBehavior<TCommand, TResult>(IUnitOfWork unitOfWork, IDomainEventDispatcher domainEvents)
+public sealed class TransactionBehavior<TCommand, TResult>(
+    IUnitOfWork unitOfWork,
+    IDomainEventDispatcher domainEvents,
+    IIdempotencyMarkerStore markers,
+    IdempotencyContext idempotency)
     : IPipelineBehavior<TCommand, TResult>
     where TCommand : ICommand<TResult>
 {
@@ -534,9 +538,23 @@ public sealed class TransactionBehavior<TCommand, TResult>(IUnitOfWork unitOfWor
         if (unitOfWork.HasActiveTransaction)
             return await next();
 
+        // Read ONCE, here, and never again inside the unit below. A nested
+        // dispatch would run its own IdempotencyBehavior and overwrite the
+        // context while this transaction is open, so re-reading after next()
+        // would mark the inner command's key against the outer command's rows.
+        string? key = idempotency.Key;
+
         return await unitOfWork.ExecuteAsync(
             async token =>
             {
+                // §8.5's durable half, and BEFORE the handler rather than after:
+                // an attempt whose commit landed and whose acknowledgement was
+                // lost released its Redis claim on the way out, so this retry
+                // holds a fresh claim over work that is already done. Knowing
+                // before next() costs a lookup instead of a rolled-back handler.
+                if (key is not null && await markers.ExistsAsync(key, token))
+                    throw new CommandAlreadyCommittedException(key);
+
                 TResult result = await next();
 
                 // A handler that returns a failed Result has rejected the command.
@@ -562,6 +580,14 @@ public sealed class TransactionBehavior<TCommand, TResult>(IUnitOfWork unitOfWor
                         "aggregate roots. One transaction, one aggregate (§2.3 principle 3) — " +
                         "the second aggregate should react to a domain event after commit (§7.5).");
                 }
+
+                // Staged last and committed with everything else, which is what
+                // makes the marker exactly as durable as the rows it guards. It
+                // is after the guard above deliberately: a command this
+                // transaction is about to refuse must leave nothing behind that
+                // would refuse its retry.
+                if (key is not null)
+                    await markers.MarkAsync(key, token);
 
                 await unitOfWork.SaveChangesAsync(token);
 
@@ -594,6 +620,33 @@ dispatch publishes nothing, no count check makes principle 3 advisory.
 > covers both: `SaveChanges` once on success and never on failure, and a
 > handler that calls `ExecuteRawAsync` and then returns `Result.Failure` leaves
 > no row behind.
+
+> **The two marker calls are the only thing in this behaviour that belongs to
+> another section, and where each one sits is the whole of what it buys.**
+> [§8.5](08-caching-redis.md) owns the mechanism and
+> [ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)
+> owns the decision; what this behaviour supplies is the one thing §8.5 has no
+> access to — a transaction. A marker written anywhere else is a second Redis
+> claim in different clothes, and §8.5's whole residual was that no ordering of
+> two systems is atomic with a SQL commit.
+>
+> **The read is before `next()` and the write is after the guards, and neither
+> is a matter of taste.** Reading first means a command that already committed
+> does no work at all, rather than doing it and losing it to a constraint
+> violation on the way out. Writing after the failure guard and after the
+> aggregate count means a command *this* transaction is about to refuse leaves
+> no marker behind — otherwise a refused command would permanently refuse its
+> own retry, which is the opposite of what the mechanism is for.
+>
+> **The key is read once, before anything runs, and that is a guard rather than
+> a style.** A command dispatched from inside a command handler runs its own
+> `IdempotencyBehavior`, which overwrites the context while this transaction is
+> still open; a behaviour re-reading it afterwards would mark the inner
+> command's key against the outer command's rows. Nothing in this document
+> dispatches a command from a command handler and
+> `No_command_handler_dispatches_a_command` asserts so per service — the
+> capture is what keeps the day that gate fails a stopped build rather than a
+> wrong row.
 
 > **Nothing inside this transaction may make a network call to another
 > service.** The behaviour wraps the whole handler, so any remote call a handler

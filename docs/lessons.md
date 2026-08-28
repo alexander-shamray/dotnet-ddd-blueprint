@@ -93,6 +93,16 @@ own line rather than sending a reader to a file that does not hold it.
   six fail. Read the build result before reading the test result — a green
   counterfactual is the outcome that should be checked hardest, because it is
   the one that says the tests are worthless.
+  **The same trap sits on the way back out, and it points the other way.**
+  Restoring the file with `shutil.copy2` restores its *modification time* along
+  with its bytes, so MSBuild sees nothing to do and the next `--no-build` run
+  executes the assembly built from the broken version. Measured on the branch
+  that added §8.5's marker: five tests reported failing against source that was
+  already correct, in a run whose whole purpose was proving the branch green.
+  It fails in the direction that wastes time rather than the direction that
+  ships a defect — which is exactly why it is worth writing down, because a
+  failure that looks like a real one gets debugged as one. `touch` the restored
+  files, or build with `--no-incremental`, before believing either outcome.
 - **A suite that enumerates from `git ls-files` is blind to the work you have
   not committed, so a green run taken before `git add` says nothing about the
   state you are about to commit.** Measured on the branch that extracted this

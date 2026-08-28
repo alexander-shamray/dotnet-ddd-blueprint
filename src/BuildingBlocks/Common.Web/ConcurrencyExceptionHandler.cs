@@ -53,7 +53,15 @@ internal sealed class ConcurrencyExceptionHandler(IProblemDetailsService problem
                 // No entity names, no row versions: the rowversion is a
                 // storage detail (§7.3), and a client that retries needs to
                 // know only that its copy was stale.
-                Detail = "The resource was modified by another request. Re-read it and retry."
+                Detail = "The resource was modified by another request. Re-read it and retry.",
+                // §10.5's machine-readable half. `detail` is human-readable by
+                // RFC 9457, so a client that switches on it is parsing English —
+                // and this status now carries instructions that CONTRADICT each
+                // other across its three producers, where before they all said
+                // retry. `code` is where §10.5 already says a client switches;
+                // the Error path has carried one since PR-18 and the exception
+                // path had none.
+                Extensions = { ["code"] = "request.concurrency_conflict" }
             }
         });
 

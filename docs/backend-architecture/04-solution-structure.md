@@ -12,7 +12,8 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   ├── BuildingBlocks/
 │   │   ├── Common.Domain/              Entity, AggregateRoot, IDomainEvent (§5.5)
 │   │   ├── Common.Application/         Dispatcher, pipeline behaviours, Result<T>
-│   │   ├── Common.Infrastructure/      Outbox, inbox, EF conventions, Redis
+│   │   ├── Common.Infrastructure/      Outbox, inbox, idempotency markers,
+│   │   │                               EF conventions, Redis
 │   │   ├── Common.Web/                 Host defaults: OTel, health, auth, ProblemDetails.
 │   │   │                               Referenced by every host. NOT resilience —
 │   │   │                               the one outbound client is the BFF's (§9.7),
@@ -552,6 +553,15 @@ public static IServiceCollection AddOrderingApplication(this IServiceCollection 
     services.AddScoped(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
     services.AddScoped(typeof(IPipelineBehavior<,>), typeof(IdempotencyBehavior<,>));
     services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>));
+
+    // The key one of those two builds and the other writes (§8.5, ADR-037).
+    // Scoped, because a command is. Here rather than inside AddDispatcher,
+    // because these lines are where a reader finds out what the pipeline is
+    // made of — and because omitting it does not fail at startup:
+    // ValidateOnBuild never constructs an open generic, so the miss surfaces
+    // as an unresolvable TransactionBehavior on the first dispatched command.
+    services.AddScoped<IdempotencyContext>();
+
     services.AddValidatorsFromAssemblyContaining<PlaceOrderValidator>();
     return services;
 }
@@ -623,14 +633,18 @@ public static IServiceCollection AddOrderingInfrastructure(
     services.AddHostedService<MessageTypeMapValidator>();                 // §9.4
 
     // The schemas the dispatcher and the retention purge compose their
-    // statements against (§9.4, §9.5). Values, because Common.Infrastructure
-    // is every service's and cannot hold a literal — and both from ONE local,
-    // so the two tables cannot end up naming different schemas.
+    // statements against (§9.4, §9.5, §8.5). Values, because
+    // Common.Infrastructure is every service's and cannot hold a literal — and
+    // every one of them from ONE local, so no two of these tables can end up
+    // naming different schemas. No count in this comment: it said "both" and
+    // "the two tables" while there were two, and §8.5's marker made it three.
     const string schema = "ordering";
     services.AddSingleton(new OutboxTable(schema));
     services.AddSingleton(new InboxTable(schema));
+    services.AddSingleton(new IdempotencyMarkerTable(schema));
 
-    // The retention windows, the batch size and the per-pass ceiling (§9.5).
+    // The retention windows of §9.4, §9.5 and §8.5, the batch size and the
+    // per-pass ceiling.
     // Registered rather than const: §9.5 tells the reader to check the inbox
     // window against their broker's redelivery limits, and a number a chapter
     // says to check has to be one a service can change.
@@ -647,6 +661,13 @@ public static IServiceCollection AddOrderingInfrastructure(
     // each needs a line here. Omitting one fails at DI resolution on the first
     // request that needs it, not at startup — unless ValidateOnBuild is on.
     services.AddScoped<IProductPriceReader, ProjectedPriceReader>();      // §6.4
+
+    // §8.5's durable half, beside the unit of work rather than with its Redis
+    // sibling below: the two ports are backed by different systems, and only
+    // this one has to land on the transaction EfUnitOfWork opens. It resolves
+    // the DbContext alias registered above — which is what puts the marker in
+    // that transaction (ADR-037).
+    services.AddScoped<IIdempotencyMarkerStore, EfIdempotencyMarkerStore>();
 
     // No ICurrentUser and no AddHttpContextAccessor. Both were here until
     // PR-16 and both moved to AddCommonWebDefaults (§11.4, §13.2): neither type
@@ -678,7 +699,8 @@ public static IServiceCollection AddOrderingInfrastructure(
     // about them.
     services.AddHostedService<OutboxDispatcher>();
 
-    // §9.4's and §9.5's retention, in the one hosted service §9.5 asks for.
+    // §9.4's, §9.5's and §8.5's retention, in the one hosted service §9.5
+    // asks for.
     // Registered last, so it is the first stopped: hosted services stop in
     // reverse, and a deploy that interrupts a purge loses nothing an hour will
     // not redo — where the dispatcher stopping first is what keeps the
@@ -1536,23 +1558,50 @@ failed claim twice a second from its first boot — the outbox itself with its
 empty allow-list mapper, §9.5's inbox filter and retention purge, §11.3's JWT
 validation, both images ([§15.2](15-cicd-deployment.md)) and
 §4.2's architecture gates. The migrations it copies are `InitialCreate`,
-`AddOutbox`, `AddInbox` and `AddOutboxRetentionIndex` — the messaging tables
-ship with the dispatcher that reads them, because a service carrying the
-dispatcher without its table logs a failed claim twice a second from its first
-boot. It then edits six shared files: `Platform.slnx`, the Compose pair and
+`AddOutbox`, `AddInbox`, `AddOutboxRetentionIndex` and `AddIdempotencyMarkers`
+— the messaging tables ship with the dispatcher that reads them, because a
+service carrying the dispatcher without its table logs a failed claim twice a
+second from its first boot, and §8.5's marker table ships on a sharper version
+of the same argument: without it the service fails a retention purge every hour
+and then fails the first idempotent command it is ever given
+([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
+It then edits seven shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, the ports table in
-`deploy/compose/README.md` ([§14.1](14-local-development.md)), and the broker
+`deploy/compose/README.md` ([§14.1](14-local-development.md)), the broker
 definitions that grant the new service an account of its own — without which it
 renders a service that starts and cannot authenticate, since the broker has
-held no shared principal since #44. The new service
-builds and its **sixty** tests pass before a line of it is written, **thirty**
-of them against real SQL Server and RabbitMQ containers — counts measured
-against a rendered service, by PR-18 when they read forty-one and sixteen three
-PRs after they stopped being true, and again by PR-22 when they read fifty-six.
-**Arithmetic is not a remeasurement**: PR-22 added three tests to the template
-and the total moved by four, so whoever adds the next one renders `Yankee` and
-runs it rather than adding to the number here. The thirty is now the
+held no shared principal since #44 — and
+`.github/secret-scan/allowed-secrets.txt`, one accepted-finding line per
+**distinct** finding the render produces — two lines carrying one value under
+one rule in one file are one finding and take one entry. **The last is the
+difference between a service that renders and a service that can be
+committed**:
+[§15.1](15-cicd-deployment.md)'s scan reads the working tree, so it reads the
+tree this leaves behind. The scaffold loads the real scanner and takes the
+fingerprints from it rather than computing them, because computing them would
+be a second implementation of which substring each rule matches — and a
+fingerprint matching nothing is a stale entry that fails the build. Where
+`.github/secret-scan/` is absent it writes nothing and says nothing, which is
+the case in the scaffold suite's own synthetic root. The new service
+builds and its **seventy-nine** tests pass before a line of it is written,
+**thirty-six** of them against real SQL Server and RabbitMQ containers —
+counts measured against a rendered service, by PR-18 when they read forty-one
+and sixteen three PRs after they stopped being true, again by PR-22 when they
+read fifty-six, and twice by PR-32. The thirty-six is the
 `Category=Integration` count of §12.4, which is a filter rather than a tally.
+
+**Arithmetic is not a remeasurement, and the two rules that follow from that
+have both been tested by now.** PR-22 added three tests to the template and the
+total moved by four, so whoever changes what the scaffold copies renders
+`Yankee` and runs it rather than adding to the number here — which is what
+PR-32 did when ADR-037's marker suite joined the template: rendered, built, and
+run as `Yankee.Domain.Tests` (1), `Yankee.Application.Tests` (18) and
+`Yankee.Api.Tests` (60) — **twice**, because the first render predated a test
+that the same pull request later added to the template, and the figures were
+stale between one commit and the next. The second rule is that this is the only figure in
+this section a reader cannot check from the tree, so it is the one to distrust
+first — a number three PRs stale here looks exactly like a number taken
+yesterday.
 
 **There is no template directory, and that is the design.** The script reads
 `src/Services/Catalog` at run time, so there is exactly one copy of the

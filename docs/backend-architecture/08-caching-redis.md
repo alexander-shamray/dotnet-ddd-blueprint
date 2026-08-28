@@ -341,13 +341,22 @@ public sealed class PriceChangedCacheInvalidator(HybridCache cache)
 
 Every non-idempotent write command carries a client-generated `CommandId`, and
 the key is claimed atomically before any work happens. What that buys is **at
-most one commit per key within `Retention`, except across a lost commit
-acknowledgement**. Both halves of that sentence are load-bearing. The window is
-24 hours because every entry expires — completed and in-progress alike — so a
-retry arriving after expiry claims a free key and commits again with nothing
-having gone wrong; the guarantee is bounded in time rather than absolute. The
-exception is this section's own residual, argued below rather than left to a
-reader to find, because it is the one case the behaviour cannot see.
+most one commit per key while the marker survives**.
+
+**That sentence had an exception in it for as long as this section existed, and
+the exception is what the marker removed.** It read *within `Retention`, except
+across a lost commit acknowledgement*, and both qualifiers came from the same
+place: a Redis claim is a write to a different system from the one the
+transaction commits to. Every entry expires, so a retry arriving after the
+retention claimed a free key and committed again with nothing having gone
+wrong; and a commit whose acknowledgement was lost threw over durable work that
+this code released the key for. **Two mechanisms answer the two halves and
+neither answers the other's**: the claim is the atomic exclusion that makes a
+concurrent duplicate fail early, and a row written *inside* the transaction —
+[ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction) —
+is what makes the ambiguous case decidable and outlives every TTL. The bound is
+still real and is now the marker's retention window, which §9.5's purge sets
+and `RetentionPolicy` refuses to put below the claim's own.
 
 **It is a field on the command, not an `Idempotency-Key` header**, and the
 reason is the dependency rule rather than taste. `IdempotencyBehavior` runs in
@@ -385,6 +394,46 @@ public interface IIdempotencyStore
 public sealed record IdempotencyEntry(bool InProgress, string? Payload);
 
 /// <summary>
+/// The durable half. Both members run on the command transaction's own
+/// connection, which is the whole contract rather than an implementation note:
+/// a marker read or written anywhere else is another Redis claim in different
+/// clothes. §6.3 is therefore the only caller, because it is the only code
+/// holding the transaction open.
+///
+/// No retention here, and the asymmetry with the store above is the point.
+/// Every entry there has a TTL; a marker is a row, and what deletes it is
+/// §9.5's purge on a window the service chooses.
+/// </summary>
+public interface IIdempotencyMarkerStore
+{
+    Task<bool> ExistsAsync(string key, CancellationToken ct);
+    Task MarkAsync(string key, CancellationToken ct);
+}
+
+/// <summary>
+/// Carries the key §8.5 builds to the transaction that writes the marker under
+/// it, for the one scope that dispatched the command. Scoped, like everything
+/// else on the command path.
+///
+/// Carried rather than rebuilt, because §6.3 is constrained to neither
+/// IIdempotentCommand nor ICurrentUser and would have to reach both by
+/// reflection — two implementations of one key shape, one file apart.
+/// </summary>
+public sealed class IdempotencyContext
+{
+    public string? Key { get; private set; }
+
+    public void Claim(string key) => Key = key;
+
+    // Forgotten when the dispatch that claimed it unwinds, from the finally
+    // below. A scope is not promised to serve one command — an endpoint or an
+    // integration-event handler may dispatch twice — and a key left standing is
+    // captured by the NEXT command's transaction, which either refuses a
+    // command nobody protected or marks the wrong command's work.
+    public void Clear() => Key = null;
+}
+
+/// <summary>
 /// Opts a command into IdempotencyBehavior. Not an empty marker: the behaviour
 /// reads CommandId to build its key, so the interface has to carry it.
 ///
@@ -408,12 +457,18 @@ public interface IIdempotentCommand
 ```
 
 ```csharp
-public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore store, ICurrentUser currentUser)
+public sealed class IdempotencyBehavior<TCommand, TResult>(
+    IIdempotencyStore store,
+    ICurrentUser currentUser,
+    IdempotencyContext idempotency)
     : IPipelineBehavior<TCommand, TResult>
     where TCommand : ICommand<TResult>, IIdempotentCommand
     where TResult : Result
 {
-    private static readonly TimeSpan Retention = TimeSpan.FromHours(24);
+    // From IdempotencyRetention, because RetentionPolicy reads the same value
+    // to refuse a marker window shorter than it — a 24 in two files agrees
+    // until one of them is edited.
+    private static readonly TimeSpan Retention = IdempotencyRetention.Window;
 
     // "null" and not the empty string. IdempotencyEntry carries a Payload the
     // store has to tell apart from the in-progress marker it wrote on the
@@ -470,6 +525,12 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             return Replay(existing.Payload!);
         }
 
+        // Handed to §6.3, which writes the durable marker under this key inside
+        // the transaction and reads it back before anything runs. After the
+        // claim rather than beside the key, so a command about to replay never
+        // hands a key to a transaction it will not open.
+        idempotency.Claim(key);
+
         TResult result;
 
         try
@@ -481,11 +542,22 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
             // Release for a fault raised INSIDE next(), and nowhere else.
             // §6.3's ExecuteAsync disposes the transaction on the way out,
             // which rolls it back — for every fault this in-process code can
-            // tell apart. The one it cannot is the lost commit acknowledgement
-            // below: there the work IS durable and this line permits the
-            // duplicate. Releasing is the right default and not a proof.
+            // tell apart. The one it cannot is the lost commit acknowledgement,
+            // where the work IS durable and this line frees the key for it.
+            //
+            // Releasing is still right, and it is now a decision rather than a
+            // default: the retry it admits meets the durable marker §6.3 wrote
+            // in that same transaction and is refused before a handler runs.
             await store.ReleaseAsync(key, claim, CancellationToken.None);
             throw;
+        }
+        finally
+        {
+            // The key lives for exactly the dispatch that claimed it. Neither
+            // of the hazards above is reachable in this platform today, which
+            // is what makes closing it here cheaper than resting on a premise
+            // the next caller falsifies.
+            idempotency.Clear();
         }
 
         if (result.IsFailure)
@@ -599,9 +671,20 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
 >   the collision described above is fully reachable *between anonymous
 >   callers*, which is the defect the subject segment was added to close,
 >   surviving inside the fix for it.
-> - **The message path shares one bucket by construction**, because §9.4's
->   broker has a single principal. Every sender of every command type claims
->   under `"system"`. That is not made worse by anything here, and
+> - **The message path shares one bucket, and the reason is no longer the one
+>   this bullet used to give.** Every sender of every command type claims under
+>   `"system"` because `ICurrentUser.IsAuthenticated` is false on that path —
+>   not because the broker has one principal. It had one when this was written;
+>   [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+>   gave each service its own account and the bucket did not move, because
+>   nothing binds a broker identity into `ICurrentUser`. **A cause that is
+>   fixed while its effect survives is the most misleading kind of stale
+>   sentence**, and this one also pointed at
+>   [#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44)
+>   in the future tense for a split that issue landed without performing.
+>   Splitting the bucket means binding the consumer's authenticated identity
+>   into the port §11.4 implements, which no chapter specifies today.
+>   That is not made worse by anything here, and
 >   [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
 >   does not make it better either, which is worth stating precisely because
 >   that ADR *did* settle what §11.4 used to leave open. It rules that a
@@ -611,9 +694,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
 >   different quantity: it identifies *the claimant* at the near end, and on
 >   this path there is still exactly one. Naming a fixed segment remains the
 >   smallest thing that keeps a principal-less command from claiming under no
->   subject at all, and per-service broker identity
->   ([#44](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/44))
->   is what would ever split this bucket.
+>   subject at all.
 
 > **Trap — JSON round-tripping the `Result` itself.** It is the obvious body for
 > both halves and it cannot work in either direction. `System.Text.Json`
@@ -631,9 +712,13 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(IIdempotencyStore sto
 > `Result.Failure<T>(e)` all throw `InvalidOperationException` carrying the
 > accessor's own message. So the naive body fails on the ordinary success path
 > rather than under an unusual fault, and it fails *after* §6.3 has committed:
-> the caller sees 500 for an order that exists, and a retry of the same
-> `CommandId` places a second one. **A protection that produces the duplicate
-> write it was added to prevent.**
+> the caller sees 500 for an order that exists. **What the retry then does is
+> the one thing in this trap the marker changed.** `Capture` still runs after
+> `next()` returns, so the throw is still after the commit — but the marker
+> committed with it, so the retry claims a free Redis key and meets
+> `CommandAlreadyCommittedException` instead of placing a second order. The
+> naive body still turns a succeeded command into a 500 and still loses the
+> result; it no longer produces the duplicate write it was added to prevent.
 >
 > Adding a `[JsonConstructor]` and non-throwing accessors to `Result` is the
 > other way out and is refused — though not for the reason that suggests
@@ -661,10 +746,10 @@ covers `next()` and nothing else, and the three store calls divide like this:
 
 | | |
 |---|---|
-| `next()` throws | **Release** — with one exception this code cannot detect, below. §6.3's `ExecuteAsync` disposes the transaction on the way out, which rolls it back, so for every *distinguishable* fault nothing survives and a retry is owed |
-| Handler returns a failed `Result` | **Release**, for the same reason and not for the one §6.3's comment suggests — see below |
-| `CompleteAsync` throws | **Hold**, which postpones the duplicate rather than preventing it. The work is durable and the entry is stuck `InProgress`, so every retry meets `ConcurrentRequestException` until it expires — and the one arriving after that claims a free key and runs the command again. A day's delay is the best an out-of-transaction store can do here; only the durable marker below prevents it |
-| `TryClaimAsync` throws | **Nothing to decide, and this is the case with no good answer.** The `SET NX` may have succeeded on the server, so the key can be held for a day for work that never ran, and no retry gets past it |
+| `next()` throws | **Release** — including for the one fault this code still cannot tell apart, and that is now a decision rather than a default. §6.3's `ExecuteAsync` disposes the transaction on the way out, which rolls it back, so for every *distinguishable* fault nothing survives and a retry is owed; for the lost acknowledgement the work is durable, the retry this admits meets the marker §6.3 wrote in that same transaction, and it is refused before a handler runs |
+| Handler returns a failed `Result` | **Release**, for the same reason and not for the one §6.3's comment suggests — see below. No marker survives either: §6.3 writes it after the failure guard |
+| `CompleteAsync` throws | **Hold**, which postpones the *replay* and no longer postpones the duplicate. The work is durable and the entry is stuck `InProgress`, so every retry meets `ConcurrentRequestException` until it expires — and the one arriving after that claims a free key, meets the marker, and is refused with `CommandAlreadyCommittedException`. What the caller loses is the recorded outcome, which this branch is the failure to write |
+| `TryClaimAsync` throws | **Nothing to decide, and it is still the case with the worst answer.** The `SET NX` may have succeeded on the server, so the key can be held for a day for work that never ran, and no retry gets past it. The marker does not help here and could not: nothing committed, so there is nothing for it to record |
 
 The two `ReleaseAsync` calls and the `CompleteAsync` all pass
 `CancellationToken.None`, and for two different reasons rather than one. After
@@ -733,32 +818,59 @@ not the transaction committed, which the next callout is about.
 > the winner. The store logs that refusal, because a write that silently did
 > nothing is the shape this whole section is about.
 
-> **The lost commit acknowledgement is the one fault the `catch` gets wrong,
-> and it is this section's debt rather than a new finding.** If `CommitAsync`
+> **The lost commit acknowledgement is the one fault the `catch` cannot
+> recognise, and the answer is that nothing here has to.** If `CommitAsync`
 > succeeds on the server and the connection drops before the acknowledgement,
-> `next()` throws over work that is already durable — and no in-process
-> tidying can tell that apart from a fault that rolled back, which is what
-> `docs/pr-decision-log.md` records as knowingly open from PR-09. Releasing
-> there frees the key for a command that committed, so a retry writes it
-> twice: the exact outcome this behaviour exists to prevent, on the one path
-> it cannot see.
+> `next()` throws over work that is already durable — and no in-process tidying
+> can tell that apart from a fault that rolled back, which is what
+> `docs/pr-decision-log.md` recorded as knowingly open from PR-09. Releasing
+> there frees the key for a command that committed. What stops the retry is not
+> a better guess in this `catch`: it is that the committing attempt left a row
+> behind, and §6.3 reads it before the retry's handler runs
+> ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
 >
-> **Redis cannot close it, and that is why the row above says "cannot detect"
-> rather than "does not happen".** `IIdempotencyStore` is outside the
-> transaction, so no claim it holds is atomic with the SQL commit. The fix is
-> an idempotency marker written **inside** the transaction, keyed on the
-> `CommandId` this interface already carries — and the decision log assigns
-> that fix to this seat rather than to §6.3's. It would close the expiry hole
-> in the same stroke: a marker inside the transaction is as durable as the row
-> it guards, where every Redis entry here has a TTL. Until it is written, the
-> opening sentence of this section is the whole guarantee — *at most one commit
-> per key within `Retention`, except across a lost acknowledgement* — and both
-> qualifiers are this behaviour's rather than somebody else's.
+> **Redis could not have closed it, and that is worth keeping rather than
+> deleting with the residual.** `IIdempotencyStore` is outside the transaction,
+> so no claim it holds is atomic with the SQL commit — claim first and a lost
+> acknowledgement releases a claim over durable work, commit first and the
+> claim is not held while the work runs. The marker is not a cleverer use of
+> this store; it is a write to the *same* system the transaction commits to,
+> which is the only thing that can be atomic with it.
 >
-> The residual is bounded rather than unbounded, and PR-14 is why: with the
-> outbox in place a re-run republishes the same fact, which is the
-> at-least-once delivery §9.4 promises and §9.5's inbox absorbs. A duplicate
-> **order** is not absorbed by either, which is what keeps this owed.
+> **Holding the claim instead of releasing it was the other candidate, and it
+> is worse in both directions.** The row above already says what holding buys
+> against a `CompleteAsync` failure: every Redis entry has a TTL, so a held key
+> expires and the attempt after that claims a free key and runs the command a
+> second time — a postponement rather than a fix. It would also cost every
+> ordinary fault its retry for a full retention, which is a large availability
+> price for a postponement. A row has no TTL; what deletes it is §9.5's purge
+> on a window `RetentionPolicy` refuses to set below this store's own.
+>
+> **What the caller gets is a refusal and not a replay, and there are two ways
+> to arrive at it — only one of which is the lost acknowledgement.** On that
+> path the attempt threw before it returned, so nothing recorded an outcome to
+> hand back. On the other, and it is the commoner one, the command succeeded
+> and `CompleteAsync` recorded its payload; the claim then expired at
+> `Retention` while the marker lived on, so a retry inside the marker's window
+> finds the outcome *gone* rather than never written.
+> `CommandAlreadyCommittedException` answers §10.5's 409 saying the command was
+> applied and its result is no longer available — not that it was never
+> recorded, which would be false on the path most callers take. Read the
+> resource.
+>
+> **That second path is a change to what a late retry does, and it is the price
+> of dropping the exception from this section's opening sentence.** Before the
+> marker, a retry after the claim expired ran the command again — which is
+> precisely why the guarantee was bounded by `Retention` and said so. It is now
+> refused for as long as the marker survives, which on the shipped windows is
+> six days longer. That is a loss against both a replay and a re-run, and it is
+> strictly better than the second order it replaces.
+>
+> **The residual it leaves is one this section already priced, and PR-14 is
+> why.** With the outbox in place a re-run republishes the same fact, which is
+> the at-least-once delivery §9.4 promises and §9.5's inbox absorbs. A
+> duplicate **order** was never absorbed by either, and that is the one this
+> closes.
 
 > **`ReleaseAsync` throwing is not handled, and the two sites fail
 > differently.** In the `catch`, an exception from the release means `throw;`
@@ -819,6 +931,127 @@ precisely because nothing commits.
 > is the constructor: a handler that resolves `IServiceProvider` and asks it
 > for a dispatcher is invisible to it, exactly as a forbidden-but-unused
 > reference is invisible to §4.2's gates — late rather than absent.
+
+### The durable marker
+
+The marker is a row in the service's own schema, beside §9.4's outbox and
+§9.5's inbox, keyed on the key this section already builds. Nothing reads it to
+find out what a command returned — presence is the whole answer, exactly as it
+is in the inbox one table over.
+
+```csharp
+public sealed class IdempotencyMarker(string key, DateTimeOffset committedAt)
+{
+    public string Key { get; private set; } = key;
+
+    public DateTimeOffset CommittedAt { get; private set; } = committedAt;
+}
+```
+
+**The key is the whole primary key, and it is already scoped by
+construction** — `{subject}:{operation}:{commandId}` puts the caller, the
+operation and the attempt inside one column. §9.5's composite key exists
+because one service may bind one message type on two endpoints; there is no
+second axis here, and a column that distinguishes nothing is what that entity's
+own comment warns against.
+
+**The column is `nvarchar(450)` with a binary collation, and both halves are
+the inbox's arguments one table over.** 450 is exactly SQL Server's 900-byte
+clustered-index limit at two bytes a character, so it is the widest this column
+can be while the primary key stays clustered; the key spends 74 of those
+characters on two GUIDs and two separators and leaves the declared operation
+name the rest. Binary because this column is a key rather than text: the
+default collation is case-insensitive, and two commands are the same command
+only if their keys are the same bytes. A per-service gate asserts the operation
+names a service declares fit, because a name too long fails neither the build
+nor startup — SQL Server refuses the insert on the first dispatch of that
+command, inside the transaction carrying the customer's order.
+
+**The store writes through the service's own `DbContext`, and that is what puts
+it in the transaction rather than beside it.** §9.5's filter already requires
+each service to register
+`AddScoped<DbContext>(sp => sp.GetRequiredService<XDbContext>())`, and the
+alias is the whole mechanism: `AddScoped<DbContext, XDbContext>()` compiles,
+resolves, and builds a *second* context in the same scope. A marker committed
+in its own transaction is worse here than a stray inbox row is there — that
+suppresses one redelivery, this refuses every later attempt at a command that
+never committed.
+
+```csharp
+public sealed class EfIdempotencyMarkerStore(DbContext db, TimeProvider clock) : IIdempotencyMarkerStore
+{
+    public Task<bool> ExistsAsync(string key, CancellationToken ct) =>
+        db.Set<IdempotencyMarker>().AnyAsync(marker => marker.Key == key, ct);
+
+    public async Task MarkAsync(string key, CancellationToken ct) =>
+        await db.Set<IdempotencyMarker>().AddAsync(new IdempotencyMarker(key, clock.GetUtcNow()), ct);
+}
+```
+
+**`MarkAsync` stages and does not save**, which is what makes the row exactly as
+durable as the aggregate: §6.3 calls `SaveChangesAsync` one line later inside
+the transaction it opened, so the marker lands with the work or not at all.
+`ExistsAsync` is a query and never the change tracker — this attempt stages its
+own marker under the key it reads, so an implementation consulting local state
+first would answer "already committed" to the attempt that is committing, and
+§6.3's `ExecuteAsync` may run the whole unit again, which is exactly when that
+would bite.
+
+> **Dapper on `IUnitOfWork.ExecuteRawAsync` was the alternative and is not
+> better.** That port is §6.3's sanctioned in-transaction raw write and would
+> have kept the table out of the EF model — but it has no read, so closing the
+> loop would have meant widening §6.3's port for one caller, and the table
+> would then need hand-written DDL in a migration EF had no reason to emit.
+> §7.2's rule is that an entity is mapped by an `IEntityTypeConfiguration`, and
+> §7.4 already classifies the inbox and the outbox as technical tables mapped
+> that way for exactly this reason.
+
+**§9.5's retention purge gains a third table, and it is the only one of the
+three whose window is a correctness setting.** A purged outbox row loses a
+debugging record; a purged inbox row loses a suppression the broker will not
+exercise again; a purged marker re-opens the duplicate. So
+`RetentionPolicy.IdempotencyWindow` has a floor the other two do not — it reads
+`IdempotencyRetention.MarkerFloor` and refuses anything shorter, because a
+window below the claim's own life leaves a stretch in which the key is claimable
+again and nothing remembers the commit. It reads the value rather than restating
+it: two 24s in two files agree until one of them is edited.
+
+> **The floor is the claim's window *plus* an allowance, and matching the claim
+> exactly is refused.** It reads as the exact fit with no waste in it, and it is
+> a knife-edge, because two independent things reorder the expiries.
+>
+> **The windows do not start at the same event.** §6.3 stamps `CommittedAt`
+> *inside* the transaction, before the commit; §8.5 re-arms the claim in
+> `CompleteAsync` only after that transaction has returned. So the claim's
+> window starts later than the marker's by the commit's own tail — milliseconds
+> ordinarily, and unbounded in principle, since a stall between those points
+> stretches it — and Redis outlives the marker by exactly that lag even with
+> perfect clocks.
+>
+> **And they are not counted by the same clock.** The marker's age is the
+> purging pod's clock minus a timestamp the writing pod stamped, and §15.3 runs
+> three replicas of each service; a purger leading the writer by δ deletes the
+> marker δ early. Either term alone lets the claim expire into a table that has
+> forgotten the commit, and the next retry runs the command again.
+>
+> `IdempotencyRetention.MarkerLeadAllowance` is five minutes and bounds their
+> **sum**, chosen for the asymmetry of being wrong rather than from a
+> measurement — too generous costs a row kept longer, too mean is the duplicate.
+> **It bounds both terms rather than removing either, and they need different
+> fixes**: ageing the row from the database's clock removes the skew
+> ([#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167)),
+> while not re-arming the claim at completion removes the lag
+> ([#168](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168))
+> at the cost of what §8.5 promises about how long an outcome stays replayable.
+
+> **The uniqueness of the key is a backstop and not the mechanism.** Two
+> attempts that somehow reach the write concurrently produce a constraint
+> violation rather than two rows. What makes that case rare is the Redis claim;
+> what makes it loud rather than quiet is the primary key. Neither is asked to
+> do the other's job, and reading the row at the top of the transaction is what
+> turns the ordinary case into a clean refusal instead of a rolled-back handler.
+
+### The Redis claim
 
 The Redis implementation lives in Infrastructure and is where the two §8.1
 constraints are satisfied — §8.3's `RedisKeys` supplies the `{service}:idem:`

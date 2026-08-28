@@ -166,12 +166,18 @@ public class IdempotencyOptInTests
         // handler takes an IDispatcher the paragraph is silently false and the
         // hole is live.
         //
-        // StockReservedHandler is the near miss and is deliberately NOT caught.
-        // It does dispatch, but it is an IIntegrationEventHandler, and §9.5's
-        // InboxFilter opens no IUnitOfWork transaction — it adds its row on the
-        // DbContext after the consumer returns — so HasActiveTransaction is
-        // false when that dispatch arrives and §6.3 opens a transaction of its
-        // own. An entry point, not a nested unit.
+        // An IIntegrationEventHandler that dispatches is the near miss, and it
+        // is deliberately NOT caught. §9.5's InboxFilter opens no IUnitOfWork
+        // transaction — it adds its row on the DbContext after the consumer
+        // returns — so HasActiveTransaction is false when that dispatch
+        // arrives and §6.3 opens a transaction of its own. An entry point, not
+        // a nested unit.
+        //
+        // Named by shape rather than by type, because this file is §4.5's
+        // template: Ordering has such a handler and Catalog does not, so a
+        // type name here would reach every rendered service as a near miss
+        // about something it has never had. SLICE_TOKEN would not catch it —
+        // the name carries no slice token — so nothing else would.
         //
         // REACH: constructor parameters, which is where every handler in this
         // solution takes its dependencies. A handler that resolves

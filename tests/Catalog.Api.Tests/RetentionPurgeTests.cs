@@ -1,5 +1,6 @@
 using Catalog.TestSupport;
 using Catalog.TestSupport.Outbox;
+using Common.Infrastructure.Idempotency;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
@@ -9,10 +10,11 @@ using Xunit;
 namespace Catalog.Api.Tests;
 
 /// <summary>
-/// §9.4's and §9.5's retention purges, driven a pass at a time against the real
-/// tables. The predicate that separates them is the whole subject: the outbox
-/// deletes on <c>ProcessedAt IS NOT NULL</c> <em>and</em> age, the inbox on age
-/// alone, and getting the first one wrong is silent, permanent data loss.
+/// §9.4's, §9.5's and §8.5's retention purges, driven a pass at a time against
+/// the real tables. The predicate that separates them is the whole subject: the
+/// outbox deletes on <c>ProcessedAt IS NOT NULL</c> <em>and</em> age, the inbox
+/// and the marker on age alone, and getting the first one wrong is silent,
+/// permanent data loss.
 /// </summary>
 [Collection(nameof(IntegrationCollection))]
 public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
@@ -21,6 +23,14 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     // the predicate rather than about arithmetic near a boundary.
     private static DateTimeOffset LongAgo => DateTimeOffset.UtcNow.AddDays(-30);
     private static DateTimeOffset Recently => DateTimeOffset.UtcNow.AddDays(-1);
+
+    /// <summary>
+    /// A key in §8.5's shape — {subject}:{operation}:{commandId} — distinct per
+    /// call, because the column is the primary key and two markers staged in
+    /// one test must be two rows.
+    /// </summary>
+    private static string Key() =>
+        $"{Guid.CreateVersion7()}:tests.purge:{Guid.CreateVersion7()}";
 
     public async ValueTask InitializeAsync() => await fixture.ResetAsync();
 
@@ -176,6 +186,30 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_marker_is_purged_on_age_alone()
+    {
+        // The inbox's asymmetry one table over, and the marker's window is the
+        // one that is not housekeeping: a purged marker loses the row that
+        // refuses a retry of a command that already committed. Age alone,
+        // because every row here records work that finished — so what protects
+        // a live marker is the window and nothing else.
+        //
+        // Two rows rather than one, which is the whole point. The combined pass
+        // below stages a single already-old marker, so a DELETE with no WHERE —
+        // or one that ignored CommittedAt — would satisfy it: every row it is
+        // given is purgeable. This is the test that fails when the predicate
+        // goes, and the recent row is what makes it one.
+        await fixture.StageIdempotencyMarkersAsync(
+            new IdempotencyMarker(Key(), LongAgo),
+            new IdempotencyMarker(Key(), Recently));
+
+        (await fixture.PurgeRetentionAsync()).Idempotency.ShouldBe(1);
+
+        IdempotencyMarker survivor = (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
+        survivor.CommittedAt.ShouldBeGreaterThan(LongAgo);
+    }
+
+    [Fact]
     public async Task A_backlog_larger_than_one_batch_drains_over_batches_and_stops_at_the_ceiling()
     {
         // Two claims the single-row tests above could not make, because one row
@@ -212,11 +246,14 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_pass_purges_both_tables()
+    public async Task A_pass_purges_every_table()
     {
-        // §9.5 asks for one hosted service covering both, and the alternative
-        // is two schedules with one of them being the one nobody notices has
-        // stopped. Asserting the pair in one pass is what that costs.
+        // §9.5 asks for one hosted service covering all of them, and the
+        // alternative is a schedule each with one of them being the one nobody
+        // notices has stopped. Asserting the set in one pass is what that
+        // costs — and the third table joined it with §8.5's durable marker,
+        // whose rows are the only ones here that carry a correctness property
+        // rather than a debugging record.
         OutboxMessage row = OutboxRows.Healthy(fixture);
         await fixture.StageOutboxAsync(row);
         await fixture.SetOutboxProcessedAtAsync(row.MessageId, LongAgo);
@@ -224,6 +261,9 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
         await fixture.StageInboxAsync(
             new InboxMessage(Guid.CreateVersion7(), "catalog-inventory-events", LongAgo));
 
-        (await fixture.PurgeRetentionAsync()).ShouldBe((Outbox: 1, Inbox: 1));
+        await fixture.StageIdempotencyMarkersAsync(
+            new IdempotencyMarker(Key(), LongAgo));
+
+        (await fixture.PurgeRetentionAsync()).ShouldBe((Outbox: 1, Inbox: 1, Idempotency: 1));
     }
 }

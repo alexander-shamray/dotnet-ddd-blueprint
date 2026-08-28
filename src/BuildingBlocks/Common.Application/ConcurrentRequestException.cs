@@ -14,8 +14,22 @@ namespace Common.Application;
 /// — an attempt that claimed the key and then failed to record what happened.
 /// That entry stays in progress until the retention expires, so this exception
 /// is what every retry meets until then. §8.5's release table argues why
-/// holding is the right answer there: the work may be durable, and releasing
-/// would permit the duplicate write outright rather than postponing it.
+/// holding is still the right answer there, and the reason moved with
+/// ADR-037: it postpones the replay of an outcome that was never stored, where
+/// it used to postpone the duplicate. A release would no longer permit the
+/// second commit — <see cref="CommandAlreadyCommittedException"/> is what
+/// refuses that now.
+/// </para>
+/// <para>
+/// <b>So the two options differ in how many answers the caller gets, and
+/// holding is the one that gives more.</b> Held, a retry meets this exception
+/// until the claim expires and
+/// <see cref="CommandAlreadyCommittedException"/> after it — two answers over
+/// time. Released, the next retry claims the free key, meets the marker inside
+/// §6.3's transaction and gets that second answer straight away. What holding
+/// buys is not fewer refusals but a claim that is never handed on while the
+/// outcome of committed work is unknown; what it costs is up to a retention of
+/// the less precise of the two answers.
 /// </para>
 /// </remarks>
 public sealed class ConcurrentRequestException(Guid commandId)

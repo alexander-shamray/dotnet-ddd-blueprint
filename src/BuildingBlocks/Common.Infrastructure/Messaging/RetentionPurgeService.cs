@@ -1,5 +1,6 @@
 using System.Data;
 using Common.Application;
+using Common.Infrastructure.Idempotency;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Outbox;
 using Dapper;
@@ -10,17 +11,28 @@ using Microsoft.Extensions.Logging;
 namespace Common.Infrastructure.Messaging;
 
 /// <summary>
-/// §9.4's and §9.5's retention purges, in one hosted service. An outbox nobody
-/// prunes grows without bound and eventually degrades the filtered index the
-/// dispatcher's claim depends on; an inbox nobody prunes grows for the life of
-/// the service and its composite-key index degrades with it.
+/// §9.4's, §9.5's and §8.5's retention purges, in one hosted service. An outbox
+/// nobody prunes grows without bound and eventually degrades the filtered index
+/// the dispatcher's claim depends on; an inbox nobody prunes grows for the life
+/// of the service and its composite-key index degrades with it; and idempotency
+/// markers accumulate one row per protected command, for ever.
 /// </summary>
 /// <remarks>
-/// <b>One service covering both tables, which is §9.5's shape</b> — "both purges
+/// <b>One service covering every table, which is §9.5's shape</b> — "both purges
 /// run from the same hosted service on a slow schedule, batched so neither holds
-/// a long lock". The alternative is two hosted services with two schedules and
-/// one of them being the one nobody notices has stopped, which is §9.3's
-/// argument against a second outbox mechanism wearing different clothes.
+/// a long lock". The alternative is a hosted service per table with a schedule
+/// each and one of them being the one nobody notices has stopped, which is
+/// §9.3's argument against a second outbox mechanism wearing different clothes.
+/// <para>
+/// <b>The third table is not like the other two, and the difference is worth
+/// carrying.</b> A purged outbox row loses a debugging record and a purged
+/// inbox row loses a duplicate suppression the broker will not exercise again;
+/// a purged idempotency marker loses a <em>correctness</em> property, because
+/// it is what refuses a retry of a command that already committed. That is why
+/// <see cref="RetentionPolicy.IdempotencyWindow"/> has a floor the other two do
+/// not, and why this pass deletes on age alone with no predicate to get wrong:
+/// every row here records work that finished.
+/// </para>
 /// </remarks>
 public sealed class RetentionPurgeService : BackgroundService
 {
@@ -52,11 +64,13 @@ public sealed class RetentionPurgeService : BackgroundService
     // and no other.
     private readonly string _outboxSql;
     private readonly string _inboxSql;
+    private readonly string _idempotencySql;
 
     public RetentionPurgeService(
         IServiceScopeFactory scopes,
         OutboxTable outbox,
         InboxTable inbox,
+        IdempotencyMarkerTable markers,
         RetentionPolicy policy,
         ILogger<RetentionPurgeService> log)
     {
@@ -89,6 +103,17 @@ public sealed class RetentionPurgeService : BackgroundService
             DELETE TOP (@BatchSize) FROM {inbox.QualifiedName}
             WHERE HandledAt < @Before;
             """;
+
+        // Age alone again, and for a stronger version of the inbox's reason:
+        // a marker records a command that committed, so there is no unfinished
+        // state a predicate could protect. What protects it is the window,
+        // which RetentionPolicy refuses to set below the life of the Redis
+        // claim it backs up (§8.5).
+        _idempotencySql =
+            $"""
+            DELETE TOP (@BatchSize) FROM {markers.QualifiedName}
+            WHERE CommittedAt < @Before;
+            """;
     }
 
     // stoppingToken, not ct: CA1725 requires an override to keep the base's
@@ -118,12 +143,12 @@ public sealed class RetentionPurgeService : BackgroundService
     }
 
     /// <summary>
-    /// One purge pass over both tables. Returns the rows deleted from each.
+    /// One purge pass over every table. Returns the rows deleted from each.
     /// Public so tests drive it directly instead of racing a timer — the same
     /// seam <c>OutboxDispatcher.ProcessBatchAsync</c> offers, for the same
     /// reason (§12.4).
     /// </summary>
-    public async Task<(int Outbox, int Inbox)> PurgeAsync(CancellationToken ct)
+    public async Task<(int Outbox, int Inbox, int Idempotency)> PurgeAsync(CancellationToken ct)
     {
         // One scope and one connection for the pass, disposed at the end of it.
         // The purge is housekeeping on this service's own database and shares
@@ -142,7 +167,14 @@ public sealed class RetentionPurgeService : BackgroundService
         int inbox = await DeleteAsync(connection, _inboxSql, now - _policy.InboxWindow, ct);
         Purged(_log, inbox, "inbox", null);
 
-        return (outbox, inbox);
+        int idempotency = await DeleteAsync(
+            connection,
+            _idempotencySql,
+            now - _policy.IdempotencyWindow,
+            ct);
+        Purged(_log, idempotency, "idempotency", null);
+
+        return (outbox, inbox, idempotency);
     }
 
     /// <summary>

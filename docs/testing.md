@@ -281,7 +281,7 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
 > twenty-six tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy — 96 in total, with no
+> `Category!=Integration` selects the other seventy-two — 98 in total, with no
 > third state and nothing counted twice. Those figures read ten/81, then
 > twenty/91, then twenty-three/94, then twenty-four/95, then twenty-six/97, and
 > every retake up to that one was the suite growing while the callout did not —
@@ -305,16 +305,24 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > the paragraph below asks for and what this line exists to stop anyone
 > assuming past.
 >
+> **And it went back up on the next branch**, which is the same lesson from the
+> other side: [ADR-037](backend-architecture/appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)'s
+> floor on `RetentionPolicy.IdempotencyWindow` brought two cases with it, so
+> the fast half is seventy-two and the total is 98. A figure that has
+> moved in both directions inside two branches is one nobody should reason
+> about at all.
+>
 > **Those are the runner's numbers, and `--list-tests` answers a different
 > question.** For this project the two now agree — discovery and execution both
-> report 96, measured rather than assumed — and they have not always: the gap
-> was 82 against 81 when this callout was written, and mixing a partition
-> quoted from `--list-tests` with a total from `dotnet test` is how it first
-> came to claim 72 and 82. The 1,052 is summed from `dotnet test` output, so
-> quote what ran. **Agreement today is a measurement and not a guarantee** —
+> report 98, measured rather than assumed on each retake — and they have not
+> always: the gap was 82 against 81 when this callout was written, and mixing a
+> partition quoted from `--list-tests` with a total from `dotnet test` is how it
+> first came to claim 72 and 82. The 1,086 is summed from `dotnet test`
+> output, so quote what ran. **Agreement today is a measurement and not a
+> guarantee** —
 > which is why the rule outlives the discrepancy that produced it.
 >
-> Across the solution the split is **847 and 205 of 1,052**, and the fast half
+> Across the solution the split is **869 and 217 of 1,086**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -350,8 +358,10 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **829** and **205**, summing to the 1,052
-the whole suite runs — which is the arithmetic the callout below asks for.
+on this repository they are **18**, **851** and **217**, summing to the 1,086
+the whole suite runs — which is the arithmetic the callout below asks for. The
+architecture stage is the one that has not moved: it is 18 gates, measured
+again on the branch that took the other two figures.
 
 **The integration figure read 187 for two branches and the arithmetic never
 closed**, which is `CLAUDE.md`'s own rule about restated numbers catching one:
@@ -390,8 +400,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 847 and 205 summing to
-> 1,052 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 869 and 217 summing to
+> 1,086 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

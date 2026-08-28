@@ -4,6 +4,7 @@ using Ordering.Domain.Orders;
 using Ordering.Infrastructure.Persistence;
 using Ordering.Migrator;
 using Common.Application;
+using Common.Infrastructure.Idempotency;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
 using Common.Infrastructure.Outbox;
@@ -625,6 +626,17 @@ public sealed class ServiceFixture : IAsyncLifetime
             .ToListAsync(TestContext.Current.CancellationToken);
     }
 
+    /// <summary>Every idempotency marker, untracked, for asserting over (§8.5).</summary>
+    public async Task<IReadOnlyList<IdempotencyMarker>> IdempotencyMarkersAsync()
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+
+        return await db.IdempotencyMarkers
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
     /// <summary>
     /// Writes inbox rows directly, for tests about the purge rather than the
     /// filter. The filter's own tests go through a consume pipeline, because
@@ -641,6 +653,21 @@ public sealed class ServiceFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// Writes idempotency markers directly, for tests about the purge rather
+    /// than about §8.5. The marker's own tests go through the pipeline, because
+    /// what they are about is that the row commits with the work and vanishes
+    /// with a rollback — which staging it here would assume rather than show.
+    /// </summary>
+    public async Task StageIdempotencyMarkersAsync(params IdempotencyMarker[] rows)
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+
+        db.IdempotencyMarkers.AddRange(rows);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
     /// Ages a processed outbox row, which is how a retention test reaches the
     /// window without a fake clock: the purge resolves <c>TimeProvider</c> from
     /// its own scope inside the host, and moving a row backwards is both
@@ -652,8 +679,8 @@ public sealed class ServiceFixture : IAsyncLifetime
             processedAt,
             messageId);
 
-    /// <summary>Runs exactly one retention pass over both tables. No timers, no waiting.</summary>
-    public Task<(int Outbox, int Inbox)> PurgeRetentionAsync() =>
+    /// <summary>Runs exactly one retention pass over every table. No timers, no waiting.</summary>
+    public Task<(int Outbox, int Inbox, int Idempotency)> PurgeRetentionAsync() =>
         Factory.Services
             .GetRequiredService<RetentionPurgeService>()
             .PurgeAsync(TestContext.Current.CancellationToken);
@@ -665,21 +692,28 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// </summary>
     /// <remarks>
     /// Constructed rather than resolved, because the policy is a constructor
-    /// argument and the service composes its two statements from the same
+    /// argument and the service composes a statement per table from the same
     /// registered tables either way — so what varies is the batching and
     /// nothing else.
     /// </remarks>
-    public Task<(int Outbox, int Inbox)> PurgeWithAsync(RetentionPolicy policy)
+    public Task<(int Outbox, int Inbox, int Idempotency)> PurgeWithAsync(RetentionPolicy policy)
     {
         RetentionPurgeService purge = new(
             Factory.Services.GetRequiredService<IServiceScopeFactory>(),
             Factory.Services.GetRequiredService<OutboxTable>(),
             Factory.Services.GetRequiredService<InboxTable>(),
+            Factory.Services.GetRequiredService<IdempotencyMarkerTable>(),
             policy,
             Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
 
         return purge.PurgeAsync(TestContext.Current.CancellationToken);
     }
+
+    /// <summary>Markers §8.5 holds for one key — nought or one, and which is the point.</summary>
+    public Task<int> IdempotencyMarkerCountAsync(string key) =>
+        ScalarAsync<int>(
+            "SELECT Value = COUNT(*) FROM ordering.IdempotencyMarkers WHERE [Key] = {0}",
+            key);
 
     /// <summary>Rows the transaction probe holds for one id.</summary>
     public Task<int> ProbeRowCountAsync(Guid id) =>

@@ -12,20 +12,47 @@ python tools/new-service/new_service.py Yankee --port 5199
 |---|---|
 | `name` | The service, PascalCase. It becomes the namespace root, the project names, the database, the SQL schema, both connection-string keys and both Compose service names |
 | `--port` | The host port the API publishes. **Required** — a port is an allocation recorded in [§14.1](../../docs/backend-architecture/14-local-development.md) and in `deploy/compose/README.md`, and a script that derived one would quietly disagree with a printed chapter. The run refuses a port another service already publishes |
-| `--migration-id` | The `InitialCreate` id, and the base for the outbox migration one minute after it. Defaults to the current UTC timestamp; the tests pass a fixed one |
+| `--migration-id` | The `InitialCreate` id, and the base every later template migration is spaced from — one minute per entry in `TEMPLATE_MIGRATIONS`, in the order they apply. Defaults to the current UTC timestamp; the tests pass a fixed one |
 | `--repo-root` | Defaults to this script's repository |
 
-It writes fifty-four files and edits five. The five are `Platform.slnx`,
-`deploy/compose/docker-compose.yml`, `docker-compose.infra-only.yml`,
-`.env.example` and `deploy/compose/README.md`.
+It creates a tree under `src/Services/<Name>` and `tests/<Name>.*`, and it
+edits the tracked files below. **They are named rather than counted, because
+the count rotted quietly**: PR-11's design spec said four, this sentence said
+five, #44's broker account made the truth six without either of them moving,
+and #161's allow-list made it seven. What a reader can check is whether the
+table matches `plan()`.
+
+| | |
+|---|---|
+| `Platform.slnx` | the service's project entries, in alphabetical position |
+| `deploy/compose/docker-compose.yml` | the migrator and API pair |
+| `deploy/compose/docker-compose.infra-only.yml` | both halves of that pair, excluded |
+| `deploy/compose/.env.example` | the two §7.1 connection variables |
+| `deploy/compose/README.md` | one row in the ports table |
+| `deploy/compose/rabbitmq/definitions.json` | the broker account the service authenticates as, since #44 |
+| `.github/secret-scan/allowed-secrets.txt` | one accepted-finding entry per credential-shaped literal the render carries, since #161 |
+
+**The last one is the difference between a service that renders and a service
+that can be committed.** §15.1's secret scan reads the working tree, so it
+reads the tree this leaves behind, and it refuses a credential-shaped literal
+nobody has written down a reason for. Catalog's literals all have an entry,
+added by hand the day Catalog landed; a rendered service carries the same
+literals under its own name and so under its own fingerprints. The scaffold
+loads the real scanner, runs it over what it has just built, and writes an
+entry per finding **the render introduced** — the fingerprints are the gate's
+own, never a second implementation of which substring each rule matches, and
+each shared file is scanned before and after so a finding that was already
+there stays somebody else's. A suppression arriving for a credential the run
+is not writing is the outcome `allowed-secrets.txt` exists to refuse, and the
+first version of this step could produce one.
 
 **Run it on a clean worktree**, and undoing it is then two commands — the
-generated tree is untracked and the five edits are tracked, so neither one
+generated tree is untracked and the edits above are tracked, so neither one
 alone is enough:
 
 ```bash
 rm -rf src/Services/Yankee tests/Yankee.*
-git restore Platform.slnx deploy/compose
+git checkout -- Platform.slnx deploy/compose/ .github/secret-scan/allowed-secrets.txt
 ```
 
 (`Yankee` rather than a `<Name>` placeholder because this is a `bash` fence and
@@ -36,45 +63,54 @@ followed literally, deleted the service that had just landed. A probe the
 suite already uses cannot become a service later, which is the property the
 example wanted all along.)
 
-`git checkout .` is **not** the undo and this file used to say it was: it
-leaves every generated file in place, because they are untracked, and it
-discards any unrelated tracked edit you happened to have. `git status` after a
-run shows exactly the five and the new directories.
+**The paths in that command are the whole of it.** `git checkout .` — the
+same verb with no pathspec — is **not** the undo, and this file used to say it
+was: it leaves every generated file in place, because they are untracked, and
+it discards any unrelated tracked edit you happened to have. So the two forms
+read alike and behave nothing alike, which is why the block above names the
+files rather than the directory it is standing in. `git status` after a run
+shows exactly the tracked files above and the new directories, and that list
+is what the pathspec has to cover.
 
 ## What you get
 
 [§4.1](../../docs/backend-architecture/04-solution-structure.md)'s five
 service projects, three test projects and the `TestSupport` library — nine in
 all, and §4.1 is explicit that the last is not a test project — with
-everything the delivery plan has built into the template through PR-16:
+everything the delivery plan has built into the template so far:
 `DbContext` and conventions, `EfUnitOfWork`, the connection factory, the
 readiness checks, the §7.4 migrator host, the `InitialCreate` migration that
-creates the schema and the `AddOutbox`, `AddInbox` and
-`AddOutboxRetentionIndex` ones beside it, §9.4's outbox with its dispatcher
-and allow-list mapper, §9.5's inbox filter and the retention purge, the §9 bus
+creates the schema and the `AddOutbox`, `AddInbox`,
+`AddOutboxRetentionIndex` and `AddIdempotencyMarkers` ones beside it, §9.4's
+outbox with its dispatcher and allow-list mapper, §9.5's inbox filter, §8.5's
+durable idempotency marker and the retention purge over all three of their
+tables, the §9 bus
 registration — a scaffolded host refuses to start without
 `ConnectionStrings:RabbitMq` — §11.3's JWT validation and the test auth
 scheme, both Dockerfiles, the Compose pair, and the architecture gates of
 [§4.2](../../docs/backend-architecture/04-solution-structure.md).
 
-The service builds and its sixty tests pass before you have written a
-line, and thirty of them run against real SQL Server and RabbitMQ containers:
+The service builds and its seventy-nine tests pass before you have written a
+line, and thirty-six of them run against real SQL Server and RabbitMQ
+containers:
 the migrator's exit code, §7.1's two-key boundary, the readiness probe — 200
 only once the bus connects — `EfUnitOfWork`'s commit, rollback and retry
-semantics, the inbox filter's once-per-endpoint guarantee, the retention
-purge over both tables, and the outbox dispatcher's per-row isolation, attempt
+semantics, the inbox filter's once-per-endpoint guarantee, §8.5's marker
+committing with the work and vanishing with a rollback, the retention purge
+over every table, and the outbox dispatcher's per-row isolation, attempt
 cap and loud failure on a `Local` row with no registered handler.
 
 Those two counts are measured rather than estimated, and they move whenever a
 PR adds to the template — they read forty-one and sixteen until PR-18
 recounted them against a rendered service, three PRs after they stopped being
-true, and fifty-six until PR-22 did it again.
+true, fifty-six until PR-22 did it again, and seventy-eight until PR-32 rendered a
+service carrying §8.5's marker suite.
 
 **Adding to the number is not recounting it.** PR-22 put three tests into the
 template and the total moved by four, so the only way to know this pair is to
-render `Yankee` at 5199 and run all three of its suites. The thirty is the
-`Category=Integration` count now, which is a filter anyone can rerun rather
-than a tally somebody kept.
+render `Yankee` at 5199 and run all three of its suites — which is what PR-32
+did, twice: 1, 18 and 60. The thirty-six is the `Category=Integration` count now,
+which is a filter anyone can rerun rather than a tally somebody kept.
 
 **The outbox arrives wired and empty**, which is the state to expect: the
 allow-list mapper has no entries, so every domain event this service raises is
@@ -160,3 +196,18 @@ So a Catalog change that breaks the scaffold fails here, loudly, naming the
 file. If it does, reconcile `new_service.py` with the template in the same
 change: a file added under `src/Services/Catalog` has to be classified as
 template or slice, and the script will not guess.
+
+**A credential-shaped literal added to the template refuses the run the same
+way**, and for the same reason. `SCAN_REASONS` gives one sentence per finding
+§15.1's scanner reports over a render; a finding no row explains raises
+`ScaffoldError` naming the file, the line and the rule, because a reason this
+script invented would be a suppression nobody wrote — which is the one thing
+`allowed-secrets.txt` says in its own header it must never hold. The refusals
+are in `RefusesToRun` beside the unclassified-file ones, which is where they
+belong and where they were not: the paragraph above stated this property for a
+release while nothing exercised either raise.
+
+**And `.github/` missing is the only thing the step is quiet about.** A
+checkout with that directory and without the scanner, or without its
+allow-list, refuses — it is a real tree, and rendering into it produces a
+service CI will not take.

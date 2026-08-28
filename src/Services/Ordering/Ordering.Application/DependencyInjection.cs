@@ -62,6 +62,16 @@ public static class DependencyInjection
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(IdempotencyBehavior<,>));
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>));
 
+        // The key one of those two behaviours builds and the other one writes,
+        // and it is scoped because a command is. Registered beside them rather
+        // than in Common.Application's own AddDispatcher, because these lines
+        // are where a reader looks to find out what the pipeline is made of —
+        // and because a service that omits it does not fail at startup:
+        // ValidateOnBuild never constructs an open generic, so the miss would
+        // surface as a TransactionBehavior that cannot be resolved on the first
+        // dispatched command. A registration test is what guards this line.
+        services.AddScoped<IdempotencyContext>();
+
         // §4.2's sample line. IValidator<T> is not in PluggableInterfaces.All
         // because it is FluentValidation's contract, not one of ours — its own
         // scanner knows its own conventions (Include* filters, internal
