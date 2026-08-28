@@ -4474,6 +4474,48 @@ class TheGitArgvGuard(unittest.TestCase):
         # the end of the string.
         self.assertAdmitted("git log \\")
 
+    def test_a_here_string_is_not_a_heredoc(self):
+        # **`<<<` fed a push straight past the guard.** The bare-delimiter
+        # alternative excludes `<`, so nothing matched at the FIRST character
+        # of `<<<EOF` — and the scan then reached the second one, where
+        # `<<EOF` matched perfectly, took the rest of the script for a body,
+        # and stripped it. Measured: `cat <<<EOF` prints the word `EOF` on
+        # stdout, the next line RUNS, and the trailing `EOF` is a
+        # command-not-found. Raised in review.
+        #
+        # Two tests close it, because the operator has two ends: an index
+        # inside a run of `<` is not the start of an operator, and an operator
+        # that continues past `<<` is not a heredoc.
+        for command in (
+            f"cat <<<EOF{NEWLINE}git push origin +HEAD:main{NEWLINE}EOF",
+            f'cat <<<"EOF"{NEWLINE}git push origin +HEAD:main',
+            f"cat <<<<EOF{NEWLINE}git push origin +HEAD:main",
+            f"git log < f{NEWLINE}git push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **The controls carry the weight here**, because the cheap fix for
+        # this — refusing anything with `<<` in it — would have passed the
+        # cases above and broken every commit body this repository writes.
+        # A heredoc is still a heredoc in all three of its forms.
+        tab = chr(9)
+        self.assertAdmitted(
+            f"git commit -F - <<EOF{NEWLINE}git push origin +HEAD:main"
+            f"{NEWLINE}EOF")
+        self.assertAdmitted(
+            f"git commit -F - <<'EOF'{NEWLINE}git push origin +HEAD:main"
+            f"{NEWLINE}EOF")
+        self.assertAdmitted(
+            f"git commit -F - <<-EOF{NEWLINE}{tab}git push origin +HEAD:main"
+            f"{NEWLINE}{tab}EOF")
+
+        # And an unquoted body still expands, so the delimiter's quoting is
+        # still doing its job after the operator test was added in front of it.
+        self.assertRefused(
+            f"git commit -F - <<EOF{NEWLINE}$(git push origin +HEAD:main)"
+            f"{NEWLINE}EOF")
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an

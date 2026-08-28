@@ -281,7 +281,23 @@ def heredoc_spans(command):
     for index, in_quotes, in_comment in shell_positions(command):
         if in_quotes or in_comment:
             continue
-        if command.startswith("<<", index) and (not openers or index >= openers[-1][0]):
+        if not command.startswith("<<", index):
+            continue
+        # **`<<<` is a here-string, and it fed a push straight past this.**
+        # The bare-delimiter alternative excludes `<`, so no opener matched at
+        # the FIRST character of `<<<EOF` — and the scan then reached the
+        # second one, where `<<EOF` matched perfectly. `cat <<<EOF` passes the
+        # word `EOF` on stdin and the next line is an ordinary command:
+        # measured, `EOF` is printed and the push runs. Raised in review.
+        #
+        # Two tests rather than one, because the operator has two ends. An
+        # index inside a run of `<` is not the start of an operator, and an
+        # operator that continues past `<<` is not a heredoc.
+        if index > 0 and command[index - 1] == "<":
+            continue
+        if command.startswith("<<<", index):
+            continue
+        if not openers or index >= openers[-1][0]:
             match = HEREDOC.match(command, index)
             if match:
                 bare = match.group("bare")
