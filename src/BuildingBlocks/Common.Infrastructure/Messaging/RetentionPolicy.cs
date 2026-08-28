@@ -71,17 +71,28 @@ public sealed record RetentionPolicy
     /// </summary>
     /// <remarks>
     /// <b>It has a floor the other two do not, and the floor is
-    /// <see cref="IdempotencyRetention.Window"/>.</b> The marker is what refuses
-    /// a retry of a command that committed, and the order the two expire in is
-    /// the whole of the constraint. While the Redis claim is alive the key is
-    /// not claimable at all, so a purged marker costs nothing yet; the gap
-    /// opens when that claim expires with the marker already gone, and the
-    /// next retry then claims a free key and runs the command a second time.
-    /// The gap is exactly the difference between the two windows, so a marker
-    /// window below the claim's own is the only way to open one — and the
-    /// duplicate write §8.5 exists to prevent would arrive at a boundary set by
-    /// a retention number, which is the least visible place a correctness
-    /// property could be lost.
+    /// <see cref="IdempotencyRetention.MarkerFloor"/> — the claim's own window
+    /// plus a skew allowance.</b> The marker is what refuses a retry of a
+    /// command that committed, and the order the two expire in is the whole of
+    /// the constraint. While the Redis claim is alive the key is not claimable
+    /// at all, so a purged marker costs nothing yet; the gap opens when that
+    /// claim expires with the marker already gone, and the next retry then
+    /// claims a free key and runs the command a second time — the duplicate
+    /// write §8.5 exists to prevent, arriving at a boundary set by a retention
+    /// number, which is the least visible place a correctness property could be
+    /// lost.
+    /// <para>
+    /// <b>Matching the claim exactly does not close that gap, which is why the
+    /// floor is not simply <see cref="IdempotencyRetention.Window"/>.</b>
+    /// <c>CompleteAsync</c> re-arms the claim's expiry at the commit, so both
+    /// windows start at the same event and equality aims both expiries at one
+    /// nominal instant. They are then counted by different clocks — Redis's for
+    /// the claim, and for the marker the purging pod's clock against a
+    /// timestamp the writing pod stamped, across three replicas — so any skew
+    /// in the wrong direction purges the marker first.
+    /// <see cref="IdempotencyRetention.SkewAllowance"/> is what turns the
+    /// knife-edge into a margin, and argues its own width.
+    /// </para>
     /// <para>
     /// Read rather than restated, for the reason
     /// <see cref="IdempotencyRetention"/> exists: two 24s in two files agree
@@ -91,7 +102,7 @@ public sealed record RetentionPolicy
     public TimeSpan IdempotencyWindow
     {
         get => _idempotencyWindow;
-        init => _idempotencyWindow = AtLeast(InRange(value, MaxWindow), IdempotencyRetention.Window);
+        init => _idempotencyWindow = AtLeast(InRange(value, MaxWindow), IdempotencyRetention.MarkerFloor);
     }
 
     /// <summary>
@@ -190,13 +201,17 @@ public sealed record RetentionPolicy
             : throw new ArgumentOutOfRangeException(
                 member,
                 value,
-                $"{member} must be at least {floor}, which is how long §8.5's Redis claim " +
-                "survives, and the order of the two expiries is the whole of why. A shorter " +
-                "window purges the marker first; the claim then expires with nothing left to " +
-                "remember the commit, so the next retry claims a free key and runs the command " +
-                "a second time. The gap is the difference between the two windows, and the " +
-                "write this platform guarantees happens once happens twice at a boundary set " +
-                "by a retention setting.");
+                $"{member} must be at least {floor} — how long §8.5's Redis claim survives, " +
+                "plus a clock-skew allowance — and the order of the two expiries is the whole " +
+                "of why. A shorter window purges the marker first; the claim then expires with " +
+                "nothing left to remember the commit, so the next retry claims a free key and " +
+                "runs the command a second time. The allowance is in the floor because the two " +
+                "expiries are timed by different clocks: the claim's is re-armed at the commit " +
+                "and counted by Redis, while the marker's age is the purging pod's clock minus " +
+                "a timestamp the writing pod stamped. Matching the claim exactly aims both at " +
+                "one instant with no margin, so any skew deletes the marker first and the write " +
+                "this platform guarantees happens once happens twice at a boundary set by a " +
+                "retention setting.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

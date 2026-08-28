@@ -63,10 +63,26 @@ public class RetentionPolicyTests
         Should.Throw<ArgumentOutOfRangeException>(
             () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window - OneSecond });
 
-        // Equal is admitted, and it is the smallest window with no gap in it.
-        new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window }
+        // MATCHING THE CLAIM EXACTLY IS REFUSED, and this assertion used to say
+        // the opposite — "equal is admitted, and it is the smallest window with
+        // no gap in it". It is not gap-free. `CompleteAsync` re-arms the
+        // claim's expiry at the commit, the same event that stamps
+        // `CommittedAt`, so equality aims both expiries at one nominal instant
+        // and leaves no margin; the two are then counted by different clocks —
+        // Redis's, against the purging pod's clock minus the writing pod's
+        // timestamp, across three replicas — and any skew in the wrong
+        // direction purges the marker first. The floor carries an allowance for
+        // that, so the smallest admissible window is the claim plus it.
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window });
+
+        Should.Throw<ArgumentOutOfRangeException>(
+            () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.MarkerFloor - OneSecond });
+
+        // The floor itself is admitted, and is the smallest window that is.
+        new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.MarkerFloor }
             .IdempotencyWindow
-            .ShouldBe(IdempotencyRetention.Window);
+            .ShouldBe(IdempotencyRetention.MarkerFloor);
 
         // And the floor does not replace the other checks: a negative window is
         // still refused as one rather than as a value below the floor, which is
@@ -90,7 +106,7 @@ public class RetentionPolicyTests
         new RetentionPolicy()
             .IdempotencyWindow
             .ShouldBeGreaterThanOrEqualTo(
-                IdempotencyRetention.Window,
+                IdempotencyRetention.MarkerFloor,
                 "the default is the one value the init validator never sees");
     }
 

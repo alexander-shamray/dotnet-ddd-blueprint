@@ -2338,8 +2338,16 @@ deletes it is a retention window this repository chooses.
   not exercise again; a purged marker re-opens the duplicate. Setting the window
   below the Redis claim's life leaves a stretch in which the key is claimable
   again and nothing remembers the commit, so `RetentionPolicy` reads
-  `IdempotencyRetention.Window` and refuses anything shorter rather than
-  restating the number.
+  `IdempotencyRetention.MarkerFloor` and refuses anything shorter rather than
+  restating the number. **The floor is the claim's window plus a skew
+  allowance, and equality is refused rather than admitted as the exact fit.**
+  `CompleteAsync` re-arms the claim at the commit that stamps `CommittedAt`, so
+  matching it aims both expiries at one instant; the claim is then counted by
+  Redis and the marker's age by the purging pod's clock against the writing
+  pod's timestamp, across three replicas, and any skew purges the marker first.
+  Five minutes bounds that rather than removing it —
+  [#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167)
+  is the database-clock fix that would.
 - **The uniqueness of the key is a backstop and not the mechanism.** Two
   attempts that reach the write concurrently produce a constraint violation
   rather than two rows; what makes that case rare is the Redis claim, and what
