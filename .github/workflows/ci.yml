@@ -246,10 +246,12 @@ jobs:
       - name: Compile what it rendered
         run: dotnet build tests/Yankee.Api.Tests/Yankee.Api.Tests.csproj
 
-      # No cleanup step. The scaffold edits five tracked files as well as
-      # creating its own, so a local run needs `git checkout` afterwards
-      # (CLAUDE.md documents it); here the checkout is discarded with the
-      # runner and cleaning it would only be tidying something nobody reads.
+      # No cleanup step. The scaffold edits tracked files as well as creating
+      # its own — `tools/new-service/README.md` names them, and the count is
+      # deliberately not restated here because it has already moved twice — so
+      # a local run needs `git checkout` afterwards (CLAUDE.md documents it);
+      # here the checkout is discarded with the runner and cleaning it would
+      # only be tidying something nobody reads.
 
   # §15.1's fork: only services whose files changed are built and deployed.
   #

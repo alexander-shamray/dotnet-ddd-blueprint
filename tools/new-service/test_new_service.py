@@ -18,14 +18,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import new_service
 from new_service import (
     COPY_ROOTS,
     MIGRATIONS as MIGRATIONS_DIR,
     OMITTED,
+    SCAN_ALLOW_LIST,
+    SCAN_GATE,
+    TEMPLATE_MIGRATIONS,
     Names,
     Plan,
     ScaffoldError,
     apply,
+    load_scan_gate,
     main,
     plan,
 )
@@ -82,10 +87,13 @@ def render(name: str = PROBE, port: int = PORT, repo_root: Path = REPO_ROOT) -> 
 
 
 def template_copy(destination: Path) -> Path:
-    """The template and the six shared files, and nothing else.
+    """The template and the shared files a render edits, minus §15.1's gate.
 
     Only the tests that need to *break* the template copy it; everything else
-    reads the checkout directly.
+    reads the checkout directly. The secret scan is deliberately absent rather
+    than forgotten — `template_copy_with_gate` below adds it, and the pair is
+    what makes the degraded path testable from both sides. The files are
+    listed and not counted, because the list has already grown twice.
     """
     for root in COPY_ROOTS:
         shutil.copytree(
@@ -104,6 +112,38 @@ def template_copy(destination: Path) -> Path:
         (destination / shared).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO_ROOT / shared, destination / shared)
     return destination
+
+
+def template_copy_with_gate(destination: Path) -> Path:
+    """The same tree, and §15.1's secret scan beside it.
+
+    The tree above has no `.github/`, so "the scaffold degraded because the
+    gate is not there" and "the step was never wired in at all" write the same
+    nothing and pass the same assertion. This root is the positive control
+    that makes the absence mean something: the same render, one directory
+    different, and an allow-list entry has to appear.
+    """
+    root = template_copy(destination)
+    shutil.copytree(
+        REPO_ROOT / Path(SCAN_GATE).parent,
+        root / Path(SCAN_GATE).parent,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    return root
+
+
+def allow_list_entries(gate, text: str) -> tuple[list, list[str]]:
+    """An allow-list body, parsed by the gate's own reader.
+
+    Never a second parser written here. What the entries mean is the gate's
+    question and this suite is asking whether the scaffold's answers satisfy
+    it, so re-implementing the four-field split would be a double agreeing
+    with itself about a format neither of them owns.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / Path(SCAN_ALLOW_LIST).name
+        path.write_bytes(text.encode("utf-8"))
+        return gate.read_allowed(path, {rule.id for rule in gate.RULES})
 
 
 class RendersTheTemplate(unittest.TestCase):
@@ -287,6 +327,7 @@ class OmitsTheSlice(unittest.TestCase):
                 "AddZuluApplication_registers_the_projection_registry_scoped",
                 "AddZuluApplication_registers_the_allow_list_mapper",
                 "AddZuluApplication_registers_the_four_behaviours_in_pipeline_order",
+                "AddZuluApplication_registers_the_key_carrier_the_two_behaviours_share",
             ],
             re.findall(r"public void (\w+)\(\)", tests),
         )
@@ -507,22 +548,25 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
         # service being scaffolded. The rule survives the copy; the reason does
         # not travel with it.
         migration = self.rendered.created[f"{self.prefix}/{INBOX_MIGRATION_ID}_AddInbox.cs"]
-        self.assertIn("runs from first boot and purges both tables", migration)
+        self.assertIn("runs from first boot and deletes from every", migration)
         self.assertNotIn("Consumes cell", migration)
 
     def test_it_leaves_no_later_catalog_migration_behind(self):
-        # Nine files: four migrations, their four designers, and the snapshot.
-        # Catalog's own AddProducts is what must not be here.
+        # Every template migration, its designer, and one snapshot — derived
+        # from TEMPLATE_MIGRATIONS rather than written out, because a literal
+        # here is a second place to edit when that tuple grows and it says
+        # nothing the tuple does not. Catalog's own AddProducts is what must
+        # not be here.
         migrations = [path for path in self.rendered.created if path.startswith(self.prefix)]
-        self.assertEqual(9, len(migrations), migrations)
+        self.assertEqual((len(TEMPLATE_MIGRATIONS) * 2) + 1, len(migrations), migrations)
         self.assertFalse([path for path in migrations if "AddProducts" in path])
 
-    def test_the_snapshot_describes_both_messaging_tables_and_nothing_else(self):
+    def test_the_snapshot_describes_the_technical_tables_and_nothing_else(self):
         # Catalog's snapshot cannot be copied — it describes Product, and the
         # next `migrations add` here would generate a drop for a table that
         # never existed. This one is EF's own description of the model a
-        # scaffolded service actually has: the outbox and inbox entities, no
-        # aggregate.
+        # scaffolded service actually has: the outbox, the inbox and §8.5's
+        # marker, no aggregate.
         #
         # Both halves matter, and the inbox is the half that was easy to miss.
         # Deriving the snapshot from the outbox migration's designer — the last
@@ -537,7 +581,9 @@ class TheMigrationAndItsSnapshot(unittest.TestCase):
         self.assertNotIn("[Migration(", snapshot)
         self.assertIn('modelBuilder.Entity("Common.Infrastructure.Outbox.OutboxMessage"', snapshot)
         self.assertIn('modelBuilder.Entity("Common.Infrastructure.Inbox.InboxMessage"', snapshot)
-        self.assertEqual(2, snapshot.count("modelBuilder.Entity("))
+        self.assertIn(
+            'modelBuilder.Entity("Common.Infrastructure.Idempotency.IdempotencyMarker"', snapshot)
+        self.assertEqual(3, snapshot.count("modelBuilder.Entity("))
         self.assertNotIn("Product", snapshot.replace("ProductVersion", ""))
 
     def test_the_machine_owned_files_keep_the_sorted_using_block_ef_writes(self):
@@ -755,6 +801,71 @@ class EditsTheSharedFiles(unittest.TestCase):
             readme,
         )
 
+    def test_the_allow_list_gains_an_entry_for_every_finding_the_render_adds(self):
+        # §15.1's secret scan reads the working tree, so it reads the tree this
+        # leaves behind. Every credential-shaped literal Catalog carries is an
+        # entry in that file, written by hand the day Catalog landed; a
+        # rendered service carries the same literals under its own name and
+        # therefore under its own fingerprints, and until #161 nobody wrote
+        # those — so a scaffolded service could not be committed at all.
+        gate = load_scan_gate(REPO_ROOT)
+        self.assertIsNotNone(gate, f"{SCAN_GATE} is this repository's own gate")
+
+        self.assertIn(SCAN_ALLOW_LIST, self.rendered.updated)
+        before = (REPO_ROOT / SCAN_ALLOW_LIST).read_bytes().decode("utf-8")
+        after = self.rendered.updated[SCAN_ALLOW_LIST]
+        self.assertTrue(after.startswith(before), "the render rewrote the allow-list")
+
+        # The gate's own reader, which is what refuses a line that is not four
+        # fields, a path with a glob in it, a rule nobody declares or a reason
+        # too short to be one. Asserting no problem is asserting all four.
+        existing, _ = allow_list_entries(gate, before)
+        entries, problems = allow_list_entries(gate, after)
+        self.assertEqual([], problems)
+
+        added = entries[len(existing):]
+        self.assertNotEqual([], added, "the render generated no entry at all")
+
+        # A duplicate is a failed build from the tool that exists to prevent
+        # one: `audit` reports the second entry as duplicating the first.
+        keys = [entry.key() for entry in entries]
+        self.assertEqual(len(set(keys)), len(keys), "a generated entry duplicates another")
+
+        # And every one of them is for a finding this render INTRODUCED. The
+        # assertion this replaces asked whether the entry's path or sentence
+        # named the probe, which the mislabelling bug satisfies trivially:
+        # the reason is renamed on the way out, so an entry written over
+        # another service's credential says `Zulu` as readily as a correct one.
+        # What cannot be faked is the file as it stands in the checkout — a key
+        # already in it is somebody else's finding, whatever the sentence
+        # claims. Green here against the old code too, because this
+        # repository's allow-list is complete and the defect needs a missing
+        # entry to surface; `TheAllowListStepDegrades` is where it is driven
+        # red, and that gap is exactly why the weak assertion looked adequate.
+        for entry in added:
+            if entry.path not in self.rendered.updated:
+                continue                      # a created file has no "before"
+            original = (REPO_ROOT / entry.path).read_bytes().decode("utf-8")
+            self.assertNotIn(
+                entry.key(),
+                {found.key() for found in gate.scan_text(entry.path, original, gate.RULES)},
+                entry.reason,
+            )
+
+    def test_no_generated_reason_carries_the_value_it_is_about(self):
+        # The allow-list is walked like every other file, so a reason quoting
+        # the literal reports itself — the file's own header says so. Measured
+        # by running the rules over what was appended rather than by looking
+        # for the values: what counts as a value is the gate's question, and a
+        # search written here would be a second answer to it.
+        gate = load_scan_gate(REPO_ROOT)
+        before = (REPO_ROOT / SCAN_ALLOW_LIST).read_bytes().decode("utf-8")
+        appended = self.rendered.updated[SCAN_ALLOW_LIST][len(before):]
+        self.assertEqual(
+            [],
+            [str(finding) for finding in gate.scan_text(SCAN_ALLOW_LIST, appended, gate.RULES)],
+        )
+
     def test_every_shared_file_keeps_the_line_endings_it_had(self):
         # Not "keeps CRLF": `.gitattributes` forces that on `*.cs` only, so
         # every file edited here is CRLF on Windows and LF on the runner. The
@@ -910,6 +1021,157 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
         self.assertEqual(sorted(services), services)
         self.assertIn("Yankee", services)
         self.assertIn("Zulu", services)
+
+
+class TheAllowListStep(unittest.TestCase):
+    """§15.1's gate over a tree the render can actually be applied to.
+
+    Everything here needs a root of its own, for two different reasons. The
+    degradation pair needs one root with `.github/` and one without, because
+    the step degrading and the step never having been wired in write the same
+    nothing — the absence test is worth exactly nothing on its own, and is
+    stated after the control that gives it meaning. The rest need a render
+    that has been *written*, because what they are about is the second run and
+    what the first one left behind.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = template_copy_with_gate(Path(self.directory.name))
+        self.gate = load_scan_gate(self.root)
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def allow_list(self) -> str:
+        return (self.root / SCAN_ALLOW_LIST).read_bytes().decode("utf-8")
+
+    def test_a_root_without_the_gate_writes_no_entry(self):
+        # The only root in this class without `.github/`, and the only one the
+        # step is allowed to be silent about.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+
+            rendered = plan(root, PROBE, PORT, MIGRATION_ID)
+
+            self.assertIsNone(load_scan_gate(root))
+            self.assertNotIn(SCAN_ALLOW_LIST, rendered.updated)
+
+    def test_the_same_render_with_the_gate_beside_it_writes_the_entries(self):
+        existing, _ = allow_list_entries(self.gate, self.allow_list())
+
+        rendered = plan(self.root, PROBE, PORT, MIGRATION_ID)
+
+        self.assertIn(SCAN_ALLOW_LIST, rendered.updated)
+        entries, problems = allow_list_entries(self.gate, rendered.updated[SCAN_ALLOW_LIST])
+        self.assertEqual([], problems)
+        self.assertGreater(len(entries), len(existing))
+
+    def test_a_rendered_service_passes_the_secret_scan(self):
+        # The property that actually matters, and the one nothing asserted
+        # before #161: §4.5 claims this script produces a service that builds
+        # and its tests pass, and a service a mandatory CI job refuses is
+        # neither.
+        #
+        # Over the APPLIED tree, with the gate's own walk. The first version of
+        # this test scanned `{**created, **updated}` with `gate.RULES` — which
+        # is what `update_allowed_secrets` does, from the same dict with the
+        # same rules, appending a line per key it does not find. Two runs of
+        # one loop cannot disagree, so the assertion could not fail. `scan_tree`
+        # reads what is on disk, which is the thing CI reads.
+        apply(self.root, plan(self.root, PROBE, PORT, MIGRATION_ID))
+
+        entries, problems = allow_list_entries(self.gate, self.allow_list())
+        self.assertEqual([], problems)
+        findings, scanned = self.gate.scan_tree(self.root, self.gate.RULES)
+
+        # Positive controls, and neither is decoration: a walk that read
+        # nothing and a scanner that matched nothing both satisfy the
+        # assertion below over an empty list, and both report a tree as clean
+        # without having looked at it. This is the gate's own argument in
+        # `main`, which refuses a clean report over an empty subject.
+        self.assertGreater(scanned, 0, "the walk read no files")
+        self.assertNotEqual([], findings, "the gate matched nothing in the applied tree")
+
+        accepted = {entry.key() for entry in entries}
+        self.assertEqual(
+            [], [str(finding) for finding in findings if finding.key() not in accepted])
+
+    def test_a_second_service_appends_beside_the_first(self):
+        # Two renders into one checkout, which is what the tool is for. The
+        # allow-list accumulates a block per service exactly as the Compose
+        # file accumulates a block per service, and a second run that rewrote
+        # it would take the first service's entries away — the gate then
+        # reports the first service's own literals as unexplained, and the
+        # branch that added the second service is what goes red.
+        apply(self.root, plan(self.root, PROBE, PORT, MIGRATION_ID))
+        first = self.allow_list()
+
+        second = plan(self.root, SECOND_PROBE, SECOND_PORT, "20260810120000")
+
+        after = second.updated[SCAN_ALLOW_LIST]
+        self.assertTrue(after.startswith(first), "the second render rewrote the file")
+
+        entries, problems = allow_list_entries(self.gate, after)
+        self.assertEqual([], problems)
+        paths = {entry.path for entry in entries}
+        self.assertIn(f"tests/{PROBE}.Api.Tests/HostSmokeTests.cs", paths)
+        self.assertIn(f"tests/{SECOND_PROBE}.Api.Tests/HostSmokeTests.cs", paths)
+
+        keys = [entry.key() for entry in entries]
+        self.assertEqual(len(set(keys)), len(keys), "the second render duplicated an entry")
+
+    def test_a_render_never_explains_a_finding_it_did_not_introduce(self):
+        # The defect #161's own fix shipped with. Ownership was decided by
+        # `path == finding.path and rule == finding.rule.id and marker in
+        # line`, and not one of those three names the service being rendered:
+        # the `definitions.json` row's marker is empty, `"" in line` is true of
+        # every line, and the line the scanner reports there carries the hash
+        # with the account name above it. So a render whose allow-list had lost
+        # an earlier service's entry matched that service's finding, wrote a
+        # sentence naming ITSELF, and cleared it — a suppression arriving for a
+        # credential the run is not writing, which is the outcome the
+        # allow-list's own header exists to refuse.
+        apply(self.root, plan(self.root, PROBE, PORT, MIGRATION_ID))
+
+        # A bad merge, a hand edit, a partial checkout — the entry is gone and
+        # the first service's hash is unexplained again.
+        lines = self.allow_list().splitlines()
+        orphaned = [
+            line for line in lines
+            if line.startswith("deploy/compose/rabbitmq/definitions.json") and PROBE in line
+        ]
+        self.assertEqual(1, len(orphaned), "the fixture found no entry to remove")
+        stolen = orphaned[0].split("|")[2].strip()
+        (self.root / SCAN_ALLOW_LIST).write_bytes(
+            ("\n".join(line for line in lines if line != orphaned[0]) + "\n").encode("utf-8"))
+
+        second = plan(self.root, SECOND_PROBE, SECOND_PORT, "20260810120000")
+
+        before, _ = allow_list_entries(self.gate, self.allow_list())
+        entries, problems = allow_list_entries(
+            self.gate, second.updated[SCAN_ALLOW_LIST])
+        self.assertEqual([], problems)
+        added = entries[len(before):]
+        self.assertNotEqual([], added, "the second render generated nothing")
+
+        # The named half: the first service's fingerprint, under the second
+        # service's name.
+        for entry in added:
+            self.assertNotEqual(stolen, entry.fingerprint, entry.reason)
+
+        # And the general half, which is the rule rather than the instance: a
+        # key the file already carried is not this render's to explain.
+        for entry in added:
+            if entry.path not in second.updated:
+                continue                      # a created file has no "before"
+            original = (self.root / entry.path).read_bytes().decode("utf-8")
+            self.assertNotIn(
+                entry.key(),
+                {found.key() for found in self.gate.scan_text(
+                    entry.path, original, self.gate.RULES)},
+                entry.reason,
+            )
 
 
 class RefusesToRun(unittest.TestCase):
@@ -1170,6 +1432,133 @@ class RefusesToRun(unittest.TestCase):
                 render(repo_root=root)
             self.assertIn("Program.cs", str(raised.exception))
 
+    def test_a_migration_shape_added_without_the_name_it_is_reported_by(self):
+        # `TEMPLATE_MIGRATIONS` and `MIGRATION_LABELS` are paired positionally,
+        # and the pairing used to be `zip(..., strict=True)` — a real guard
+        # raising the wrong exception. `main` catches `ScaffoldError` and
+        # nothing else, so a tuple grown without its label ended the run in a
+        # `ValueError` traceback naming neither constant, from a script whose
+        # stated contract is one line on stderr and exit 1.
+        original = new_service.MIGRATION_LABELS
+        new_service.MIGRATION_LABELS = original[:-1]
+        self.addCleanup(setattr, new_service, "MIGRATION_LABELS", original)
+
+        with self.assertRaises(ScaffoldError) as raised:
+            render()
+        self.assertIn("MIGRATION_LABELS", str(raised.exception))
+
+    def test_a_credential_shaped_literal_in_the_template_nobody_explained(self):
+        # The same refusal as an unclassified file, one gate along, and the
+        # one this file's README sells as the safety property while nothing
+        # exercised it. `SCAN_REASONS` gives one sentence per finding §15.1's
+        # scanner reports over a render; a finding no row explains has to stop
+        # the run, because the alternative is this script inventing a reason —
+        # a suppression nobody wrote, which is the one thing the allow-list's
+        # own header says it must never hold.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy_with_gate(Path(directory))
+            smoke = root / "tests/Catalog.Api.Tests/HostSmokeTests.cs"
+            # A shape the scanner already recognises, in a file the render
+            # copies, under a rule no row in SCAN_REASONS pairs with that path.
+            # The value is invented and belongs to nobody.
+            #
+            # ASSEMBLED FROM TWO PIECES, because this file is walked by the
+            # scanner like every other: written as one source line the fixture
+            # would itself be a finding in the suite that tests the refusal,
+            # and would want an allow-list entry for a credential that never
+            # leaves a temporary directory. The rules are line-based, so the
+            # join happens at run time and the file this writes carries the
+            # shape whole. Measured, not reasoned about — the one-line form
+            # failed the scan.
+            shape = b'// const string ApiKey = "' + b'not-a-real-value-either";'
+            smoke.write_bytes(smoke.read_bytes() + b"\r\n" + shape + b"\r\n")
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn("SCAN_REASONS", str(raised.exception))
+
+    def test_an_allow_list_that_does_not_parse(self):
+        # This script appends to that file, so it reads it first — and a file
+        # the gate already rejects is not one to append to: the run would
+        # produce a tree whose scan fails on a line the render did not write,
+        # reported against the branch that rendered.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy_with_gate(Path(directory))
+            allow_list = root / SCAN_ALLOW_LIST
+            allow_list.write_bytes(
+                allow_list.read_bytes() + b"this line has no pipes at all\n")
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn("allowed-secrets.txt", str(raised.exception))
+
+    def test_a_github_directory_carrying_neither_the_gate_nor_the_list(self):
+        # `.github/` absent is the degradation and is tested next door. A
+        # checkout that HAS the directory and is missing a piece of the gate is
+        # a real tree, and returning None there rendered a service the scanner
+        # refuses without saying so — #161 back, quietly, out of the code that
+        # closed it. It is also the only shared file whose absence was
+        # tolerated; the other six raise inside `read`.
+        for missing in (SCAN_GATE, SCAN_ALLOW_LIST):
+            with tempfile.TemporaryDirectory() as directory:
+                root = template_copy_with_gate(Path(directory))
+                (root / missing).unlink()
+
+                with self.assertRaises(ScaffoldError) as raised:
+                    render(repo_root=root)
+                self.assertIn(missing, str(raised.exception), missing)
+
+    def test_a_gate_that_is_not_a_python_module(self):
+        # `exec_module` runs whatever is at that path, so a malformed one used
+        # to leave the run as an uncaught SyntaxError — past `main`'s
+        # `except ScaffoldError` and out as a traceback, from a script whose
+        # stated contract is one line on stderr and exit 1.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy_with_gate(Path(directory))
+            (root / SCAN_GATE).write_bytes(b"def (\n")
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn("did not load", str(raised.exception))
+
+    def test_a_gate_that_loads_and_is_not_the_secret_scan(self):
+        # A module that imports is not a module that is the gate. Without this
+        # the failure is an AttributeError three frames later, naming a symbol
+        # rather than the file the caller pointed at.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy_with_gate(Path(directory))
+            (root / SCAN_GATE).write_bytes(b"RULES = []\n")
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn("read_allowed", str(raised.exception))
+
+    def test_a_name_that_is_a_prefix_of_the_broker_connection_key(self):
+        # NOT a refusal, and it used to be one. The Compose rows were keyed on
+        # `ConnectionStrings__Catalog`, which renames to
+        # `ConnectionStrings__<Name>` — a substring of the broker line's
+        # `ConnectionStrings__RabbitMq` for every name that is a prefix of
+        # `RabbitMq`. Both rows then matched one finding and the run stopped
+        # with "the template has gained a credential-shaped literal", which is
+        # actionable for nobody. Eight legal PascalCase names cleared every
+        # other precondition and hit it; the markers now come from the value,
+        # where no service name reaches them.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy_with_gate(Path(directory))
+
+            rendered = plan(root, "Rabbit", PORT, MIGRATION_ID)
+
+            entries, problems = allow_list_entries(
+                load_scan_gate(root), rendered.updated[SCAN_ALLOW_LIST])
+            self.assertEqual([], problems)
+            reasons = [entry.reason for entry in entries if "docker-compose" in entry.path]
+            self.assertIn("Rabbit's local connection default, in-cluster hostname.", reasons)
+            self.assertIn(
+                "Section 14.1's broker default for Rabbit, the per-service account "
+                "that replaced guest.",
+                reasons,
+            )
+
     def test_nothing_is_written_when_the_run_refuses(self):
         # A *refused* run writes nothing, because the whole render is a value
         # until `apply` is called. That is the guarantee, and it is narrower
@@ -1232,17 +1621,19 @@ class TheCommandLine(unittest.TestCase):
 
             self.assertEqual(0, code)
             self.assertEqual("", err)
-            # 55: PR-16 added TestAuthHandler to Catalog.TestSupport, which
-            # every service carries because CatalogApiFactory installs it
-            # unconditionally, and §8.5's PR added IdempotencyOptInTests.cs,
-            # which every service carries because the gate it holds is one a
-            # service without it silently does not have.
+            # NO ENUMERATION HERE, and the third failure of one is why. The
+            # comment used to name the files that made the total what it was —
+            # it said 54 while the assertion said 55, then named two files
+            # while the assertion said 59 — and each time it congratulated
+            # itself, in its own text, for being the half that does not rot.
+            # A number a test pins fails when it is wrong; a list a comment
+            # keeps beside it does not, so the list is the half to delete.
+            # What a reader can check is `plan().created`.
             #
-            # The comment is the half that rots: it said 54 and named only the
-            # first, while the assertion beside it had already been raised to
-            # 55. A number a test pins and a number a comment states are two
-            # copies, and only one of them fails when they disagree.
-            self.assertIn("55 files created, 6 updated", out)
+            # `6 updated` and not 7: this root has no `.github/`, so §15.1's
+            # allow-list step degrades — which is `TheAllowListStep`'s subject
+            # and is asserted there from both sides.
+            self.assertIn("59 files created, 6 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

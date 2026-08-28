@@ -17,6 +17,14 @@ render is built in memory and validated before anything is written, and a miss
 raises ScaffoldError naming the file. A tool that fails open on its own
 precondition reports success for work it did not do.
 
+Since #161 it also LOADS `.github/secret-scan/secret_scan.py` and runs it over
+what it has just rendered. §15.1's gate reads the working tree, so a service
+carrying a credential-shaped literal with no accepted-finding entry beside it
+cannot be committed at all — and the fingerprints those entries name are the
+scanner's own, never a second implementation of its matching. Where that gate
+is not in the tree the step writes nothing and says nothing, which is stated
+here rather than discovered from a green run.
+
 Stdlib only, like the licence gate, and for the same reasons: no restore, no
 SDK, and it runs on Windows and on the Ubuntu runner without either noticing.
 
@@ -29,11 +37,14 @@ APIs the floor does not, and the local suite goes green on code CI cannot run.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
+from types import ModuleType
+from typing import Any
 
 TEMPLATE = "Catalog"
 
@@ -99,6 +110,7 @@ COPIED = frozenset(
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/EfUnitOfWork.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/OutboxMessageConfiguration.cs",
         "src/Services/Catalog/Catalog.Infrastructure/Persistence/InboxMessageConfiguration.cs",
+        "src/Services/Catalog/Catalog.Infrastructure/Persistence/IdempotencyMarkerConfiguration.cs",
         "src/Services/Catalog/Catalog.Migrator/Catalog.Migrator.csproj",
         "src/Services/Catalog/Catalog.Migrator/Dockerfile",
         "src/Services/Catalog/Catalog.Migrator/MigrationRunner.cs",
@@ -114,6 +126,7 @@ COPIED = frozenset(
         "tests/Catalog.Api.Tests/Catalog.Api.Tests.csproj",
         "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs",
         "tests/Catalog.Api.Tests/HostSmokeTests.cs",
+        "tests/Catalog.Api.Tests/IdempotencyMarkerTests.cs",
         "tests/Catalog.Api.Tests/IntegrationCollection.cs",
         "tests/Catalog.Api.Tests/MessageTypeMapValidatorTests.cs",
         "tests/Catalog.Api.Tests/MessagingRegistrationTests.cs",
@@ -1147,6 +1160,38 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "/// inventing a subscription §3.2 does not give this service.\n",
         ),
     ),
+    # §8.5's marker suite travels, and its anti-vacuity floor is INVERTED for
+    # the reason IdempotencyOptInTests' three are: a rendered service opts no
+    # command into idempotency, so a floor asserting the selector found one
+    # fails on a tree that is perfectly correct. The three integration tests
+    # above it need no patch at all — they drive a probe command through §6.3
+    # with a key supplied by the test, which is wiring every service has.
+    #
+    # This is the FOURTH inversion, and it was owed the moment the gate was
+    # written rather than discovered later. Every anti-vacuity floor added to a
+    # template file is owed an entry here; that is the rule, and the way to
+    # find out whether it was followed is to render a service and run its
+    # tests.
+    "tests/Catalog.Api.Tests/IdempotencyMarkerTests.cs": (
+        (
+            "    public async Task The_gate_above_is_looking_at_this_service_s_operation_names()\n",
+            "    public async Task This_service_has_no_operation_names_for_the_gate_above_yet()\n",
+        ),
+        (
+            "        Operations().ShouldNotBeEmpty(\n"
+            '            "no command in this assembly declares IIdempotentCommand, so the '
+            'width gate is " +\n'
+            '            "looking at nothing — the interface has been renamed, moved, or '
+            'not yet applied");\n',
+            "        Operations().ShouldBeEmpty(\n"
+            '            "This service opts no command into idempotency yet, so the width '
+            'gate above is " +\n'
+            '            "vacuous. The day it does, this test fails — replace it with the '
+            'ShouldNotBeEmpty " +\n'
+            '            "form, which is what keeps a vacuous gate from quietly becoming '
+            'a permanent one.");\n',
+        ),
+    ),
     "tests/Catalog.Api.Tests/DatabaseSmokeTests.cs": (
         (
             "/// PR-08's deliverables against a real engine: the migrator applies the schema\n",
@@ -1164,26 +1209,29 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // apply every migration in sequence, and a count alone would pass on\n"
             "        // a shorter prefix of them applied twice.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(5);\n"
+            "        applied.Length.ShouldBe(6);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddProducts\");\n"
             "        applied[2].ShouldEndWith(\"_AddOutbox\");\n"
             "        applied[3].ShouldEndWith(\"_AddInbox\");\n"
-            "        applied[4].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n",
+            "        applied[4].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n"
+            "        applied[5].ShouldEndWith(\"_AddIdempotencyMarkers\");\n",
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
             "\n"
             "        // Named and ordered, not merely counted: the migrator's job is to\n"
             "        // apply every migration in sequence, and a count alone would pass on\n"
             "        // a shorter prefix of them applied twice. What a scaffolded service\n"
-            "        // starts with is the schema, then §9.4's outbox table, §9.5's inbox\n"
-            "        // and the index the retention purge deletes through — all of them\n"
-            "        // wiring every service has rather than anything this one chose.\n"
+            "        // starts with is the schema, then §9.4's outbox table, §9.5's inbox,\n"
+            "        // the index the retention purge deletes through and §8.5's marker\n"
+            "        // table — all of them wiring every service has rather than anything\n"
+            "        // this one chose.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(4);\n"
+            "        applied.Length.ShouldBe(5);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddOutbox\");\n"
             "        applied[2].ShouldEndWith(\"_AddInbox\");\n"
-            "        applied[3].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n",
+            "        applied[3].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n"
+            "        applied[4].ShouldEndWith(\"_AddIdempotencyMarkers\");\n",
         ),
     ),
 }
@@ -1262,17 +1310,18 @@ INBOX_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
         "/// <b>The table ships to every service, including the ones that consume\n"
         "/// nothing.</b> Catalog binds no receive endpoint yet (§3.2 gives it one\n"
         "/// Consumes cell, owned by a service that does not exist), so nothing writes a\n"
-        "/// row here — but <c>RetentionPurgeService</c> runs from first boot and purges\n"
-        "/// both tables, and a purge against a table that is not there logs a failure\n"
-        "/// every pass. That is the same argument that keeps <c>AddOutbox</c> in the\n"
-        "/// scaffold's output, inverted: the dispatcher would fail a claim, this would\n"
-        "/// fail a delete.\n",
+        "/// row here — but <c>RetentionPurgeService</c> runs from first boot and deletes\n"
+        "/// from every table it was given, and a purge against a table that is not there\n"
+        "/// logs a failure every pass. That is the same argument that keeps\n"
+        "/// <c>AddOutbox</c> in the scaffold's output, inverted: the dispatcher would\n"
+        "/// fail a claim, this would fail a delete.\n",
         "/// <b>The table arrives before the first consumer, deliberately.</b> A service\n"
         "/// that binds no receive endpoint writes no row here — but\n"
-        "/// <c>RetentionPurgeService</c> runs from first boot and purges both tables,\n"
-        "/// and a purge against a table that is not there logs a failure every pass.\n"
-        "/// That is the same argument that keeps the outbox migration here, inverted:\n"
-        "/// the dispatcher would fail a claim, this would fail a delete.\n",
+        "/// <c>RetentionPurgeService</c> runs from first boot and deletes from every\n"
+        "/// table it was given, and a purge against a table that is not there logs a\n"
+        "/// failure every pass. That is the same argument that keeps the outbox\n"
+        "/// migration here, inverted: the dispatcher would fail a claim, this would fail\n"
+        "/// a delete.\n",
     ),
 )
 
@@ -1305,6 +1354,29 @@ RETENTION_INDEX_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
         "/// never reads an unprocessed row, so the index stays the size of the undeleted\n"
         "/// backlog rather than of the table.\n"
         "/// </para>\n",
+    ),
+)
+
+# §8.5's marker table, shape-keyed like the three above. What is dropped is the
+# paragraph naming the defect the marker closes: a scaffolded service inherits
+# the table without inheriting the history of the race that was open from PR-09
+# until it was written.
+IDEMPOTENCY_MIGRATION_PATCHES: tuple[tuple[str, str], ...] = (
+    (
+        "/// <b>This table is the one place in the schema where a missing row is a\n"
+        "/// correctness failure rather than a lost record.</b> The outbox and the inbox\n"
+        "/// hold delivery state; a row here says a command committed, and it is what\n"
+        "/// refuses the retry of an attempt whose commit landed and whose acknowledgement\n"
+        "/// was lost. Without it §8.5's guarantee carries the exception it carried from\n"
+        "/// PR-09 to this migration — at most one commit per key, <em>except</em> across\n"
+        "/// a lost acknowledgement.\n"
+        "/// <para>\n",
+        "/// <b>This table is the one place in the schema where a missing row is a\n"
+        "/// correctness failure rather than a lost record.</b> The outbox and the inbox\n"
+        "/// hold delivery state; a row here says a command committed, and it is what\n"
+        "/// refuses the retry of an attempt whose commit landed and whose acknowledgement\n"
+        "/// was lost.\n"
+        "/// <para>\n",
     ),
 )
 
@@ -1407,6 +1479,14 @@ INBOX_MIGRATION = re.compile(r"^\d{14}_AddInbox(\.Designer)?\.cs$")
 # dispatcher with no table, and invisible for exactly as long as the table is
 # small.
 RETENTION_INDEX_MIGRATION = re.compile(r"^\d{14}_AddOutboxRetentionIndex(\.Designer)?\.cs$")
+# §8.5's durable marker, and it travels on a stronger version of the inbox's
+# argument. A service that protects no command yet writes no row here — but
+# `RetentionPurgeService` deletes from this table from first boot, and
+# `EfIdempotencyMarkerStore` reads it on the first command that does opt in. A
+# service scaffolded without it fails a purge every hour and then fails the
+# first idempotent command it is ever given, both against a table that is
+# simply not there.
+IDEMPOTENCY_MIGRATION = re.compile(r"^\d{14}_AddIdempotencyMarkers(\.Designer)?\.cs$")
 LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 
 # The migrations a scaffolded service starts with, in the order they are
@@ -1423,6 +1503,22 @@ TEMPLATE_MIGRATIONS = (
     OUTBOX_MIGRATION,
     INBOX_MIGRATION,
     RETENTION_INDEX_MIGRATION,
+    IDEMPOTENCY_MIGRATION,
+)
+
+# The name each shape above is known by in a diagnostic, in the same order and
+# beside it rather than spelt out where `classify` pairs the two. There the
+# pairing was `zip(..., strict=True)`, which is a real guard raising the wrong
+# exception: a tuple grown without its label gave a bare `ValueError`, past
+# `main`'s `except ScaffoldError` and out as a traceback, from a script whose
+# stated contract is one line on stderr and exit 1. Declared here the two are
+# read in one place, and `classify` says which of them is short.
+MIGRATION_LABELS = (
+    "InitialCreate",
+    "AddOutbox",
+    "AddInbox",
+    "AddOutboxRetentionIndex",
+    "AddIdempotencyMarkers",
 )
 
 # The two files that accumulate a block per service, and the markers that bound
@@ -1445,6 +1541,111 @@ PORTS = range(1, 65536)
 # interface is taken all the same.
 LOOPBACK = "127.0.0.1"
 HOST_IP = r"\d+\.\d+\.\d+\.\d+"
+
+
+# §15.1's secret scan reads the WORKING TREE, so the tree a render leaves
+# behind is a tree that gate judges — and it refuses a credential-shaped
+# literal nobody has written down a reason for. Catalog's literals all have
+# one, added by hand the day Catalog landed; a rendered service carries the
+# same literals under its own name and therefore under its own fingerprints,
+# and nothing was writing those (#161). So the render ends by running the real
+# scanner over what it has just built.
+SCAN_GATE = ".github/secret-scan/secret_scan.py"
+SCAN_ALLOW_LIST = ".github/secret-scan/allowed-secrets.txt"
+
+# Everything this script calls on the module it loads. Named so a file that
+# imports cleanly and is not the gate fails here, against the path the caller
+# supplied, rather than three frames later against a symbol.
+SCAN_GATE_MEMBERS = ("RULES", "read_allowed", "scan_text")
+
+# The heading width the allow-list's own section headers are padded to.
+SCAN_HEADING_WIDTH = 76
+
+# One row per finding the render is known to produce: the file, the rule that
+# reports it, a marker naming WHICH literal on that line it is, and the
+# sentence the entry carries. Written in the template's own casings and put
+# through `Names.rename` like every other string here, so `Catalog` below
+# reaches the file as the service being rendered.
+#
+# A ROW IS NOT A SECOND MATCHER, and the distinction is the whole reason this
+# imports the gate rather than reproducing it. The scanner decides what a
+# finding is and what its fingerprint is; a marker only tells two findings of
+# one rule in one file apart. The Compose file needs that much: a service's
+# database default and its broker URI are both `credential-assignment` on
+# adjacent lines, and they take different sentences because they record
+# different decisions.
+#
+# A MARKER IS NEVER A TEST OF WHOSE FINDING IT IS, and it used to be read as
+# one. Nothing in a row names the service being rendered, `"" in line` is true
+# of every line, and the line the scanner reports for a password hash carries
+# the value with the account name above it — so a render whose allow-list had
+# lost a *previous* service's entry matched that service's finding, wrote a
+# sentence naming the service being rendered, and cleared it. A suppression
+# arriving for a credential the run is not writing is exactly what the
+# allow-list's header says must never happen. `update_allowed_secrets`
+# subtracts the findings the file already had, which settles ownership before
+# a marker is consulted; the empty markers below are safe because of that
+# subtraction rather than because nothing has collided with them yet.
+#
+# THE COMPOSE MARKERS COME FROM THE VALUE, NOT THE KEY, and that is the second
+# half of the same lesson. `ConnectionStrings__Catalog` renames to
+# `ConnectionStrings__<Name>`, which is a substring of the broker line's
+# `ConnectionStrings__RabbitMq` whenever the name is a prefix of `RabbitMq` —
+# `R`, `Ra`, up to `RabbitMq` itself, eight legal PascalCase names that cleared
+# every other precondition and then refused the run with a message blaming the
+# template. A database name and a URI scheme are in the value, where no service
+# name reaches them.
+#
+# A FINDING NO ROW EXPLAINS REFUSES THE RUN, on `classify`'s argument one
+# function over. A reason this script invented would be a suppression nobody
+# wrote, which is the one thing the allow-list's own header says it must never
+# hold — so a new credential-shaped literal in the template is a decision this
+# script forces, exactly as a new file there is.
+SCAN_REASONS = (
+    (
+        "tests/Catalog.Api.Tests/HostSmokeTests.cs",
+        "connection-string-password",
+        "",
+        "A deliberately unusable value in a host that must not reach a database.",
+    ),
+    (
+        "tests/Catalog.Api.Tests/MessageTypeMapValidatorTests.cs",
+        "connection-string-password",
+        "",
+        "The same unusable fixture in the validator suite.",
+    ),
+    (
+        "tests/Catalog.Api.Tests/MessagingRegistrationTests.cs",
+        "credential-assignment",
+        "",
+        "A broker URI pointing at a hostname that does not resolve.",
+    ),
+    (
+        "deploy/compose/docker-compose.yml",
+        "credential-assignment",
+        # The database segment of the connection string, which the migrator's
+        # line and the API's both carry — one value, one fingerprint, one
+        # entry, one sentence. Not the `ConnectionStrings__` key: that renames
+        # into a substring of the broker line for eight legal service names.
+        "Database=Catalog",
+        "Catalog's local connection default, in-cluster hostname.",
+    ),
+    (
+        "deploy/compose/docker-compose.yml",
+        "credential-assignment",
+        # The URI scheme, for the same reason. No service name renames into
+        # it, and no connection string carries it.
+        "amqp://",
+        "Section 14.1's broker default for Catalog, the per-service account "
+        "that replaced guest.",
+    ),
+    (
+        "deploy/compose/rabbitmq/definitions.json",
+        "credential-assignment",
+        "",
+        "The Catalog service account's password hash, Section 14.1's local default.",
+    ),
+)
 
 
 class ScaffoldError(Exception):
@@ -1584,16 +1785,19 @@ def classify(repo_root: Path) -> list[str]:
     # the whole directory would be satisfied by duplicates of one migration and
     # none of another — which is precisely the state that ships a dispatcher
     # with no table behind it, or a purge with no index.
-    for shape, label in zip(
-        TEMPLATE_MIGRATIONS,
-        (
-            "InitialCreate",
-            "AddOutbox",
-            "AddInbox",
-            "AddOutboxRetentionIndex",
-        ),
-        strict=True,
-    ):
+    #
+    # The pairing is checked before it is used, and `strict=True` is what this
+    # replaces: it caught the same mistake and raised `ValueError`, which
+    # `main` does not catch, so growing TEMPLATE_MIGRATIONS without its label
+    # ended the run in a traceback naming neither constant.
+    if len(TEMPLATE_MIGRATIONS) != len(MIGRATION_LABELS):
+        raise ScaffoldError(
+            f"TEMPLATE_MIGRATIONS has {len(TEMPLATE_MIGRATIONS)} shape(s) and "
+            f"MIGRATION_LABELS has {len(MIGRATION_LABELS)} name(s). A migration was "
+            f"added to one and not the other; the shorter one is the edit that is "
+            f"missing."
+        )
+    for shape, label in zip(TEMPLATE_MIGRATIONS, MIGRATION_LABELS, strict=True):
         pair = [p for p in copied if shape.fullmatch(PurePosixPath(p).name)]
         if len(pair) != 2:
             raise ScaffoldError(
@@ -1689,7 +1893,7 @@ def without_slice_entity(designer: str) -> str:
     return stripped
 
 
-def snapshot_from_designer(designer: str, migration_id: str) -> str:
+def snapshot_from_designer(designer: str, migration_id: str, migration: str) -> str:
     """The model snapshot, from the tool's own description of the same model.
 
     Catalog's snapshot cannot be copied — it describes `Product`, and the next
@@ -1711,13 +1915,27 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
     render loop does that before its slice check, so that a failed removal
     stops the run rather than reaching a shipped file. Stripping again here
     would find nothing and `require_once` would say so.
+
+    `migration` is that last migration's class name, passed in rather than
+    written here. It was a literal — `AddOutboxRetentionIndex` — until §8.5's
+    marker table became the last entry in TEMPLATE_MIGRATIONS: the literal then
+    named the second-to-last migration, every anchor below missed at once, and
+    the run stopped. Loudly, which was luck.
+
+    **What deriving it bought is narrow and worth stating narrowly**: this
+    function no longer memorises a migration name, so it is not one of the
+    places a sixth migration has to be edited. It is not the only place — the
+    shape regex, TEMPLATE_MIGRATIONS, MIGRATION_LABELS, `without_slice_entity`
+    and the patch dispatch all name the new one, and an earlier draft of this
+    paragraph claimed the tuple was the whole edit. It was not, and a docstring
+    that undercounts the work is how the next entry lands half-applied.
     """
     text = designer
     for needle, replacement in (
         ("using Microsoft.EntityFrameworkCore.Migrations;\n", ""),
-        (f'    [Migration("{migration_id}_AddOutboxRetentionIndex")]\n', ""),
+        (f'    [Migration("{migration_id}_{migration}")]\n', ""),
         (
-            "    partial class AddOutboxRetentionIndex\n",
+            f"    partial class {migration}\n",
             "    partial class CatalogDbContextModelSnapshot : ModelSnapshot\n",
         ),
         ("        /// <inheritdoc />\n", ""),
@@ -1726,7 +1944,7 @@ def snapshot_from_designer(designer: str, migration_id: str) -> str:
             "        protected override void BuildModel(ModelBuilder modelBuilder)\n",
         ),
     ):
-        require_once(text, needle, "AddOutboxRetentionIndex.Designer.cs")
+        require_once(text, needle, f"{migration}.Designer.cs")
         text = text.replace(needle, replacement)
     return text
 
@@ -1813,6 +2031,8 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
             patches = (*patches, *INBOX_MIGRATION_PATCHES)
         elif PurePosixPath(relative).name.endswith("_AddOutboxRetentionIndex.cs"):
             patches = (*patches, *RETENTION_INDEX_MIGRATION_PATCHES)
+        elif PurePosixPath(relative).name.endswith("_AddIdempotencyMarkers.cs"):
+            patches = (*patches, *IDEMPOTENCY_MIGRATION_PATCHES)
         for needle, replacement in patches:
             require_once(text, needle, relative)
             text = text.replace(needle, replacement)
@@ -1832,6 +2052,7 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
                 "_AddOutbox.Designer.cs",
                 "_AddInbox.Designer.cs",
                 "_AddOutboxRetentionIndex.Designer.cs",
+                "_AddIdempotencyMarkers.Designer.cs",
             )):
             text = without_slice_entity(text)
 
@@ -1878,7 +2099,11 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
                     # Only the last migration's designer describes the model
                     # the service ends up with, and the snapshot is a
                     # description of exactly that.
-                    snapshot = names.rename(snapshot_from_designer(text, new_id))
+                    snapshot = names.rename(
+                        snapshot_from_designer(
+                            text,
+                            new_id,
+                            name.split("_", 1)[1].removesuffix(".Designer.cs")))
                     created[names.rename(f"{MIGRATIONS}/{TEMPLATE}DbContextModelSnapshot.cs")] = (
                         restore(sort_usings(snapshot), newline)
                     )
@@ -2156,6 +2381,207 @@ def update_ports_readme(repo_root: Path, names: Names, port: int) -> str:
     return restore(text[:end] + row + text[end:], newline)
 
 
+def load_scan_gate(repo_root: Path) -> ModuleType | None:
+    """§15.1's secret scan, loaded out of the tree being rendered into, or None.
+
+    Resolved from `repo_root` and never from this file's own location. The
+    suite renders into temporary roots holding the template and the shared
+    files and no `.github/` at all, so a gate resolved from `__file__` would
+    read the real repository's rules and the real allow-list while writing
+    into a tree that has neither — green, and about nothing.
+
+    **`.github/` missing is the degradation; the gate missing is a refusal**,
+    and the two used to be one test. A checkout with the directory and without
+    one of its two files is a real tree, and returning None there rendered a
+    service the scanner refuses without saying so — #161 back, quietly, from
+    the code that closed it. It is also the only shared file whose absence was
+    tolerated: the other six raise inside `read`.
+
+    Loaded by path rather than by `import`, and the difference is not a
+    formality: `import` caches by module name, so a second render against a
+    second root would silently reuse the first root's gate, and the suite
+    renders against several roots in one process. There is no `sys.path`
+    manipulation anywhere in this repository and this does not add the first.
+    `spec_from_file_location` is the form already in use here —
+    `deploy/compose/rabbitmq/test_check_permissions.py` loads its subject that
+    way, and so does `.claude/scripts/test_grok_helpers.py`; what is new is
+    only the directory being crossed.
+
+    **This executes a file chosen by `--repo-root`**, which is worth saying
+    outright in a docstring that argues the loading strategy at length. It is
+    the same trust a developer tool already extends to the repository it is
+    pointed at — the template it copies is source, and `apply` writes into that
+    tree — so the exposure is not new; it is simply no longer unstated.
+    `secret_scan.py` is stdlib-only and guards its own entry point, so loading
+    the file this repository ships runs no scan and touches nothing.
+    """
+    if not (repo_root / ".github").is_dir():
+        return None
+
+    gate = repo_root / SCAN_GATE
+    if not gate.is_file():
+        raise ScaffoldError(
+            f"{repo_root} has a .github directory and no {SCAN_GATE}. §15.1's scan "
+            f"is what says a rendered service may be committed; without it this "
+            f"script cannot write the entries the gate would demand."
+        )
+    if not (repo_root / SCAN_ALLOW_LIST).is_file():
+        raise ScaffoldError(
+            f"{SCAN_GATE} is here and {SCAN_ALLOW_LIST} is not. The scan reads that "
+            f"file to know what it may ignore, and this script appends to it."
+        )
+
+    specification = importlib.util.spec_from_file_location("scaffold_secret_scan", gate)
+    if specification is None or specification.loader is None:
+        raise ScaffoldError(f"{SCAN_GATE} cannot be loaded as a Python module")
+
+    module = importlib.util.module_from_spec(specification)
+    try:
+        specification.loader.exec_module(module)
+    # Every exception class there is, because the subject is arbitrary
+    # module-level code and nothing narrows the set. What matters is not which
+    # one arrives but that it arrives as a ScaffoldError: `main` catches that
+    # and nothing else, so an unwrapped SyntaxError here ends the run in a
+    # traceback and breaks the one-line-on-stderr contract this script states.
+    except Exception as error:
+        raise ScaffoldError(f"{SCAN_GATE} did not load: {error}") from error
+
+    # A module that loaded is not a module that is the gate. Checked because
+    # the alternative is an AttributeError three frames later, naming a symbol
+    # rather than the file the caller pointed at.
+    if (absent := [name for name in SCAN_GATE_MEMBERS if not hasattr(module, name)]):
+        raise ScaffoldError(
+            f"{SCAN_GATE} declares no " + ", ".join(absent) + "; it is not the "
+            f"secret scan this script knows how to drive."
+        )
+    return module
+
+
+def scan_reason(rows: list[tuple[str, str, str, str]], finding: Any, line: str) -> str:
+    """The sentence one finding's entry carries, or a refusal.
+
+    Exactly one row, never the first of several: two rows that both explain a
+    finding is a table nobody can read, and no row at all is the template
+    having gained a literal this script has never been shown. Both refuse,
+    because the alternative is a suppression with a reason nobody wrote.
+
+    **This decides WHICH sentence and never WHOSE finding it is.** Ownership is
+    settled before anything reaches here, by the subtraction in
+    `update_allowed_secrets`; a marker that had to carry it as well would be a
+    second thing for the same string to be wrong about, which is how a row for
+    one service came to be written over another service's credential.
+
+    `finding` is typed `Any` because its class comes from a module loaded at
+    run time out of `repo_root` — there is no name to annotate it with that
+    this file could import.
+    """
+    matched = [
+        reason
+        for path, rule, marker, reason in rows
+        if path == finding.path and rule == finding.rule.id and marker in line
+    ]
+    if len(matched) != 1:
+        raise ScaffoldError(
+            f"{finding.path}:{finding.line}: the secret scan reports "
+            f"`{finding.rule.id}` here and SCAN_REASONS gives {len(matched)} "
+            f"sentence(s) for it. The template has gained a credential-shaped "
+            f"literal, or moved one; add the row saying why it is accepted. "
+            f"A reason this script invented is a suppression nobody wrote."
+        )
+    return matched[0]
+
+
+def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str],
+                           updated: dict[str, str]) -> str | None:
+    """One allow-list entry per finding THIS RENDER ADDS, or None (#161).
+
+    Two paths return None and both are ordinary. The tree has no `.github/`
+    at all — the suite's synthetic roots, where a render has nothing to
+    reconcile — or the render adds no finding, which is what a second run of a
+    service already entered would produce. Silent in both cases: `main`
+    reports what it wrote on stdout and nothing on stderr, and a warning about
+    a directory the caller never asked for would be the tool complaining about
+    its own fixture. A `.github/` that exists and is missing a piece is a
+    refusal instead, and `load_scan_gate` argues that.
+
+    **A finding the file already had is not this render's to explain.** Every
+    path in `updated` has an original in the tree; both are scanned and only
+    the keys the render INTRODUCED are eligible. Ownership is a property of
+    the diff, not of the allow-list — the earlier version asked only whether a
+    finding was already accepted, so a render whose allow-list had lost an
+    entry for a service rendered earlier picked that finding up, wrote a
+    sentence naming the wrong service, and cleared it. Paths in `created` did
+    not exist a moment ago, so every finding in them is new by construction.
+
+    The fingerprints are the SCANNER'S, taken from the findings it reported.
+    A digest computed here would be a second implementation of which substring
+    each rule matches, and being wrong at it is silent in the worst direction:
+    an entry matching nothing is a stale entry, which is the failure the gate
+    reports and the build stops on.
+    """
+    gate = load_scan_gate(repo_root)
+    if gate is None:
+        return None
+
+    text, newline = read(repo_root, SCAN_ALLOW_LIST)
+    entries, problems = gate.read_allowed(
+        repo_root / SCAN_ALLOW_LIST, {rule.id for rule in gate.RULES})
+    if problems:
+        raise ScaffoldError(
+            f"{SCAN_ALLOW_LIST}: {problems[0]}. This script appends to that file "
+            f"and will not append to one that does not already parse."
+        )
+
+    rows = [
+        (names.rename(path), rule, names.rename(marker), names.rename(reason))
+        for path, rule, marker, reason in SCAN_REASONS
+    ]
+
+    # Deduplicated on the key the gate itself judges by. Two lines carrying one
+    # value under one rule in one file are one accepted finding, and a second
+    # entry for it is reported as duplicating the first — a failed build, from
+    # the tool that was supposed to prevent one.
+    accepted = {entry.key() for entry in entries}
+    lines: list[str] = []
+    for relative, body in {**created, **updated}.items():
+        before: set[tuple[str, str, str]] = set()
+        if relative in updated:
+            original, _ = read(repo_root, relative)
+            before = {
+                finding.key()
+                for finding in gate.scan_text(relative, original, gate.RULES)
+            }
+
+        source = body.splitlines()
+        for finding in gate.scan_text(relative, body, gate.RULES):
+            if finding.key() in before or finding.key() in accepted:
+                continue
+            accepted.add(finding.key())
+            lines.append(
+                f"{finding.path} | {finding.rule.id} | {finding.fingerprint} | "
+                f"{scan_reason(rows, finding, source[finding.line - 1])}"
+            )
+
+    if not lines:
+        return None
+
+    heading = f"# --- {names.pascal}, rendered by tools/new-service "
+    heading += "-" * max(3, SCAN_HEADING_WIDTH - len(heading))
+    block = "\n".join([
+        "",
+        "",
+        heading,
+        "#",
+        "# One entry per finding the gate reported over this render, carrying the",
+        "# fingerprints it computed rather than any this script worked out. The",
+        "# equivalent literals for a hand-built service are entries above, written",
+        "# the day that service landed; these are the same decision, taken by the",
+        "# tool that rendered them (#161).",
+        "",
+    ] + lines) + "\n"
+    return restore(text + block, newline)
+
+
 def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     """Everything the run would write, validated. Nothing is written here."""
     if not NAME.fullmatch(name):
@@ -2279,18 +2705,27 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
         if TEMPLATE_TOKEN.search(mask.sub("", relative)) is not None:
             raise ScaffoldError(f"{relative}: the path itself still names the template")
 
-    return Plan(
-        created=created,
-        updated={
-            "Platform.slnx": update_solution(repo_root, names),
-            "deploy/compose/docker-compose.yml": update_compose(repo_root, names, port),
-            "deploy/compose/docker-compose.infra-only.yml": update_infra_only(repo_root, names),
-            "deploy/compose/.env.example": update_env_example(repo_root, names),
-            "deploy/compose/README.md": update_ports_readme(repo_root, names, port),
-            "deploy/compose/rabbitmq/definitions.json":
-                update_broker_definitions(repo_root, names),
-        },
-    )
+    updated = {
+        "Platform.slnx": update_solution(repo_root, names),
+        "deploy/compose/docker-compose.yml": update_compose(repo_root, names, port),
+        "deploy/compose/docker-compose.infra-only.yml": update_infra_only(repo_root, names),
+        "deploy/compose/.env.example": update_env_example(repo_root, names),
+        "deploy/compose/README.md": update_ports_readme(repo_root, names, port),
+        "deploy/compose/rabbitmq/definitions.json":
+            update_broker_definitions(repo_root, names),
+    }
+
+    # Last, because it is the only update whose input is every other one. The
+    # gate runs over the whole render — the generated tree AND the shared files
+    # as they will stand — so it can only be asked once both maps are complete,
+    # and it is still asked before anything is written: the file it returns is
+    # a value like every other, and `apply` remains the one thing that touches
+    # disk.
+    allowed = update_allowed_secrets(repo_root, names, created, updated)
+    if allowed is not None:
+        updated[SCAN_ALLOW_LIST] = allowed
+
+    return Plan(created=created, updated=updated)
 
 
 def apply(repo_root: Path, rendered: Plan) -> None:
