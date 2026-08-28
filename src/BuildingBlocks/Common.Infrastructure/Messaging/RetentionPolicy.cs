@@ -72,7 +72,8 @@ public sealed record RetentionPolicy
     /// <remarks>
     /// <b>It has a floor the other two do not, and the floor is
     /// <see cref="IdempotencyRetention.MarkerFloor"/> — the claim's own window
-    /// plus a skew allowance.</b> The marker is what refuses a retry of a
+    /// plus the margin its expiry has to lead by.</b> The marker is what
+    /// refuses a retry of a
     /// command that committed, and the order the two expire in is the whole of
     /// the constraint. While the Redis claim is alive the key is not claimable
     /// at all, so a purged marker costs nothing yet; the gap opens when that

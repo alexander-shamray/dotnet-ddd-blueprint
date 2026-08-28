@@ -2815,8 +2815,11 @@ twenty-four hours.
 A row has no TTL. It survives until something deletes it, and what deletes it is
 a retention window this repository chooses — which is why
 `RetentionPolicy.IdempotencyWindow` is the one window of the three with a
-**floor**, and why the floor is read from `IdempotencyRetention.Window` rather
-than restated: a 24 written in two files agrees until one of them is edited.
+**floor**, and why the floor is read from `IdempotencyRetention.MarkerFloor`
+rather than restated: a 24 written in two files agrees until one of them is
+edited. That floor is the claim's `Window` **plus** `MarkerLeadAllowance`, and
+the margin is not slack — two independent things put the claim's expiry after
+the marker's, and both are invisible from the two numbers alone (#167, #168).
 
 **So the release stays, and it is now a decision rather than a default.** The
 retry it admits meets the marker, and is refused with
@@ -2915,12 +2918,22 @@ of the guarantee rather than an oversight.** While §8.5's promise ended at
 expiry and the exception in that sentence were one fact, so removing the
 exception removes the re-run with it. A caller retrying a succeeded command
 between the claim's expiry and the marker's purge — six days on the shipped
-windows — now meets a 409 where it used to get a fresh execution. Setting
-`IdempotencyWindow` to the claim's own length would close the lost
-acknowledgement without widening that refusal at all, and the floor permits
-exactly that; the default declines it, because the question the marker answers
-is "did this already commit" and a wider window is the more conservative answer
-to it. A client that needs the outcome reads the resource.
+windows — now meets a 409 where it used to get a fresh execution. Narrowing
+`IdempotencyWindow` towards the claim's own length buys most of that back, and
+the floor permits it down to `IdempotencyRetention.MarkerFloor` — the claim
+**plus** `MarkerLeadAllowance`, five minutes. It does **not** permit equality,
+and the review round that established this corrected a sentence here that
+recommended exactly that. Two things put the claim's expiry after the marker's
+and neither is visible from the two numbers: the marker is stamped inside the
+transaction while the claim is re-armed after it commits, so the claim's window
+starts later by the commit's tail ([#168](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168));
+and the marker's age is the purging pod's clock against the writing pod's
+timestamp, across three replicas ([#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167)).
+Matching the claim leaves no margin for either, and a duplicate write arrives at
+a boundary set by a retention setting. The default declines the narrowing
+anyway, because the question the marker answers is "did this already commit" and
+a wider window is the more conservative answer to it. A client that needs the
+outcome reads the resource.
 
 ---
 
