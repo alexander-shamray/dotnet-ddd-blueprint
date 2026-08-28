@@ -203,6 +203,25 @@ own line rather than sending a reader to a file that does not hold it.
   anything whose bytes matter and keep argv for values with no shell
   metacharacters. This is the divergence above one layer down: the argument,
   not the path.
+- **“Stdin is not re-parsed” is a fact about the shell, and the *reader* on
+  the far side still chooses an encoding.** The lesson above sends anything
+  whose bytes matter through stdin, which is right and is not sufficient:
+  `json.load(sys.stdin)` on this host decodes with the console codepage rather
+  than UTF-8, so a pull request body read back through a pipe returned every
+  non-ASCII character as its UTF-8 bytes read as cp1252 — an em dash as three
+  characters, an emoji as four. Patched and uploaded, that rewrote fifteen em
+  dashes, an arrow, a minus sign and the emoji in a live PR description.
+  **It is invisible at every point a person would look**: the terminal renders
+  both forms as *some* punctuation, the file compares equal to itself because
+  both copies are corrupt, and the round trip reports success. It surfaced
+  only when a `.count()` that had to be 1 came back 0, and was confirmed by
+  reading code points. `sys.stdin.buffer.read().decode("utf-8")` is the fix.
+  **The repair is worth knowing too, because the obvious one fails**: once a
+  later edit has inserted correctly-encoded text, the document is mixed, and
+  re-encoding the whole of it throws on the first clean character. Reverse it
+  per run of non-ASCII and keep the run whenever the re-encoded bytes are not
+  valid UTF-8 — which is exactly the test that tells a genuine character from
+  a mangled one.
 - **One tool's "valid" is not the next tool's, and the gap is where a value
   crosses between them.** PR-23 hit this three times in one file: `Release_1`
   is a legal OCI tag and an illegal Job name; `https://shop.example.com:443` is
