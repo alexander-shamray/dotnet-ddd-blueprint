@@ -1477,6 +1477,68 @@ class RefusesToRun(unittest.TestCase):
                 render(repo_root=root)
             self.assertIn("SCAN_REASONS", str(raised.exception))
 
+    def test_a_second_credential_under_a_rule_the_same_file_already_carries(self):
+        # The case the test above does NOT reach, and the distinction is the
+        # whole of the defect: that one adds a literal under a rule no row
+        # pairs with this path, so no row matches and the refusal fires. Here
+        # the rule and the path both already have a row — only the credential
+        # is new — and while the marker was `""` that row matched the new line
+        # too, handing it a sentence written about the fixture next to it. A
+        # suppression for a credential nobody explained, produced by the guard
+        # that exists to refuse exactly that.
+        #
+        # Assembled from two pieces for the reason the neighbour states: a
+        # whole password literal on one source line would make this file a
+        # finding in the scan of the repository that contains it.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy_with_gate(Path(directory))
+            smoke = root / "tests/Catalog.Api.Tests/HostSmokeTests.cs"
+            shape = (b'// var other = "Server=x;User Id=sa;Password'
+                     + b'=a-different-unusable-value;";')
+            smoke.write_bytes(smoke.read_bytes() + b"\r\n" + shape + b"\r\n")
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn("SCAN_REASONS", str(raised.exception))
+
+    def test_a_row_whose_marker_explains_every_line_of_its_file(self):
+        # The guard over the table itself, rather than over what the template
+        # holds. An empty marker is `in` every line, so the row stops naming a
+        # literal and accepts its rule blanket across that file — and it reads
+        # as deliberate until the second finding arrives to be swallowed, which
+        # is why the emptiness is refused rather than the collision waited for.
+        original = new_service.SCAN_REASONS
+        path, rule, _, reason = original[0]
+        new_service.SCAN_REASONS = ((path, rule, "", reason),) + original[1:]
+        self.addCleanup(setattr, new_service, "SCAN_REASONS", original)
+
+        with self.assertRaises(ScaffoldError) as raised:
+            render()
+        self.assertIn("empty marker", str(raised.exception))
+
+    def test_a_row_whose_marker_is_loose_without_being_empty(self):
+        # The other half, and the one a non-empty marker does not buy. `"` is
+        # in both password lines of the smoke fixture's file, so this row would
+        # explain two findings with two fingerprints under one sentence —
+        # narrower than `""` and wrong in exactly the same way. The check reads
+        # what the table SELECTED rather than how it was spelled, which is the
+        # only form that survives a marker nobody thought was loose.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy_with_gate(Path(directory))
+            smoke = root / "tests/Catalog.Api.Tests/HostSmokeTests.cs"
+            shape = (b'// var other = "Server=x;User Id=sa;Password'
+                     + b'=a-different-unusable-value;";')
+            smoke.write_bytes(smoke.read_bytes() + b"\r\n" + shape + b"\r\n")
+
+            original = new_service.SCAN_REASONS
+            path, rule, _, reason = original[0]
+            new_service.SCAN_REASONS = ((path, rule, "Password=", reason),) + original[1:]
+            self.addCleanup(setattr, new_service, "SCAN_REASONS", original)
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn("different fingerprints", str(raised.exception))
+
     def test_an_allow_list_that_does_not_parse(self):
         # This script appends to that file, so it reads it first — and a file
         # the gate already rejects is not one to append to: the run would

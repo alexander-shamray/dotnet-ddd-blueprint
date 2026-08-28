@@ -1584,8 +1584,26 @@ SCAN_HEADING_WIDTH = 76
 # arriving for a credential the run is not writing is exactly what the
 # allow-list's header says must never happen. `update_allowed_secrets`
 # subtracts the findings the file already had, which settles ownership before
-# a marker is consulted; the empty markers below are safe because of that
-# subtraction rather than because nothing has collided with them yet.
+# a marker is consulted.
+#
+# EVERY MARKER IS NON-EMPTY, AND THAT IS ENFORCED RATHER THAN OBSERVED. Four
+# of these rows carried `""` on the argument that the subtraction above made
+# them safe, and that argument does not reach them: subtraction is defined
+# over a path's ORIGINAL, so it protects the shared files in `updated` and
+# nothing in `created`, which is where three of the four live. A rendered
+# `HostSmokeTests.cs` gaining a SECOND `connection-string-password` literal
+# would have been handed this row's sentence — a reason written about a
+# different credential, which is the invented suppression the paragraph below
+# refuses, arriving through the one path that skipped the refusal. So the
+# emptiness is now a refusal of its own, because a row is a decision and `""`
+# is the spelling of not having taken one.
+#
+# A NON-EMPTY MARKER IS STILL ONLY A NARROWING, so the run also checks what
+# each row actually explained: one row that accounts for two findings with
+# different fingerprints has not discriminated between them, whatever it
+# matched on. That check is the subject-of-the-gate one — it reads what the
+# table selected rather than trusting the table — and it is what catches a
+# marker that is loose without being empty.
 #
 # THE COMPOSE MARKERS COME FROM THE VALUE, NOT THE KEY, and that is the second
 # half of the same lesson. `ConnectionStrings__Catalog` renames to
@@ -1605,19 +1623,23 @@ SCAN_REASONS = (
     (
         "tests/Catalog.Api.Tests/HostSmokeTests.cs",
         "connection-string-password",
-        "",
+        # The value, on the compose rows' argument. It says which literal this
+        # sentence is about, so a second password in this file refuses the run
+        # rather than inheriting a reason written for this one.
+        "not-a-real-password",
         "A deliberately unusable value in a host that must not reach a database.",
     ),
     (
         "tests/Catalog.Api.Tests/MessageTypeMapValidatorTests.cs",
         "connection-string-password",
-        "",
+        "not-a-real-password",
         "The same unusable fixture in the validator suite.",
     ),
     (
         "tests/Catalog.Api.Tests/MessagingRegistrationTests.cs",
         "credential-assignment",
-        "",
+        # The URI scheme, exactly as the compose broker row uses it.
+        "amqp://",
         "A broker URI pointing at a hostname that does not resolve.",
     ),
     (
@@ -1642,7 +1664,13 @@ SCAN_REASONS = (
     (
         "deploy/compose/rabbitmq/definitions.json",
         "credential-assignment",
-        "",
+        # The one row whose marker is a KEY rather than a value, and the
+        # exception is narrow rather than a softening: the hash is computed per
+        # service, so no literal this table could carry would match the line
+        # the render writes. `password_hash` is safe where
+        # `ConnectionStrings__Catalog` was not, because it carries no service
+        # name for `rename` to turn into a prefix of a neighbouring key.
+        "password_hash",
         "The Catalog service account's password hash, Section 14.1's local default.",
     ),
 )
@@ -2457,8 +2485,9 @@ def load_scan_gate(repo_root: Path) -> ModuleType | None:
     return module
 
 
-def scan_reason(rows: list[tuple[str, str, str, str]], finding: Any, line: str) -> str:
-    """The sentence one finding's entry carries, or a refusal.
+def scan_reason(rows: list[tuple[str, str, str, str]], finding: Any,
+                line: str) -> tuple[int, str]:
+    """The row explaining one finding and the sentence it carries, or a refusal.
 
     Exactly one row, never the first of several: two rows that both explain a
     finding is a table nobody can read, and no row at all is the template
@@ -2471,13 +2500,18 @@ def scan_reason(rows: list[tuple[str, str, str, str]], finding: Any, line: str) 
     second thing for the same string to be wrong about, which is how a row for
     one service came to be written over another service's credential.
 
+    **The row's index comes back with its sentence so the caller can audit the
+    selection**, which is the half a marker cannot do on its own: one row
+    explaining two fingerprints has not told two credentials apart, however
+    specific the substring it matched on looked.
+
     `finding` is typed `Any` because its class comes from a module loaded at
     run time out of `repo_root` — there is no name to annotate it with that
     this file could import.
     """
     matched = [
-        reason
-        for path, rule, marker, reason in rows
+        (index, reason)
+        for index, (path, rule, marker, reason) in enumerate(rows)
         if path == finding.path and rule == finding.rule.id and marker in line
     ]
     if len(matched) != 1:
@@ -2537,11 +2571,27 @@ def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str
         for path, rule, marker, reason in SCAN_REASONS
     ]
 
+    # An empty marker matches every line of its file, so the row stops asking
+    # which literal it is about and becomes a blanket acceptance of its rule
+    # there. Refused here rather than trusted to the table, because the four
+    # rows that carried one read as deliberate for as long as no second finding
+    # existed to be swallowed.
+    blank = [f"{path} | {rule}" for path, rule, marker, _ in rows if not marker]
+    if blank:
+        raise ScaffoldError(
+            f"SCAN_REASONS: {len(blank)} row(s) carry an empty marker "
+            f"({'; '.join(blank)}). A marker says WHICH literal on the line a "
+            f"sentence explains, and an empty one matches every line — so the "
+            f"next finding of that rule in that file would be allow-listed with "
+            f"a reason written for a different credential."
+        )
+
     # Deduplicated on the key the gate itself judges by. Two lines carrying one
     # value under one rule in one file are one accepted finding, and a second
     # entry for it is reported as duplicating the first — a failed build, from
     # the tool that was supposed to prevent one.
     accepted = {entry.key() for entry in entries}
+    explained: dict[int, set[str]] = {}
     lines: list[str] = []
     for relative, body in {**created, **updated}.items():
         before: set[tuple[str, str, str]] = set()
@@ -2557,10 +2607,26 @@ def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str
             if finding.key() in before or finding.key() in accepted:
                 continue
             accepted.add(finding.key())
+            index, reason = scan_reason(rows, finding, source[finding.line - 1])
+            explained.setdefault(index, set()).add(finding.fingerprint)
             lines.append(
                 f"{finding.path} | {finding.rule.id} | {finding.fingerprint} | "
-                f"{scan_reason(rows, finding, source[finding.line - 1])}"
+                f"{reason}"
             )
+
+    # What each row actually selected, which is the question a non-empty marker
+    # only narrows. A row accounting for two fingerprints has explained two
+    # different credentials with one sentence — the empty marker's defect
+    # surviving a marker that is merely too loose.
+    loose = sorted(index for index, seen in explained.items() if len(seen) > 1)
+    if loose:
+        path, rule, marker, _ = rows[loose[0]]
+        raise ScaffoldError(
+            f"SCAN_REASONS: the row for {path} | {rule} with marker "
+            f"'{marker}' explains {len(explained[loose[0]])} findings with "
+            f"different fingerprints. One sentence cannot be the reason for two "
+            f"credentials; narrow the marker, or add the row the second one owes."
+        )
 
     if not lines:
         return None
