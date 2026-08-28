@@ -889,7 +889,7 @@ same argument as never calling a branch clean because asking failed.
      is reported with the option taken and the option rejected. What must not
      happen is the quiet version — a row silently reclassified as `Fixed`,
      which loses both the question and the answer.
-   - **Two consecutive clean rounds end it; six rounds is the ceiling.**
+   - **Two consecutive clean rounds end it; `CEILING` is the ceiling.**
      Two clauses, and the first is deliberately *two* — **in this loop only**.
      Clean here means a pass that leaves no `suggestions.md` — a full review
      with nothing to write, or a recheck that removes the file; step 6 states
@@ -901,9 +901,10 @@ same argument as never calling a branch clean because asking failed.
      also subsumes "never end on a round that produced a fix", since a round
      with findings is not clean and resets the count.
 
-     Failing that, stop at six and hand over what survives — saying plainly
-     that the loop ended on its ceiling rather than on convergence, because
-     those are different states and only one of them is evidence.
+     Failing that, stop when `grok-ledger.sh <n> count` reaches `CEILING`
+     and hand over what survives — saying plainly that the loop ended on its
+     ceiling rather than on convergence, because those are different states
+     and only one of them is evidence.
 
      **Step 5's ceiling is a count of Grok checks per PR, not per session**,
      and the two loops no longer share a number: this one carries `CEILING`
@@ -948,12 +949,12 @@ same argument as never calling a branch clean because asking failed.
      **The two orders fail in opposite directions and only one is safe** —
      written after, an interrupted run has spent the check and left no record,
      and the resumed run spends a thirteenth; written before, the worst case is
-     a reservation for a check that never ran, which wastes one of the six
-     and never exceeds it. The helper writes it immediately before the review's
-     own `docker run`, which is what makes the accounting tight: **every path
-     that can refuse before that line spends nothing** — a dirty tree, no
-     daemon, a missing credential, a bad `suggestions.md` shape, and all three
-     usage-limit skips.
+     a reservation for a check that never ran, which wastes one slot and
+     never exceeds the ceiling. The helper writes it immediately before the
+     review's own `docker run`, which is what makes the accounting tight:
+     **every path that can refuse before that line spends nothing** — a dirty
+     tree, no daemon, a missing credential, a bad `suggestions.md` shape, and
+     all three usage-limit skips.
 
      **Tight rather than exact, and the difference is one deliberate case.** The
      ledger posts its comment and then reads to settle the election, so a
@@ -961,7 +962,7 @@ same argument as never calling a branch clean because asking failed.
      helper exits 13 before the model call. That stays: after a failed read the
      state is precisely what is not known, and releasing on it would return a
      slot on the strength of a lookup that did not complete. The cost is bounded
-     at one check in six; guessing the other way is not. So **exit 12 no
+     at one check; guessing the other way is not bounded at all. So **exit 12 no
      longer posts a release**, because it has no
      reservation to give one back for; the verb survives for a human
      reconciling a slot spent wrongly, and for `count`, which must still fold a
@@ -1019,18 +1020,19 @@ same argument as never calling a branch clean because asking failed.
      when it stops asking a person: bounded review, honestly measured, rather
      than an unbounded loop nobody is waiting on.
 
-     **The ceiling is six now, on the caller's instruction, and the paragraphs
-     above are the argument against it.** They are left standing rather than
-     rewritten: PR-11's rounds four through seven each caught a real defect,
-     and its round eight was clean with every later round finding more — so
-     the recorded evidence says a small ceiling ships defects, and six is
-     nearer three than twelve. That is the cost of the change, not a reason
-     the change is wrong; the caller owns the budget. What it means in
+     **The ceiling is whatever `CEILING` declares — the caller set it, and the
+     paragraphs above are the argument against a small one.** They are left
+     standing rather than rewritten: PR-11's rounds four through seven each
+     caught a real defect, and its round eight was clean with every later round
+     finding more — so the recorded evidence said a small ceiling ships
+     defects, and that the figure the caller asked for was nearer three than
+     twelve. That is the cost of the change, not a reason the change is wrong;
+     the caller owns the budget. What it means in
      practice is that **the two-clean-passes rule will more often lose to the
-     ceiling**, since a recheck and a full pass are two of the six — so a
-     branch with findings in round one has at most two chances to converge
-     before the budget is gone. Report which of the two ended the loop, and
-     never round a ceiling up into convergence.
+     ceiling**, since a recheck and a full pass each spend a slot — so at
+     the ceiling the caller chose, a branch with findings in round one has
+     very few chances to converge before the budget is gone. Report which of
+     the two ended the loop, and never round a ceiling up into convergence.
 
      **The enforcement half binds it now (#140), and this file is no longer
      the thing that does.** `grok-ledger.sh` declares `CEILING` once and
