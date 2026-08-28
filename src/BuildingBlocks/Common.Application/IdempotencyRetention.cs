@@ -7,11 +7,14 @@ namespace Common.Application;
 /// <remarks>
 /// <b>It used to be a private field on
 /// <see cref="IdempotencyBehavior{TCommand,TResult}"/>, and moving it out is a
-/// consequence of the durable marker rather than tidying.</b> The claim expires
-/// and the marker does not, so the marker's own retention window has to be at
-/// least this long — a shorter one purges the row that refuses a duplicate
-/// while the key it guards is still claimable, which reopens the hole the
-/// marker was added to close, at a boundary nobody would think to look at.
+/// consequence of the durable marker rather than tidying.</b> Both expire, and
+/// the order they expire in is the whole of the constraint — so the marker's
+/// own window has to be at least this long. While the claim is alive the key is
+/// not claimable at all, so a purged marker costs nothing yet; the gap opens
+/// when the claim expires with the marker already gone, and the retry after
+/// that claims a free key and runs the command a second time. It is exactly the
+/// difference between the two windows, at a boundary set by a retention number
+/// — the least visible place a correctness property could be lost.
 /// <c>RetentionPolicy</c> refuses a window below this value, and it reads the
 /// value rather than restating it: a 24 written in two files is a number that
 /// agrees until one of them is edited.
