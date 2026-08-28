@@ -170,7 +170,7 @@ PROTECTED_BRANCHES = {"main"}
 # is not a heredoc to bash either. The quote characters are spelled \x27 and
 # \x22 so that neither this pattern nor anything quoting it has to escape them.
 HEREDOC = re.compile(
-    r"<<-?[ \t]*(?:\x27(?P<single>[^\x27]*)\x27"
+    r"<<(?P<dash>-?)[ \t]*(?:\x27(?P<single>[^\x27]*)\x27"
     r"|\x22(?P<double>[^\x22]*)\x22"
     r"|(?P<bare>[^\s;&|<>()\x27\x22]+))"
 )
@@ -312,10 +312,11 @@ def heredoc_spans(command):
                     # the word.
                     delimiter = bare.replace("\\", "")
                     expands = "\\" not in bare
-                openers.append((match.end(), expands, delimiter))
+                openers.append(
+                    (match.end(), expands, delimiter, bool(match.group("dash"))))
 
     spans, pending = [], 0
-    for intro_end, expands, delimiter in openers:
+    for intro_end, expands, delimiter, dash in openers:
         # An introducer sitting inside an earlier body is body text, not an
         # opener. Containment, not "before the cursor" — two heredocs stacked on
         # ONE line both introduce before either body starts, so an ordering test
@@ -336,8 +337,18 @@ def heredoc_spans(command):
         # Stacked bodies queue: the second starts where the first terminated,
         # which is past its own line break.
         start = max(newline + 1, pending)
-        closing = re.search(
-            rf"^\s*{re.escape(delimiter)}\s*$", command[start:], re.MULTILINE)
+        # **The terminator is the delimiter and nothing else.** `^\s*…\s*$`
+        # accepted an indented or trailing-spaced line, and bash accepts
+        # neither — only `<<-` strips leading TABS, and no form ignores
+        # trailing whitespace. Measured: a heredoc body containing a line
+        # `  EOF` prints it and keeps going. So an ordinary commit body that
+        # indents the word had its remaining lines exposed as commands, which
+        # is a false positive on exactly the file this repository writes most.
+        # Raised in review.
+        terminator = (
+            rf"^\t*{re.escape(delimiter)}$" if dash
+            else rf"^{re.escape(delimiter)}$")
+        closing = re.search(terminator, command[start:], re.MULTILINE)
         if closing is None:
             # **No span, so nothing is stripped, and the fail direction is the
             # point.** A delimiter this guard cannot find means one of two
@@ -531,7 +542,13 @@ def substitutions(command, quotes=True):
                 end += 1
             if end >= len(command):
                 break
-            found.append(command[index + 1:end])
+            # **An escaped backtick is how the legacy form NESTS**, so skipping
+            # the escape and handing the body on unchanged skipped it twice:
+            # `git log "`echo \`git push origin +HEAD:main\``"` runs the push
+            # — measured — and the inner substitution was invisible to both
+            # passes. Unescaping on the way down is what makes the recursion
+            # see the nested command as a command.
+            found.append(command[index + 1:end].replace("\\`", "`"))
             index = end + 1
             continue
         index += 1
@@ -546,9 +563,20 @@ def _closing_brace(command, start):
     differ in what nests inside them and a shared one would have to be told.
     """
     depth, index = 1, start
-    single = double = False
+    single = double = comment = False
+    at_word_start = True
     while index < len(command):
         char = command[index]
+        if comment:
+            # A function substitution's body is a command list too, so a `}`
+            # inside a comment closes nothing. The same handling
+            # `_closing_paren` carries, and owed here for the same reason —
+            # raised in review, one bracket over.
+            if char == "\n":
+                comment = False
+                at_word_start = True
+            index += 1
+            continue
         if single:
             if char == "'":
                 single = False
@@ -560,17 +588,26 @@ def _closing_brace(command, start):
                 double = False
         elif char == "\\" and index + 1 < len(command):
             index += 2
+            at_word_start = False
+            continue
+        elif char == "#" and at_word_start:
+            comment = True
+            index += 1
             continue
         elif char == "'":
             single = True
+            at_word_start = False
         elif char == '"':
             double = True
+            at_word_start = False
         elif char == "{":
             depth += 1
         elif char == "}":
             depth -= 1
             if not depth:
                 return index
+        if not (single or double):
+            at_word_start = char in METACHARACTERS
         index += 1
     return None
 
@@ -970,7 +1007,15 @@ def offence(command, depth=0):
             return refusal
 
         for element in global_options(segment):
-            if element in CONFIG_OPTIONS or any(
+            # `-cdiff.external=<cmd>` was raised in review as a compact form
+            # git accepts. **It does not**, on 2.45.1: `unknown option`, and
+            # the usage line spells the option `-c <name>=<value>`. So this is
+            # hardening rather than a fix, and it is cheap because the global
+            # option set is small and fixed — no git subcommand flag can reach
+            # here, since this loop only ever sees the tokens BEFORE the
+            # subcommand. `-C` is left alone, and the comparison is
+            # case-sensitive for exactly that reason.
+            if element in CONFIG_OPTIONS or element.startswith("-c") or any(
                     element.startswith(option + "=") for option in CONFIG_OPTIONS):
                 return (
                     "`git -c` / `--config-env` sets configuration for one "

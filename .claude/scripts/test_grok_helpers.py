@@ -4665,6 +4665,88 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertRefused(command)
 
+    def test_a_heredoc_terminator_is_the_delimiter_and_nothing_else(self):
+        # **A false positive on the file this repository writes most.**
+        # `^\\s*DELIM\\s*$` accepted an indented or trailing-spaced line as the
+        # terminator, and bash accepts neither: only `<<-` strips leading TABS,
+        # and no form ignores trailing whitespace. Measured — a heredoc body
+        # containing a line `  EOF` prints it and keeps going.
+        #
+        # So a commit body that indented the word had its remaining lines
+        # exposed as commands. Raised in review.
+        tab = chr(9)
+        self.assertAdmitted(
+            f"git commit -F - <<EOF{NEWLINE}line one{NEWLINE}  EOF"
+            f"{NEWLINE}line three{NEWLINE}EOF")
+        self.assertAdmitted(
+            f"git commit -F - <<EOF{NEWLINE}body{NEWLINE}EOF "
+            f"{NEWLINE}git push origin +HEAD:main{NEWLINE}EOF")
+
+        # `<<-` strips tabs and only tabs, so a space-indented terminator is
+        # body text there too.
+        self.assertAdmitted(
+            f"git commit -F - <<-EOF{NEWLINE}body{NEWLINE}  EOF"
+            f"{NEWLINE}more{NEWLINE}{tab}EOF")
+
+        # The controls, and they are what stop this becoming a licence to
+        # ignore terminators: an exact one ends the body, and a tab-indented
+        # one ends a `<<-` body. What follows either is a command again.
+        self.assertRefused(
+            f"git commit -F - <<EOF{NEWLINE}body{NEWLINE}EOF"
+            f"{NEWLINE}git push origin +HEAD:main")
+        self.assertRefused(
+            f"git commit -F - <<-EOF{NEWLINE}{tab}body{NEWLINE}{tab}EOF"
+            f"{NEWLINE}git push origin +HEAD:main")
+
+    def test_a_nested_backtick_substitution_is_a_command(self):
+        # **An escaped backtick is how the legacy form NESTS.** Skipping the
+        # escape and handing the body on unchanged skipped it twice — once in
+        # the outer scan and again in the recursion, which received the
+        # escapes still in place. Measured with a `git` shim: the push RUNS.
+        # Raised in review.
+        self.assertRefused(
+            "git log \"`echo \\`git push origin +HEAD:main\\``\"")
+
+        # Unescaping on the way down is what makes the recursion see a command,
+        # so the single-level form must keep working too.
+        self.assertRefused("git log `git push origin +HEAD:main`")
+        self.assertAdmitted("git log `git status`")
+
+    def test_a_comment_hides_no_brace_either(self):
+        # `_closing_brace` owed what `_closing_paren` already had: a function
+        # substitution's body is a command list, so a `}` inside a comment
+        # closes nothing. Raised in review, one bracket over.
+        #
+        # Not reachable on this host — bash 5.2 has no function substitution —
+        # so this is the same forward-looking case as the feature itself, and
+        # it is stated rather than left to look like a live bypass.
+        #
+        # **And it passes against e65b257 for the wrong reason**, which is why
+        # that is written down: there the brace closed early, and the tail was
+        # then scanned as an ordinary command line and refused by the outer
+        # pass. Right answer, wrong route. A case that goes green either way
+        # says nothing on its own, so what this one holds is the route.
+        self.assertRefused(
+            f"echo ${{ echo ok # }}{NEWLINE}git push origin +HEAD:main; }}")
+
+    def test_a_compact_config_option_is_refused_as_hardening(self):
+        # **Raised in review as a bypass, and it is not one.**
+        # `git -cdiff.external=<cmd> diff` is rejected by git 2.45.1 —
+        # `unknown option`, and the usage line spells the option
+        # `-c <name>=<value>`. Measured in a scratch repository.
+        #
+        # Refused anyway: the global option set is small and fixed, this loop
+        # only ever sees tokens BEFORE the subcommand, and a git that starts
+        # accepting the compact form would otherwise open the hole silently.
+        # Recorded as hardening so the next reader does not cite it as a
+        # measured escape.
+        self.assertIn("config", self.assertRefused("git -cdiff.external=id diff"))
+
+        # `-C` is a different option and stays admitted — the comparison is
+        # case-sensitive for exactly that reason.
+        self.assertAdmitted("git -C /some/path log")
+        self.assertAdmitted("git -C /some/path status --short")
+
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated
         # this whole file is exactly what a raw-string scan cannot see, so an
