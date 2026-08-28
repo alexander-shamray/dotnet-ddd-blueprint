@@ -2948,6 +2948,48 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
         self.assertNotIn('"$@"', source)
         self.assertNotIn("$mode\"", source.replace('"$mode" in', ""))
 
+    # What `/validate-blueprint` actually audits, from its own opening lines.
+    AUDITED_BY_VALIDATE_BLUEPRINT = {
+        "backend-architecture",
+        "roadmap.md",
+        "testing.md",
+    }
+
+    def test_validate_blueprint_may_only_edit_what_it_audits(self):
+        # **`docs/` was exempted as a tree, and the command audits three paths
+        # inside it.** So `docs/superpowers/` — which `CLAUDE.md` calls a frozen
+        # historical record and names as outside this command's scope in as
+        # many words — was editable by it, along with `runbooks/`,
+        # `pr-decision-log.md` and `secrets.md`. Raised in review.
+        #
+        # The entries are read from git rather than listed here, so a new file
+        # under `docs/` fails this until someone decides which side it is on.
+        # That is the scaffold's rule — a tool that refuses input it has never
+        # been shown beats one that guesses — applied to a permission boundary.
+        out = subprocess.run(
+            [GIT, "ls-files", "docs/"], cwd=str(SCRIPTS.parent.parent),
+            capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            raise AssertionError(f"git ls-files failed: {out.stderr}")
+
+        entries = {
+            line.split("/")[1] for line in out.stdout.splitlines()
+            if line.startswith("docs/") and len(line.split("/")) > 1
+        }
+        self.assertTrue(entries, "found no entries under docs/")
+        self.assertTrue(
+            self.AUDITED_BY_VALIDATE_BLUEPRINT <= entries,
+            "the audited set names something docs/ does not hold: "
+            f"{self.AUDITED_BY_VALIDATE_BLUEPRINT - entries}")
+
+        rules = self.disallowed("validate-blueprint.md")
+        for entry in sorted(entries - self.AUDITED_BY_VALIDATE_BLUEPRINT):
+            with self.subTest(entry=entry):
+                suffix = "/**" if "." not in entry else ""
+                for prefix in ("", "./"):
+                    self.assertIn(f"Edit({prefix}docs/{entry}{suffix})", rules)
+
     def test_the_one_legitimate_output_stays_writable(self):
         # The other side, and the reason the root is enumerated rather than
         # denied wholesale. `suggestions.md` is `/review-branch`'s only output
@@ -4099,6 +4141,69 @@ class TheGitArgvGuard(unittest.TestCase):
         # And the two together: a global `-c` is still caught when a
         # subcommand-level `-c` stands beside it.
         self.assertRefused("git -c alias.x=@ commit -c HEAD")
+
+    def test_a_heredoc_delimiter_is_a_whole_word(self):
+        # **`<<EOF-1` matched `EOF` and lost the rest of the script.** The
+        # delimiter pattern was identifier-shaped, so it matched a PREFIX of a
+        # valid delimiter: no `^EOF$` line was ever found, the tail was taken
+        # for an unterminated body, and the push after the real `EOF-1` line
+        # went with it. Measured — bash terminates on `EOF-1` and runs the
+        # push. Raised in review.
+        for command in (
+            f"cat <<EOF-1{NEWLINE}body{NEWLINE}EOF-1{NEWLINE}"
+            "git push origin +HEAD:main",
+            f"cat <<END.2{NEWLINE}body{NEWLINE}END.2{NEWLINE}"
+            "git push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # Still a body when the delimiter is read correctly, whichever
+        # unusual word it is.
+        self.assertAdmitted(
+            f"git commit -F - <<'EOF-1'{NEWLINE}"
+            f"git push origin +HEAD:main{NEWLINE}EOF-1")
+
+        # `<<\EOF` is a QUOTED delimiter to bash — the body is handed over
+        # verbatim — so a substitution in it is text.
+        self.assertAdmitted(
+            f"git commit -F - <<\\EOF{NEWLINE}"
+            f"$(git push origin +HEAD:main){NEWLINE}EOF")
+
+    def test_an_unfindable_delimiter_does_not_hide_the_tail(self):
+        # The fail direction behind that fix. A delimiter this guard cannot
+        # find means either a genuinely unterminated heredoc — where the tail
+        # is data and refusing it over-refuses a malformed command — or a
+        # delimiter read wrongly, where the tail holds commands. Dropping it
+        # served the first and hid the second. It is scanned now, which is
+        # wrong only in the safe direction.
+        self.assertRefused(
+            f"cat <<NEVERCLOSED{NEWLINE}git push origin +HEAD:main")
+
+    def test_git_named_as_data_is_not_an_invocation(self):
+        # **`echo git push origin +HEAD:main` was refused**, and a guard that
+        # refuses honest traffic is the one this file's own docstring says
+        # somebody turns off. Raised in review. The run's LEADING word decides
+        # it now.
+        self.assertAdmitted("echo git push origin +HEAD:main")
+        self.assertAdmitted("printf '%s' git push origin +HEAD:main")
+
+        # **The control, and it is the load-bearing half**: the list is of
+        # commands whose arguments are DATA, so anything not on it still
+        # reaches the scan. Every one of these runs the push.
+        for wrapper in ("timeout 5", "env", "nohup", "sudo", "xargs",
+                        "command", "time"):
+            with self.subTest(wrapper=wrapper):
+                self.assertRefused(f"{wrapper} git push origin +HEAD:main")
+
+        # And a separator starts a new run, so a printer does not cover what
+        # follows it.
+        self.assertRefused("echo hi; git push origin +HEAD:main")
+        self.assertRefused("echo hi && git push origin +HEAD:main")
+
+        # A substitution is judged in its own right, so a printer's argument
+        # that EXECUTES is still reached.
+        self.assertRefused('echo "$(git push origin +HEAD:main)"')
 
     def test_the_degraded_check_is_the_settings_denys_and_no_stronger(self):
         # And it is honest about being weaker: the quoted spelling that motivated

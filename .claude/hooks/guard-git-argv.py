@@ -160,7 +160,20 @@ PROTECTED_BRANCHES = {"main"}
 
 # Heredoc introducers. The body between the introducer and its delimiter is data
 # the shell hands to a command, not a command line.
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# **A delimiter is a shell WORD, and matching an identifier-shaped prefix of
+# one was a bypass.** `<<EOF-1` matched `EOF`, no `^EOF$` line was ever found,
+# the whole tail was taken for an unterminated body — and the
+# `git push origin +HEAD:main` after the real `EOF-1` line went with it.
+# Measured: bash terminates on `EOF-1` and runs the push. Raised in review.
+#
+# `[ \t]*` rather than `\s*`, because a newline between `<<` and its delimiter
+# is not a heredoc to bash either. The quote characters are spelled \x27 and
+# \x22 so that neither this pattern nor anything quoting it has to escape them.
+HEREDOC = re.compile(
+    r"<<-?[ \t]*(?:\x27(?P<single>[^\x27]*)\x27"
+    r"|\x22(?P<double>[^\x22]*)\x22"
+    r"|(?P<bare>[^\s;&|<>()\x27\x22]+))"
+)
 
 
 def shell_positions(command):
@@ -247,10 +260,22 @@ def heredoc_spans(command):
         if command.startswith("<<", index) and (not openers or index >= openers[-1][0]):
             match = HEREDOC.match(command, index)
             if match:
-                openers.append((match.end(), match.group(1), match.group(2)))
+                bare = match.group("bare")
+                if bare is None:
+                    delimiter = match.group("single")
+                    if delimiter is None:
+                        delimiter = match.group("double")
+                    expands = False
+                else:
+                    # `<<\EOF` is a quoted delimiter to bash: the body is
+                    # handed over verbatim, and the backslash is not part of
+                    # the word.
+                    delimiter = bare.replace("\\", "")
+                    expands = "\\" not in bare
+                openers.append((match.end(), expands, delimiter))
 
     spans, pending = [], 0
-    for intro_end, quote, delimiter in openers:
+    for intro_end, expands, delimiter in openers:
         # An introducer sitting inside an earlier body is body text, not an
         # opener. Containment, not "before the cursor" — two heredocs stacked on
         # ONE line both introduce before either body starts, so an ordering test
@@ -274,12 +299,17 @@ def heredoc_spans(command):
         closing = re.search(
             rf"^\s*{re.escape(delimiter)}\s*$", command[start:], re.MULTILINE)
         if closing is None:
-            # Unterminated: the whole tail is body. Treating it as one is right
-            # — an unterminated heredoc is not a command line either.
-            spans.append((start, len(command), not quote))
+            # **No span, so nothing is stripped, and the fail direction is the
+            # point.** A delimiter this guard cannot find means one of two
+            # things: the heredoc really is unterminated, in which case the
+            # tail is data and scanning it over-refuses a malformed command; or
+            # the delimiter was read wrongly, in which case the tail holds
+            # commands. Dropping it served the first and hid the second, and
+            # the second is how `<<EOF-1` walked a push past this file.
+            # Scanning is wrong only in the safe direction.
             break
         pending = start + closing.end()
-        spans.append((start, pending, not quote))
+        spans.append((start, pending, expands))
     return spans
 
 
@@ -520,17 +550,50 @@ def evaluated_scripts(tokens):
                 yield " ".join(argv)
 
 
+# Commands whose arguments are text and never a command line.
+#
+# **An allow-list, and the direction is load-bearing.** A name missing from
+# here costs an over-refusal; the converse — listing the wrappers that DO
+# execute their arguments — fails open on the first one nobody thought of, and
+# `timeout`, `env`, `nohup`, `xargs`, `sudo`, `command` and `time` all run
+# `git push origin +HEAD:main` perfectly well. A run led by anything not named
+# here keeps reaching the scan.
+DATA_ONLY_COMMANDS = {"echo", "printf", ":", "true", "false"}
+
+
+def command_runs(tokens):
+    """`tokens` split into the separate commands the shell would run."""
+    current = []
+    for token in tokens:
+        if token in SEPARATORS:
+            if current:
+                yield current
+            current = []
+        else:
+            current.append(token)
+    if current:
+        yield current
+
+
 def git_segments(tokens):
-    """Yield the argv slice of every `git` invocation in a compound command."""
-    for index, token in enumerate(tokens):
-        if program_name(token) != "git":
+    """Yield the argv slice of every `git` invocation in a compound command.
+
+    **A `git` token is only an invocation where a command can stand.**
+    `echo git push origin +HEAD:main` was refused, and a guard that refuses
+    honest traffic is the one this file's own docstring says somebody turns
+    off. Raised in review.
+
+    The test is the run's LEADING word, not where `git` sits inside it, because
+    a wrapper puts the real command in the middle — which is why the scan still
+    covers the whole run.
+    """
+    for run in command_runs(tokens):
+        if not run or program_name(run[0]) in DATA_ONLY_COMMANDS:
             continue
-        segment = []
-        for following in tokens[index + 1:]:
-            if following in SEPARATORS:
-                break
-            segment.append(following)
-        yield segment
+        for index, token in enumerate(run):
+            if program_name(token) != "git":
+                continue
+            yield run[index + 1:]
 
 
 def after_global_options(segment):
