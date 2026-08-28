@@ -643,7 +643,8 @@ public static IServiceCollection AddOrderingInfrastructure(
     services.AddSingleton(new InboxTable(schema));
     services.AddSingleton(new IdempotencyMarkerTable(schema));
 
-    // The retention windows, the batch size and the per-pass ceiling (§9.5).
+    // The retention windows of §9.4, §9.5 and §8.5, the batch size and the
+    // per-pass ceiling.
     // Registered rather than const: §9.5 tells the reader to check the inbox
     // window against their broker's redelivery limits, and a number a chapter
     // says to check has to be one a service can change.
@@ -698,7 +699,8 @@ public static IServiceCollection AddOrderingInfrastructure(
     // about them.
     services.AddHostedService<OutboxDispatcher>();
 
-    // §9.4's and §9.5's retention, in the one hosted service §9.5 asks for.
+    // §9.4's, §9.5's and §8.5's retention, in the one hosted service §9.5
+    // asks for.
     // Registered last, so it is the first stopped: hosted services stop in
     // reverse, and a deploy that interrupts a purge loses nothing an hour will
     // not redo — where the dispatcher stopping first is what keeps the
