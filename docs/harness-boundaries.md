@@ -39,15 +39,24 @@ navigation aid's clothes. Grep the bold lead-ins; they are the index.
 its residuals are recorded, and those citations were deliberately left
 alone.** `CLAUDE.md` keeps a *What cuts across them* section that forwards
 here, so a command's reference lands one hop from what it names — where
-rewriting nine command files to point at a new path would be nine chances to
-get it wrong, in files the harness denies this session an edit to anyway. **A
-new residual is stated here**, and `CLAUDE.md` carries the pointer rather than
-a second copy.
+rewriting every one of those citations to point at a new path would be a
+chance to get each of them wrong, in files the harness denies this session an
+edit to anyway. **A new residual is stated here**, and `CLAUDE.md` carries the
+pointer rather than a second copy.
+
+**No count of those citations appears here, and the first draft of this
+paragraph is why.** It said "nine command files" — wrong on both halves, since
+there are three such files and they carry eleven mentions between them, of
+which only some are the sandbox residual. A reviewer caught it. The restated
+total failing inside the file whose own inventory paragraph refuses to state
+one is the joke this repository keeps writing; the predicate a reader can check
+is `grep -l 'CLAUDE.md' .claude/commands/`, which needs no numeral in front of
+it.
 
 **One of those citations is named rather than left to the general clause,
 because it claims more than the others do.** `ship.md`'s grants callout says
 `CLAUDE.md` "keeps the count and the inventory" — a possessive claim, where the
-other nine only say a thing is *recorded* there. The inventory half resolves in
+others only say a thing is *recorded* there. The inventory half resolves in
 one hop like the rest: `CLAUDE.md` forwards, and the numbered inventory is
 below. **The count half was already stale before this branch touched
 anything** — the headline figure was deliberately dropped after it read "six"

@@ -40,7 +40,7 @@ BLANK COUNTS AS MISSING, and the emptiness check above does not catch it: a
 list holding `" "` is truthy, so it rendered a blank value and the gateway
 threw at startup — after the release had begun rolling, which is the failure
 the render-time guard exists to move earlier. That lesson is already in
-CLAUDE.md, learned against `Identity__Authority` and again against
+docs/lessons.md, learned against `Identity__Authority` and again against
 `Cors__Origins`, and it was not applied here until Copilot said so.
 */}}
 {{- $n := trim $cidr }}

@@ -156,16 +156,23 @@ not validate rule syntax.
 runs but not all of them.** Each gate is tested and then run — the pattern
 every gate here follows, across `ci.yml` and the path-filtered workflows
 beside it — so a green suite says the gate works and not that this checkout
-passes it. The block above already runs the observability gate, the broker ACL
-and the secret scan; these are the gate invocations it does **not** carry:
+passes it. The block above already runs the observability gate, the broker ACL,
+the secret scan and the chart gate; these are the gate invocations it does
+**not** carry:
 
 ```bash
 (cd .github/licence-gate && py -3.12 licence_gate.py)    # from its own directory
 py -3.12 .github/pipeline-gate/pipeline_gate.py filters
 py -3.12 .github/pipeline-gate/pipeline_gate.py images
 py -3.12 deploy/canary/canary.py check
+```
 
-HELM=/path/to/helm bash deploy/helm/smoke.sh             # when helm is not on PATH
+**`HELM=` is an override, not a gate run**, so it is documented here rather
+than listed above: the chart gate is already invoked in the suite block, and
+this only tells it where the executable is when `helm` is not on `PATH`.
+
+```bash
+HELM=/path/to/helm bash deploy/helm/smoke.sh
 ```
 
 **`pipeline_gate.py stages` is the one that cannot be run on its own**: it

@@ -27,7 +27,7 @@ overlay with `identity.authority: " "` rendered cleanly, began a rollout, and
 died in the new pod — which is the failure every render-time guard here exists
 to move earlier.
 
-BLANK COUNTS AS MISSING is already a lesson in CLAUDE.md, learned twice against
+BLANK COUNTS AS MISSING is already a lesson in docs/lessons.md, learned twice against
 this exact key. This is the third time, and it goes in one helper so there is
 one place to be wrong. `toString` before `trim` because `trim` errors on a
 non-string, and `tag: 1.2` is a YAML float.
