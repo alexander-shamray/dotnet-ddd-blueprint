@@ -2629,7 +2629,8 @@ transport is closed on the allow side instead — **and the two grants do it by
 two different mechanisms, which an earlier revision of this paragraph ran
 together.**
 
-**Since #30 it is also closed on a third mechanism, and that one is not a rule.**
+**Since #30 it is also closed on a third mechanism, and that one is not a
+rule.**
 `.claude/hooks/guard-git-argv.py` refuses an argv element containing `ext::` on
 a git subcommand that takes a **repository** — `fetch`, `clone`, `pull`,
 `push`, `remote` and their neighbours. **Not every element after `git`**, which
@@ -2856,9 +2857,10 @@ and `--all` and `--mirror` carry no refspec to inspect, `refs/heads/*` includes
 at all. That is the deny-list trailing the grammar in parser form. **The
 question is inverted now**: a push is refused unless every part of it is
 recognised, so the spelling nobody has listed is refused for being
-unrecognised rather than admitted for being unlisted. Its suite carries the six the issue listed and six it did not, plus
-the three pushes `/ship` actually makes, because over-reach here breaks the
-delivery chain and would be found at the worst moment.
+unrecognised rather than admitted for being unlisted. Its suite carries the
+six the issue listed and six it did not, plus the three pushes `/ship`
+actually makes, because over-reach here breaks the delivery chain and would
+be found at the worst moment.
 
 **The two sweeps are one shape asking two questions**, split by what makes a
 finding rather than by where they look. `/security-sweep` files what an

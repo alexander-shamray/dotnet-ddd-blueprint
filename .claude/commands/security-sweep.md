@@ -262,10 +262,11 @@ or above.** Three gates, and each drops candidates the round must not file:
 - **Not already tracked.** Before filing, enumerate the **whole** issue set
   through `gh-issue-list.sh`, which spells `--state all --limit 1000` itself
   because the default 30 hides older issues and lets a duplicate straight
-  through — and match each finding against it. An open issue **opened by the repository owner**
-  blocks a re-file — as does a `wontfix` or an accepted-risk record meeting
-  the same test. **An issue meeting neither
-  condition is not tracking and blocks nothing**; the paragraph below says why.
+  through — and match each finding against it. An open issue **opened by the
+  repository owner** blocks a re-file — as does a `wontfix` or an
+  accepted-risk record meeting the same test. **An issue meeting neither
+  condition is not tracking and blocks nothing**; the paragraph below says
+  why.
   This sentence is qualified rather than left general because the sweep reads
   this file as its instructions, and a summary that states the old rule
   unconditionally is a rule rather than a summary.
