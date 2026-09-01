@@ -2027,9 +2027,10 @@ so the marker outlives it for every window at least as long
 and the departure is deliberate. The two above are handed a `@Before` this
 service worked out from the registered `TimeProvider`; the marker's takes the
 window as a duration in seconds and subtracts it from `SYSDATETIMEOFFSET()`,
-because `CommittedAt` is written by a column default on whichever replica ran
-the command and ageing a row across two clocks is what the floor used to have
-to bound. [§8.5](08-caching-redis.md) prints the statement and argues the
+because `CommittedAt` is written by a column default and is therefore the
+database's own clock whichever replica ran the command — and ageing a row
+across two clocks is what the floor used to have to bound.
+[§8.5](08-caching-redis.md) prints the statement and argues the
 trade: the outbox's and the inbox's windows are housekeeping, where a clock a
 test host can move is worth more than one nothing can, and the marker's window
 is a correctness property, where one clock on both ends is worth more than a

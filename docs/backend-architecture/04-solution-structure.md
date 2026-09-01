@@ -1558,13 +1558,21 @@ failed claim twice a second from its first boot — the outbox itself with its
 empty allow-list mapper, §9.5's inbox filter and retention purge, §11.3's JWT
 validation, both images ([§15.2](15-cicd-deployment.md)) and
 §4.2's architecture gates. The migrations it copies are `InitialCreate`,
-`AddOutbox`, `AddInbox`, `AddOutboxRetentionIndex` and `AddIdempotencyMarkers`
-— the messaging tables ship with the dispatcher that reads them, because a
-service carrying the dispatcher without its table logs a failed claim twice a
-second from its first boot, and §8.5's marker table ships on a sharper version
-of the same argument: without it the service fails a retention purge every hour
-and then fails the first idempotent command it is ever given
+`AddOutbox`, `AddInbox`, `AddOutboxRetentionIndex`, `AddIdempotencyMarkers` and
+`IdempotencyMarkerCommittedAtDefault` — the messaging tables ship with the
+dispatcher that reads them, because a service carrying the dispatcher without
+its table logs a failed claim twice a second from its first boot, and §8.5's
+marker table ships on a sharper version of the same argument: without it the
+service fails a retention purge every hour and then fails the first idempotent
+command it is ever given
 ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
+**The last of the six is the marker's `CommittedAt` default and travels for
+the reason the table itself does**: the `SYSDATETIMEOFFSET()` default and the
+cutoff `RetentionPurgeService` computes in SQL are two halves of one guarantee
+([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)),
+so a service scaffolded with the table and without the default ages its markers
+on the writing pod's clock while the purge ages them on the server's — the skew
+that migration exists to remove, reintroduced in every new service by omission.
 It then edits seven shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)), the broker
@@ -1649,6 +1657,17 @@ be removed, and its own doc comment says so.
 §14.1 and in `deploy/compose/README.md`; a script that guessed one would
 quietly disagree with a printed chapter. The run refuses a port another service
 already publishes.
+
+**It refuses a *name* on the same terms, and the collision is one the rename
+creates rather than one the operator could see.** §7.1's runtime key is
+`ConnectionStrings__<Service>`, so a service named after one of §14.1's
+infrastructure connections renders a key the api block already declares — and
+nothing else catches it: the rename is correct, no template token is left
+behind, and duplicate keys leave the YAML well formed, so whatever parses the
+file keeps one of the two values and discards the other. The guard is a
+predicate over the rendered `environment:` mappings and never a list of the
+names it happens to catch today, because a list goes stale the moment §14.1
+gives that block another `ConnectionStrings__*` key.
 
 Three things are outside it, and none is silently missing: the gateway route
 ([§10.2](10-api-gateway.md)) — the route belongs to the gateway's

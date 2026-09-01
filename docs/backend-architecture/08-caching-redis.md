@@ -1006,14 +1006,20 @@ public sealed class IdempotencyMarker(string key, DateTimeOffset committedAt = d
 }
 ```
 
-**The mapping is what makes that default reachable, and it takes two calls
-rather than one.** The service's `IEntityTypeConfiguration` writes
+**What makes that default reachable is `ValueGenerated.OnAdd` over it, and the
+mapping writes both calls rather than leaning on the one that implies the
+other.** The service's `IEntityTypeConfiguration` writes
 `.HasDefaultValueSql("SYSDATETIMEOFFSET()")` **and** `.ValueGeneratedOnAdd()`
-on the property — the first supplies the DDL default, the second is what tells
-EF to leave the column out of the insert and read the generated value back.
-With only the first, EF sends the sentinel and the default never fires. Both
-services carry a migration for it, and §4.5's scaffold ships it with the
-template.
+on the property: the first supplies the DDL default, the second is what leaves
+the column out of the insert while the property holds its sentinel and reads
+the generated value back. **The second call is redundant and is made anyway**,
+because EF's relational convention already infers `OnAdd` from a store default
+— measured on this solution's own model snapshot, where
+`ProductPrice.IsAvailable` is configured with `.HasDefaultValue(true)` and
+nothing else and records `.ValueGeneratedOnAdd()` all the same. Writing it puts
+the property on the record instead of resting on a convention the reader has to
+already know. Both services carry a migration for the default, and §4.5's
+scaffold ships it with the template.
 
 **The key is the whole primary key, and it is already scoped by
 construction** — `{subject}:{operation}:{commandId}` puts the caller, the
@@ -1101,8 +1107,9 @@ duration and works the cutoff out on the server:
 --
 -- The cutoff is computed HERE rather than handed in, which is the one place
 -- this statement departs from the two above it. CommittedAt is written by a
--- SYSDATETIMEOFFSET() column default on whichever replica ran the command, so
--- a cutoff computed from a pod's clock would age the row across two of them.
+-- SYSDATETIMEOFFSET() column default, so it is the server's own clock whichever
+-- replica ran the command — and a cutoff computed from a pod's clock would then
+-- age the row across two of them.
 -- Seconds and not days because the window is a caller-supplied TimeSpan;
 -- DATEADD takes an int, which the policy's ten-year ceiling clears.
 DELETE TOP (@BatchSize) FROM ordering.IdempotencyMarkers

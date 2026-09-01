@@ -477,7 +477,7 @@ defect in the branch.
 to be refused alongside it.** A skip runs the suite and reports a pass; a
 category runs a smaller suite and says which. `Category!=Integration` is 869 of
 the 1,088 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 217, needing the daemon
+inferred — and `Category=Integration` is the other 219, needing the daemon
 exactly as before.
 
 Adding a migration needs the pinned tool and a startup project:

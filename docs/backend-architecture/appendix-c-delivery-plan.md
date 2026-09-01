@@ -249,9 +249,10 @@ margin where the ordering it wanted could be made structural.
 **Three rules move, which is the test every row here has to pass.**
 `RetentionPolicy.IdempotencyWindow`'s floor goes from *strictly greater than
 the claim's window* to *equal admitted*, and `IdempotencyRetention` loses a
-member — the one setting this platform calls a correctness setting rather than
-housekeeping. `IIdempotencyStore.CompleteAsync` loses a parameter, which is a
-change to an application port §8.5 specifies and carries a cost a reader of
+member. That window is the one setting this platform calls a correctness
+setting rather than housekeeping, which is what makes its floor worth a row.
+`IIdempotencyStore.CompleteAsync` loses a parameter, which is a change to an
+application port §8.5 specifies and carries a cost a reader of
 the rows above would have no reason to look for: an outcome now stays
 replayable for the remainder of the window the claim opened rather than for a
 full retention starting at the commit. And [§9.5](09-messaging.md)'s "the
@@ -265,7 +266,6 @@ changed too.
 | PR | Title | Depends | Delivers |
 |---|---|---|---|
 | **33** | `fix(common): the marker and its claim are ordered by construction` | 32 | `IIdempotencyStore.CompleteAsync` without a retention, over a Lua `SET … KEEPTTL` — so a claim's window runs from `TryClaimAsync` and the completion never re-arms it. `IdempotencyMarker.CommittedAt` written by a `SYSDATETIMEOFFSET()` column default declared `ValueGeneratedOnAdd`, `EfIdempotencyMarkerStore` without its `TimeProvider`, and `RetentionPurgeService`'s marker statement computing `DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())` where the outbox's and the inbox's keep the `@Before` they were given. `IdempotencyRetention.MarkerLeadAllowance` retired and `MarkerFloor` reduced to `Window`, so a marker window equal to the claim's is admitted. Per service a migration, and §4.5's scaffold carrying it. **Both halves are needed and neither is sufficient**: a column default with an application-computed cutoff still compares two clocks, and a SQL cutoff against an application-stamped column does the same — which is why one row delivers both. **Two tests had to be inverted, and both were good tests.** One asserted that completing *re-armed* the TTL, and an earlier review round had already shortened the key first so that the assertion could fail; the other asserted that a window equal to the claim's was *refused*, and carried the argument in place. A test that pins a design correctly is the thing you edit when the design changes, which is the moment the change gets hidden — so each keeps its history in the comment, and the floor's test now also asserts that `MarkerFloor` equals `Window`, making its subject the relationship rather than a number. It also closes [#166](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/166) and [#164](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/164), because one pull request is one row: an inbox assertion that claimed both *the filter suppressed the duplicate* and *no other row exists anywhere in the schema* now reads by message id through the fixture helper every test calls, and §4.5's scaffold refuses a service name whose §7.1 connection key would collide with a §14.1 infrastructure one — by reading the environment keys back off the block it has just rendered rather than by holding a list of names that would go stale the first time the template gained a key |
-
 
 ## C.3 Dependency graph
 
