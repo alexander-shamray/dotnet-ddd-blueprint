@@ -605,6 +605,23 @@ and "correct". They are consistent across all ~150 existing C# blocks, and the
 solution is written the same way. Changing one is a decision about the whole
 corpus, not about the file in front of you.
 
+**One more house non-finding is not this file's rule, and it is named here
+because the commands that consult this table send a reviewer for the whole
+set.** An external reviewer regularly flags `Aspire.*` packages as unpinned.
+They are not pinned and that is correct: §14.2's AppHost is optional, **Aspire
+is not adopted**, nothing references an `Aspire.*` package, and §4.4 therefore
+pins none — the argument lives in `CLAUDE.md`'s tree section, which is the
+authority for it. Reject the finding and cite that, not this table.
+
+**A pointer rather than a copy, deliberately.** `/review-branch` and
+`/review-grok` list the house non-findings a reviewer may reject by name and
+attribute the list to this file; four of the five are rules stated here and
+the fifth is a fact about what the repository pins, which is nowhere near a
+style rule. Restating it here would put a claim about `Directory.Packages.props`
+in a document about prose and braces, and it would rot on that file's clock
+rather than on this one's. **A set with a hole sends a reviewer back to
+guessing, so the hole is filled with a direction and not with a second copy.**
+
 **Fence languages in use:** `csharp`, `sql`, `yaml`, `bash`, `json`, `mermaid`,
 `dockerfile`, `xml`, `promql`, and bare ``` for trees and console output.
 Always tag a fence that contains a real language.
