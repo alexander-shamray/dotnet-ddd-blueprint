@@ -55,11 +55,20 @@ internal sealed class IdempotencyMarkerConfiguration : IEntityTypeConfiguration<
         // the outbox's and the inbox's stay on the registered TimeProvider a
         // test host can substitute (§9.5).
         //
-        // ValueGeneratedOnAdd is what makes the default reachable: EF omits a
-        // property still holding its sentinel from the insert and reads the
-        // generated value back. A marker constructed WITH a timestamp still
-        // writes it, which is what lets a fixture stage one at a controlled
-        // age.
+        // What makes the default reachable is ValueGenerated.OnAdd over it: EF
+        // omits a property still holding its sentinel from the insert and reads
+        // the generated value back, so a marker constructed WITH a timestamp
+        // still writes it — which is what lets a fixture stage one at a
+        // controlled age.
+        //
+        // The call below is REDUNDANT and is made anyway. EF's relational
+        // convention derives OnAdd from a store default, measured on this
+        // solution rather than read off the documentation: two properties in
+        // Ordering's model configure a default and nothing else, and the
+        // snapshot records ValueGeneratedOnAdd beside each. Spelling it here
+        // states the behaviour the sentinel argument above depends on at the
+        // one site that depends on it, rather than leaving a correctness
+        // property to a convention a later EF version could narrow.
         builder
             .Property(marker => marker.CommittedAt)
             .HasDefaultValueSql("SYSDATETIMEOFFSET()")

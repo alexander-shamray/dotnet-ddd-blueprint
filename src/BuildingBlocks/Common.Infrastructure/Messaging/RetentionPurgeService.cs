@@ -113,7 +113,8 @@ public sealed class RetentionPurgeService : BackgroundService
         // The cutoff is computed HERE and not by the caller, which is the one
         // place this service departs from the two statements above and is
         // #167's fix. CommittedAt is written by a SYSDATETIMEOFFSET() column
-        // default on the pod that ran the command; a cutoff computed from this
+        // default, so it is the server's own clock whichever replica ran the
+        // command — that is the whole point, and a cutoff computed from this
         // pod's TimeProvider would age the row across two clocks, and §15.3
         // ships three replicas of each service. A purger leading the writer by
         // δ deletes the marker δ early, the claim then expires into a table

@@ -110,8 +110,12 @@ public sealed record RetentionPolicy
 
     /// <summary>
     /// Rows per statement. §9.5 asks for the purge to be batched "so neither
-    /// holds a long lock", and 5000 is what §9.4's and §9.5's <c>DELETE TOP</c>
-    /// samples both write.
+    /// holds a long lock", and 5000 is the figure §9.4's and §9.5's arithmetic
+    /// about the dispatcher's rate is written against — see
+    /// <see cref="MaxBatchesPerPass"/>. Those chapters' <c>DELETE</c> samples
+    /// printed the literal until they were corrected to the <c>@BatchSize</c>
+    /// this parameterises, which is why the citation names the arithmetic
+    /// rather than the sample.
     /// </summary>
     public int BatchSize
     {
