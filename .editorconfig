@@ -95,10 +95,19 @@ csharp_preserve_single_line_statements = false
 # `o => { /* §11.3 */ }` where the elision is the point.
 csharp_preserve_single_line_blocks = true
 
-# Extra spaces before `=` are alignment, not accident: 78 declarations and
-# initialiser members line their values up in a column (§8.2's HybridCache
-# options, §6.6's anonymous parameter objects). `false` here would collapse
-# every one of them to a single space.
+# This setting reaches a LOCAL declaration statement — `int a      = 1;` in a
+# method body — and nothing else. Measured with a probe compiled against
+# Common.Domain: a padded `{` on a member, a padded `=` in an object
+# initialiser and a padded `=>` all produce error IDE0055 with this set to
+# ignore, so it does not protect them and never did.
+#
+# It used to say "78 declarations and initialiser members line their values
+# up in a column (§8.2's HybridCache options, §6.6's anonymous parameter
+# objects)". Those sites are SQL inside raw string literals, which no
+# analyser reads whatever this is set to — so the count described the wrong
+# language and the setting was credited with protecting something it cannot
+# see. Left at ignore because no local declaration in the corpus pads an `=`
+# either way, and flipping a setting nothing exercises is churn.
 csharp_space_around_declaration_statements = ignore
 
 # Members of a multi-line initialiser get one line each — the list rule, in the

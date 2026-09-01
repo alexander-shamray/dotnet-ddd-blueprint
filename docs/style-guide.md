@@ -32,15 +32,17 @@ otherwise read as covering them:
 
 - the fence inventory was missing `promql`, which §13 had been using
   throughout;
-- the whitespace rule's *enforcement* claim was narrowed to review-carried,
-  because `.editorconfig` sets `csharp_space_around_declaration_statements =
-  ignore` and nothing in the corpus tests it. **The rule itself was widened
-  and then put back**: it was given a carve-out for aligned `=` in an
-  initialiser on evidence that turned out to be SQL inside raw string
-  literals, and the carve-out was removed when the search was redone with
-  those literals excluded. The round trip is listed rather than tidied away,
-  because a rule relaxed on bad evidence and quietly restored is
-  indistinguishable from one that was never touched;
+- the whitespace rule went out and came back, and the round trip is listed
+  rather than tidied away because a rule relaxed on bad evidence and quietly
+  restored is indistinguishable from one that was never touched. It was given
+  a carve-out for an aligned `=` in an initialiser, on hits that turned out to
+  be SQL inside raw string literals; the carve-out went when the search was
+  redone with those literals excluded; the enforcement claim was then hedged
+  to "review-carried, nothing tests it", which was a second unmeasured claim
+  wearing the opposite sign; and a probe finally settled it. **The rule as
+  originally written was correct in every particular**, and the only thing
+  this file gained is the one real exception, a padded `=` in a local
+  declaration, which is what the `.editorconfig` setting actually reaches;
 - the *Settled choices* table said braces are optional for a single
   statement, where the rule requires them for one that wraps.
 
@@ -528,9 +530,9 @@ file and a reviewer are the only things that do.
 
 ### Whitespace, suppressions and secrets
 
-- **One space before `=`, `=>` and `{` in a *declaration* — never a column
-  of them.** Padding a token out to line up with the one above fails the
-  build: IDE0055 reports it and ADR-019 makes that an error.
+- **One space before `=`, `=>` and `{` — never a column of them.** Padding a
+  token out to line up with the one above fails the build: IDE0055 reports
+  it and ADR-019 makes that an error.
 
   ```csharp
   // Fails the build. Every line but the longest carries the diagnostic.
@@ -562,7 +564,17 @@ file and a reviewer are the only things that do.
   with the column aliases §6.5 uses, §6.6's `MERGE`. Those are the SQL
   section's, and it argues their column on its own terms below.
 
-  **This paragraph said the opposite for three review rounds, and the
+  **The exception is a local declaration statement, and it is the only
+  one.** Measured with a probe compiled against `Common.Domain` and then
+  deleted: a padded `{` on a member, a padded `=` in an object initialiser
+  and a padded `=>` on an expression-bodied member each produce
+  `error IDE0055`, while `int a      = 1;` inside a method body produces
+  nothing. That last case is what
+  `csharp_space_around_declaration_statements = ignore` reaches, and it is
+  the whole of what it reaches. **The rule above therefore holds as
+  written and as enforced**, and a reviewer may cite the build for it.
+
+  **This paragraph argued the opposite for three review rounds, and the
   mistake is worth more than the rule.** A grep for a padded `=` across
   `src/` returned real hits on a green `main`, and they were read as C#
   initialisers proving a deliberate carve-out — so the rule was narrowed to
@@ -573,16 +585,16 @@ file and a reviewer are the only things that do.
   repository keeps the other one — so a measurement over `.cs` files is a
   measurement over two languages unless it is told otherwise.
 
-  **How much of the rule the build enforces is genuinely unsettled, and
-  that is stated rather than guessed.** `.editorconfig` sets
-  `csharp_space_around_declaration_statements = ignore`, so IDE0055 does
-  not police that spacing in a declaration — and with no aligned site in
-  the corpus, nothing has ever tested whether the padded member above
-  fails a build. Treat the rule as **review-carried** and do not claim a
-  build failure for it. The setting's own comment names "78 declarations
-  and initialiser members" relying on it; those are the SQL sites too, so
-  that comment is owed the same correction and is not this change's to
-  make.
+  **Then it hedged, which was the second error and the more tempting one.**
+  Having found the evidence bad, the fix was to call the enforcement
+  "unsettled" and mark the rule review-carried — which reads as caution and
+  is just a second unmeasured claim wearing the opposite sign. One probe
+  settled it in three seconds. **When a question is decidable by running
+  something, hedging is not the safe answer, it is the unmeasured one.**
+  `.editorconfig`'s own comment still names "78 declarations and initialiser
+  members" as relying on that setting; an initialiser member does not, by
+  the probe above, and the sites it means are the SQL ones. That comment is
+  corrected in the same change.
 
   **Two places the analyser does not reach, and they are opposites.** Padding
   between a type and its identifier —
@@ -722,7 +734,8 @@ UPDATE SET
 
 The `=` signs line up in a column here, and that alignment is deliberate. It
 does **not** rest on parity with the C# initialisers, which keep no such
-column — the rule above forbids it and the corpus has none. SQL keeps the
+column — the rule above forbids it, IDE0055 enforces it, and the corpus has
+none. SQL keeps the
 column on its own merits: a statement inside a raw string literal is invisible
 to every analyser and formatter in the toolchain, so nothing will fight it, and
 one assignment per line with the names in a column is what makes `SET` read as
