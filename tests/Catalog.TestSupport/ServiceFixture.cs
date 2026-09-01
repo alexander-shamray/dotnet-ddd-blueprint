@@ -394,6 +394,45 @@ public sealed class ServiceFixture : IAsyncLifetime
             .ToListAsync(TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// The inbox rows <em>one message</em> wrote, untracked (§9.5) — the read
+    /// an assertion about the filter wants, and the one
+    /// <see cref="InboxAsync()"/> cannot be.
+    /// </summary>
+    /// <remarks>
+    /// <b>An unscoped read makes every assertion two claims at once, and only
+    /// one of them is the filter's guarantee.</b>
+    /// <c>(await InboxAsync()).ShouldHaveSingleItem()</c> asserts both that the
+    /// duplicate was suppressed and that no other row exists anywhere in the
+    /// schema. The second is a property of test isolation rather than of
+    /// <c>InboxFilter&lt;T&gt;</c>, and it is the half that breaks: classes in
+    /// <c>IntegrationCollection</c> share this fixture and run in sequence, so
+    /// a message an earlier class published and a consumer handled after this
+    /// class's <see cref="ResetAsync"/> is a second row under an assertion with
+    /// nothing to do with it. Seen once in CI against Ordering's copy of this
+    /// suite (#166); the shape is the fixture's, not that service's, so the
+    /// read is added on both sides rather than where it happened to fire.
+    /// <para>
+    /// The precedent is <c>Ordering.Api.Tests</c>' <c>CatalogEventEndpointTests</c>,
+    /// which already filters on <c>MessageId</c> inline at its own call site.
+    /// This is that filter moved into the helper every test already calls,
+    /// which is where a barrier leaves nothing to forget.
+    /// <see cref="InboxAsync()"/> stays for the assertions whose subject
+    /// genuinely <em>is</em> the table — the retention purge counts rows it
+    /// never keyed.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<InboxMessage>> InboxAsync(Guid messageId)
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+
+        return await db.InboxMessages
+            .AsNoTracking()
+            .Where(m => m.MessageId == messageId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
     /// <summary>Every idempotency marker, untracked, for asserting over (§8.5).</summary>
     public async Task<IReadOnlyList<IdempotencyMarker>> IdempotencyMarkersAsync()
     {

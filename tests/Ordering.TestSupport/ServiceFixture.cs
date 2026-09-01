@@ -350,14 +350,22 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// latent rather than theoretical.</b> <c>Unschedule</c> is a no-op on
     /// ADR-021's scheduler, so every saga test leaves its timeouts armed in
     /// the collection-wide RabbitMQ. One landing mid-run would cross
-    /// <c>InboxFilter</c> and write a row — and <c>InboxFilterTests</c>
-    /// asserts <c>ShouldBeEmpty()</c> over the whole table, in this same
-    /// collection. What stops it is only that the shortest schedule is five
-    /// minutes and this collection runs in about eighty seconds. **A runner
-    /// four times slower makes that a flake in a test that has nothing to do
-    /// with sagas**, so read the PR-21 entry in the decision log before
+    /// <c>InboxFilter</c> and write a row into a table another class is
+    /// asserting over. What stops it is only that the shortest schedule is
+    /// five minutes and this collection runs in about eighty seconds. **A
+    /// runner four times slower makes that a flake in a test that has nothing
+    /// to do with sagas**, so read the PR-21 entry in the decision log before
     /// chasing it. Copilot raised it; the fix is a broker per saga class and
     /// was judged too expensive for the hazard.
+    /// <para>
+    /// <b>This paragraph named <c>InboxFilterTests</c>' whole-table
+    /// <c>ShouldBeEmpty()</c> as the target and no longer can</b> — since #166
+    /// that suite reads through <see cref="InboxAsync(Guid)"/> and asserts
+    /// about its own message id, so a stray row does not reach it. The hazard
+    /// is unchanged and its remaining targets are the reads whose subject
+    /// really is the table, <c>RetentionPurgeTests</c> above all. Narrowing
+    /// one consumer of a shared fixture does not narrow the fixture.
+    /// </para>
     /// </para>
     /// <para>
     /// <b>It deadlocks against whatever is still consuming, and the retry below
@@ -623,6 +631,43 @@ public sealed class ServiceFixture : IAsyncLifetime
 
         return await db.InboxMessages
             .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// The inbox rows <em>one message</em> wrote, untracked (§9.5) — the read
+    /// an assertion about the filter wants, and the one
+    /// <see cref="InboxAsync()"/> cannot be.
+    /// </summary>
+    /// <remarks>
+    /// <b>An unscoped read makes every assertion two claims at once, and only
+    /// one of them is the filter's guarantee.</b>
+    /// <c>(await InboxAsync()).ShouldHaveSingleItem()</c> asserts both that the
+    /// duplicate was suppressed and that no other row exists anywhere in the
+    /// schema. The second is a property of test isolation rather than of
+    /// <c>InboxFilter&lt;T&gt;</c>, and it is the half that breaks: classes in
+    /// <c>IntegrationCollection</c> share this fixture and run in sequence, so
+    /// a message an earlier class published and a consumer handled after this
+    /// class's <see cref="ResetAsync"/> is a second row under an assertion with
+    /// nothing to do with it. Seen once in CI (#166) and not reproduced in ten
+    /// local runs, which is what that shape looks like from the outside.
+    /// <para>
+    /// The precedent is <c>CatalogEventEndpointTests</c>, which already filters
+    /// on <c>MessageId</c> inline at its own call site. This is that filter
+    /// moved into the helper every test already calls, which is where a barrier
+    /// leaves nothing to forget. <see cref="InboxAsync()"/> stays for the
+    /// assertions whose subject genuinely <em>is</em> the table — the retention
+    /// purge counts rows it never keyed.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<InboxMessage>> InboxAsync(Guid messageId)
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+
+        return await db.InboxMessages
+            .AsNoTracking()
+            .Where(m => m.MessageId == messageId)
             .ToListAsync(TestContext.Current.CancellationToken);
     }
 

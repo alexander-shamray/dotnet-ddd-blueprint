@@ -203,8 +203,11 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
             TestContext.Current.CancellationToken);
 
         // The row, not the consume: the row is what the second delivery reads,
-        // and it is committed after the consumer returns.
-        await Eventually(() => fixture.InboxAsync(), expected: 1);
+        // and it is committed after the consumer returns. Scoped to this
+        // message's own id — an unscoped wait returns on a row some other
+        // class left behind, so the second publish would go out before this
+        // one's row was committed and the filter would have nothing to read.
+        await Eventually(() => fixture.InboxAsync(messageId), expected: 1);
 
         await harness.Bus.Publish(
             new ProbeMessage(id),
@@ -229,7 +232,19 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
             expected: 2);
 
         FirstConsumer.Consumed.ShouldBe([id], "the filter must drop the second delivery");
-        (await fixture.InboxAsync()).ShouldHaveSingleItem().MessageId.ShouldBe(messageId);
+
+        // Scoped to this message (#166). The unscoped read made this line two
+        // claims at once — that the duplicate wrote no second row, and that no
+        // other row exists anywhere in the schema — and only the first is the
+        // filter's. The second is test isolation, and it is the one that
+        // failed: this collection runs its classes in sequence over one
+        // fixture, so a message an earlier class published and a consumer
+        // handled after this class's ResetAsync is a row this assertion had no
+        // business counting. The endpoint is what is left to assert once the
+        // id is in the query rather than in the assertion.
+        (await fixture.InboxAsync(messageId))
+            .ShouldHaveSingleItem("one delivery of this message reached the consumer, so one row")
+            .Endpoint.ShouldBe(FirstEndpoint);
     }
 
     [Fact]
@@ -284,7 +299,11 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
             c => c.MessageId = messageId,
             TestContext.Current.CancellationToken);
 
-        await Eventually(() => fixture.InboxAsync(), expected: 1);
+        // Scoped for the reason the test above gives at length: an unscoped
+        // wait can be satisfied by a row this test did not write, and the
+        // second publish would then race the first delivery's commit — the
+        // suppression this test counts would simply not happen.
+        await Eventually(() => fixture.InboxAsync(messageId), expected: 1);
 
         await harness.Bus.Publish(
             new ProbeMessage(id),
@@ -341,10 +360,19 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
 
         // Both endpoints, one message: two rows sharing a MessageId and
         // differing only in Endpoint, which is the shape the key exists for.
-        IReadOnlyList<InboxMessage> rows = await Eventually(() => fixture.InboxAsync(), expected: 2);
+        // Scoping by message id still expects two — that is the point of the
+        // key, and it is what makes this the one call site where the count
+        // survives the change unaltered. Unscoped, the same wait would return
+        // on one row of this message and one of somebody else's.
+        IReadOnlyList<InboxMessage> rows =
+            await Eventually(() => fixture.InboxAsync(messageId), expected: 2);
 
+        // The endpoints are the whole claim now. `ShouldAllBe(r => r.MessageId
+        // == messageId)` stood here and cannot fail against a read that
+        // filters on exactly that — an assertion no arrangement can break is
+        // this repository's named failure, so the claim moved into the query
+        // rather than being restated after it.
         rows.Select(r => r.Endpoint).OrderBy(e => e).ShouldBe([FirstEndpoint, SecondEndpoint]);
-        rows.ShouldAllBe(r => r.MessageId == messageId);
     }
 
     [Fact]
@@ -359,9 +387,13 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
         ITestHarness harness = provider.GetRequiredService<ITestHarness>();
         await harness.Start();
 
+        // Named rather than inlined, because the assertion below is now about
+        // this message and needs to be able to say which one.
+        var messageId = Guid.CreateVersion7();
+
         await harness.Bus.Publish(
             new ProbeMessage(Guid.CreateVersion7()),
-            c => c.MessageId = Guid.CreateVersion7(),
+            c => c.MessageId = messageId,
             TestContext.Current.CancellationToken);
 
         // The completed record, not `Consumed.Any`. That predicate is satisfied
@@ -382,7 +414,13 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
         received.ShouldNotBeNull();
         received.Exception.ShouldBeOfType<InvalidOperationException>();
 
-        (await fixture.InboxAsync()).ShouldBeEmpty();
+        // "This message wrote no row", not "the table is empty". The second is
+        // a claim about every other class in the collection, and a stray row
+        // from one of them would fail a test about a consumer that throws —
+        // which is the wrong test to fail and tells the reader nothing. The
+        // scoped read still fails the moment the filter commits a row for a
+        // consumer that faulted, which is the whole subject here.
+        (await fixture.InboxAsync(messageId)).ShouldBeEmpty();
     }
 
     [Fact]
@@ -416,11 +454,16 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
         (await harness.Consumed.Any<ProbeMessage>(TestContext.Current.CancellationToken)).ShouldBeTrue();
 
         IReadOnlyList<InboxMessage> rows =
-            await Eventually(() => fixture.InboxAsync(), expected: 1);
+            await Eventually(() => fixture.InboxAsync(messageId), expected: 1);
 
+        // Scoped, so the wait cannot be satisfied by a row this consumer did
+        // not write — which for a test whose defect was "the table simply
+        // stayed empty" is the difference between the regression test and a
+        // test of the collection's tidiness. The endpoint is what the
+        // assertion has left to say, the id having moved into the query.
         rows.ShouldHaveSingleItem(
             "the row is staged after the consumer returns precisely so the unit of work's " +
-            "ChangeTracker.Clear() cannot take it").MessageId.ShouldBe(messageId);
+            "ChangeTracker.Clear() cannot take it").Endpoint.ShouldBe(FirstEndpoint);
     }
 
     [Fact]
@@ -441,6 +484,44 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
         OrderingDbContext own = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
 
         resolved.ShouldBeSameAs(own);
+    }
+
+    [Fact]
+    public async Task The_scoped_inbox_read_returns_only_the_message_it_was_asked_for()
+    {
+        // The subject is the fixture's reader rather than the filter, and it is
+        // owed for the reason every gate here is owed: a scoped read that
+        // matched nothing would make every assertion above pass vacuously, on
+        // a green run, for as long as nobody looked. #166 measured what an
+        // unscoped read costs; this is what shows the scoped one is looking at
+        // anything at all.
+        //
+        // Homed in this suite alone, on the same argument as the suppression
+        // counter above — the reader is one helper copied into both fixtures,
+        // and this is a property of the read rather than of either service.
+        //
+        // Staged rather than consumed, because no endpoint has to run: what
+        // must differ between the two rows is the MessageId, and the filter
+        // only ever writes the one it was handed.
+        var mine = Guid.CreateVersion7();
+        var anotherMessage = Guid.CreateVersion7();
+
+        await fixture.StageInboxAsync(
+            new InboxMessage(mine, FirstEndpoint, DateTimeOffset.UtcNow),
+            new InboxMessage(anotherMessage, FirstEndpoint, DateTimeOffset.UtcNow));
+
+        (await fixture.InboxAsync(mine)).ShouldHaveSingleItem().MessageId.ShouldBe(mine);
+
+        // Both ids, not a count. Asserting the table holds exactly two rows
+        // would be the very claim about the whole schema this change exists to
+        // stop making — and it would leave this test flaking on the leak it
+        // was written to survive. What has to be true is that the unscoped
+        // read saw the row the scoped one filtered out, which is what
+        // distinguishes "the filter works" from "there was only ever one row".
+        IReadOnlyList<Guid> all = [.. (await fixture.InboxAsync()).Select(r => r.MessageId)];
+
+        all.ShouldContain(mine);
+        all.ShouldContain(anotherMessage, "the scoped read filtered this row rather than never seeing it");
     }
 
     /// <summary>
