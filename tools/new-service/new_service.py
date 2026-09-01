@@ -1527,6 +1527,16 @@ MIGRATION_LABELS = (
 SERVICE_KEY = re.compile(r"^  ([A-Za-z0-9][A-Za-z0-9_-]*):$")
 ENV_MARKER = re.compile(r"^# ([A-Za-z0-9]+)'s two §7\.1 keys")
 
+# One service's `environment:` mapping in that same file, and the keys inside
+# it — read back off the block this script has just rendered rather than off
+# the template it was lifted from, because the collision below is something the
+# rename creates. Indent is the whole selector: a mapping opens at the
+# service's own level and its keys sit one level inside it, so `build:`'s
+# nested pair, `depends_on:`'s entries and every comment are excluded by
+# position rather than by a list of names to skip past.
+ENVIRONMENT_BLOCK = re.compile(r"^    environment:$")
+ENVIRONMENT_KEY = re.compile(r"^      ([A-Za-z0-9_]+):(?:\s|$)")
+
 # Docker publishes 1–65535 and nothing else. §14.1 allocates 51xx by
 # convention, which is a decision rather than a rule, so the guard is the
 # protocol's limit and the convention stays in the documentation.
@@ -2087,6 +2097,7 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
                 "_AddInbox.Designer.cs",
                 "_AddOutboxRetentionIndex.Designer.cs",
                 "_AddIdempotencyMarkers.Designer.cs",
+                "_IdempotencyMarkerCommittedAtDefault.Designer.cs",
             )):
             text = without_slice_entity(text)
 
@@ -2203,6 +2214,40 @@ def update_solution(repo_root: Path, names: Names) -> str:
         positions = [(i, m.group(1)) for i, l in enumerate(lines) if (m := entry.match(l))]
 
     return restore("".join(lines), newline)
+
+
+def environment_keys(block: str) -> list[list[str]]:
+    """The mapping keys of every `environment:` block, one list per mapping.
+
+    **Per mapping and never one flat set**, because §14.1's pair rule renders
+    two services and each declares its own: a key appearing in both is two
+    containers agreeing about a variable, which is ordinary, while the same key
+    twice in one mapping is a service saying one thing twice, which is the
+    defect. Flattening the two would report the first as a collision and lose
+    the second in the noise.
+
+    **Returned rather than judged, so that what this reads is testable.** A
+    duplicate check is only as good as the keys handed to it, and a pattern
+    that stops matching the template's shape hands it nothing — over which
+    every name there is passes. That is this repository's most-repeated
+    failure, so the extraction is a value a test can assert about instead of a
+    step buried inside the caller.
+    """
+    mappings: list[list[str]] = []
+    keys: list[str] | None = None
+    for line in block.split("\n"):
+        if ENVIRONMENT_BLOCK.fullmatch(line):
+            keys = []
+            mappings.append(keys)
+        elif keys is None:
+            continue
+        elif line.strip() and not line.startswith("      "):
+            # Anything back out at the service's own level ends the mapping —
+            # `ports:`, `depends_on:`, the next service. A blank line does not.
+            keys = None
+        elif (key := ENVIRONMENT_KEY.match(line)) is not None:
+            keys.append(key.group(1))
+    return mappings
 
 
 def update_compose(repo_root: Path, names: Names, port: int) -> str:

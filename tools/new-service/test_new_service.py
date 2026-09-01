@@ -30,6 +30,7 @@ from new_service import (
     Plan,
     ScaffoldError,
     apply,
+    environment_keys,
     load_scan_gate,
     main,
     plan,
@@ -1329,6 +1330,55 @@ class RefusesToRun(unittest.TestCase):
 
             with self.assertRaises(ScaffoldError):
                 render(repo_root=root)
+
+    def test_a_name_that_collides_with_an_infrastructure_connection_key(self):
+        # §7.1's runtime key is ConnectionStrings__<Service> and the rename is
+        # what writes it, while §14.1's api block already declares
+        # ConnectionStrings__RabbitMq, ConnectionStrings__RedisCache and
+        # ConnectionStrings__RedisCoordination beside it. A service named after
+        # one of those renders the same mapping key twice — and this was the
+        # sixth bad name and the only one whose failure was silent: the rename
+        # worked, the straggler check saw no template token, the YAML stayed
+        # valid, and one of the two connection strings was discarded by
+        # whatever read the file.
+        for name in ("RabbitMq", "RedisCache", "RedisCoordination"):
+            with self.assertRaises(ScaffoldError) as raised:
+                render(name=name)
+            self.assertIn(f"ConnectionStrings__{name}", str(raised.exception), name)
+
+    def test_the_duplicate_key_check_is_looking_at_the_environment_mappings(self):
+        # The subject test for the refusal above, and the reason it is a
+        # predicate rather than those three names: the check is only as good as
+        # the keys handed to it, and a pattern that stops matching the
+        # template's shape hands it nothing — over which every name there is
+        # passes. So this asserts what environment_keys extracted, not what the
+        # caller concluded from it.
+        compose = render().updated["deploy/compose/docker-compose.yml"].replace("\r\n", "\n")
+        lines = compose.split("\n")
+        # Sliced the way update_compose slices, with the script's own reader:
+        # §14.1's pair rule renders a migrator and an api, so the block is the
+        # two service keys from the migrator to the third one after it.
+        starts = [i for i, line in enumerate(lines) if new_service.SERVICE_KEY.fullmatch(line)]
+        at = starts.index(lines.index(f"  {PROBE.lower()}-migrator:"))
+        end = starts[at + 2] if at + 2 < len(starts) else len(lines)
+        block = "\n".join(lines[starts[at]:end])
+
+        mappings = environment_keys(block)
+
+        # Two, one per service, and each with something in it. Flattening them
+        # would be weaker as well as wrong — a key in both is two containers
+        # agreeing about a variable, not one saying a thing twice.
+        self.assertEqual(2, len(mappings), block)
+        for mapping in mappings:
+            self.assertTrue(mapping, block)
+
+        keys = [key for mapping in mappings for key in mapping]
+        # Both halves of the collision, read out of the rendered block itself:
+        # the key the rename writes from the service's name, and one §14.1
+        # wrote long before it. Lose either and the check above is watching a
+        # surface the defect is not on.
+        self.assertIn(f"ConnectionStrings__{PROBE}", keys, block)
+        self.assertIn("ConnectionStrings__RabbitMq", keys, block)
 
     def test_a_port_docker_cannot_publish(self):
         # Collision was the only check once, so -1 and 70000 planned happily
