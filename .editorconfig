@@ -4,7 +4,7 @@ root = true
 # docs/backend-architecture/ and the solution that will be built in src/ and
 # tests/ — one dialect, so a sample and its implementation read identically.
 # docs/style-guide.md carries the prose version, including the settled choices
-# might otherwise try to "correct".
+# a reviewer might otherwise try to "correct".
 #
 # This is the .editorconfig delivery-plan PR-01 ships. Treat it as source.
 #

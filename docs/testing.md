@@ -565,4 +565,5 @@ repository. They run on stdlib Python with no SDK, which means they inspect
 text and never build what they render — so a Catalog test using a helper the
 scaffold removes renders into a service that does not compile with every test
 green. A change touching `tests/Catalog.*` is not verified until a scaffolded
-service has been built; `CLAUDE.md` carries the four commands and the cleanup.
+service has been built; `docs/repo-map.md` carries the four commands and the
+cleanup.

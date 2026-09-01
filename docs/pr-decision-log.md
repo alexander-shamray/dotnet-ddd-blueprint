@@ -225,7 +225,7 @@ file's own explanation of itself.
 
 ### The rule the corpus disagreed with (#139)
 
-`CLAUDE.md` puts a broken fluent chain's continuations at head + 4.
+`docs/style-guide.md` puts a broken fluent chain's continuations at head + 4.
 `OrderFulfilmentSagaTests.cs` used head + 8 for one shape — and held nine sites
 at +4 in the same file, so it was neither the repository's form nor its own.
 §12.5's sample followed the minority form, which is the half that mattered:
@@ -997,7 +997,8 @@ the claim had been copied to all of them. **A rule is reversed everywhere it is
 stated or nowhere** — and this sentence carried a count of four, then seven,
 each time corrected by somebody counting again. The number is gone rather than
 corrected a third time: the places are checkable and the tally never was, which
-is the argument `CLAUDE.md` makes about its own callout totals.
+is the argument `docs/style-guide.md` makes about the blueprint's callout
+totals.
 
 ---
 
@@ -4295,8 +4296,8 @@ the `web-bff` route's service — and ten of its decisions bind what comes after
   port reserved for two** — and arithmetic at a call site is what hid it, so the
   second port is a named constant now.
 
-  The rest of the scaffold reconciliation is the ordinary price CLAUDE.md
-  already names: ten new files classified, the gRPC package, the `Protobuf`
+  The rest of the scaffold reconciliation is the ordinary price
+  `docs/repo-map.md` already names: ten new files classified, the gRPC package, the `Protobuf`
   item and both `Program.cs` blocks patched out, and the non-vacuity test
   replaced by the comment that tells the next service when to add it back. A
   scaffolded service was rendered and **built** afterwards, because the Python
@@ -4775,8 +4776,9 @@ test in the repository was watching.**
   fixing a fail-closed contract while it is still theoretical rather than the
   argument against.
 
-**One finding against `CLAUDE.md`'s own procedure**, worth keeping because it
-cost work: the scaffold cleanup it prescribes ends with
+**One finding against the scaffold procedure** — `CLAUDE.md`'s when this was
+written, `docs/repo-map.md`'s since — worth keeping because it cost work: the
+cleanup it prescribes ends with
 `git checkout -- Platform.slnx deploy/compose/`, which is correct only while
 the PR does not itself change `deploy/compose/`. PR-16 changes all three files
 in that tree, and the cleanup reverted them. **Commit before dogfooding the
@@ -5001,7 +5003,7 @@ after:
 - **Catalog is the template, read at run time.** There is no template
   directory, so there is one copy of the wiring rather than two that drift, and
   the scaffold's tests render *this* repository. The consequence is stated in
-  `CLAUDE.md`'s scaffold section and worth repeating here: a Catalog change can
+  `docs/repo-map.md`'s scaffold section and worth repeating here: a Catalog change can
   turn
   `tools/new-service`'s suite red, and reconciling the script belongs in the
   same change.

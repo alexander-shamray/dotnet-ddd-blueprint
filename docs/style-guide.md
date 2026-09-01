@@ -514,27 +514,9 @@ file and a reviewer are the only things that do.
 
 ### Whitespace, suppressions and secrets
 
-- **One space before `=`, `=>` and `{` — never a column of them.** Padding a
-  token out to line up with the one above is the house form this rule
-  refuses.
-
-  **How much of it the build actually catches is narrower than this rule,
-  and the gap is deliberate on the build's side.** IDE0055 reports the
-  padded member declaration below and ADR-019 makes that an error — but
-  `.editorconfig` sets `csharp_space_around_declaration_statements =
-  ignore`, arguing in its own comment that extra spaces before `=` are
-  *alignment, not accident*, and naming the initialiser members that rely
-  on it. So an aligned `=` column in an object initialiser compiles green,
-  and the corpus holds live examples in `OutboxDispatcher` and Catalog's
-  query handlers.
-
-  **The two statements were contradictory for as long as both existed**,
-  and this is the documentation reconciled to the measurement rather than
-  the rule relaxed: what the build enforces is one thing, what this file
-  asks of a reviewer is another, and only the first was overclaimed.
-  Flipping that setting to `false` would collapse every aligned initialiser
-  in the corpus, which is a `/style-pass` decision about the whole corpus
-  and not one to take inside an extraction.
+- **One space before `=`, `=>` and `{` in a *declaration* — never a column
+  of them.** Padding a token out to line up with the one above fails the
+  build: IDE0055 reports it and ADR-019 makes that an error.
 
   ```csharp
   // Fails the build. Every line but the longest carries the diagnostic.
@@ -557,6 +539,24 @@ file and a reviewer are the only things that do.
   `dotnet format` agrees with both halves — it collapses the code padding and
   leaves the comment column untouched — so a format run neither introduces this
   nor undoes it.
+
+  **An aligned `=` column inside an object or collection initialiser is the
+  carve-out, and it is deliberate rather than tolerated.** `.editorconfig`
+  sets `csharp_space_around_declaration_statements = ignore` and argues in
+  its own comment that those spaces are *alignment, not accident*, naming
+  §8.2's HybridCache options and §6.6's anonymous parameter objects. The
+  corpus holds live examples in `OutboxDispatcher` and Catalog's query
+  handlers, on a green `main`. So the rule above is about the declaration,
+  and an initialiser keeps its column for the reason SQL does: it reads as
+  the row shape it produces.
+
+  **That carve-out was written here as a prohibition until a review
+  measured it**, and the correction is the documentation moving to the code
+  rather than the other way round. Sweeping those sites so the prohibition
+  became true is a `/style-pass` decision about the whole corpus, which is
+  the user's; nothing is entitled to take it by rewording a rule, and a
+  rule left overclaiming is how a reviewer ends up correcting the corpus
+  toward a build failure that cannot occur.
 
   **Two places the analyser does not reach, and they are opposites.** Padding
   between a type and its identifier —
@@ -694,13 +694,19 @@ UPDATE SET
     LineCount   = @LineCount,
 ```
 
-The `=` signs line up in a column here, and that alignment is deliberate. It is
-**not** justified by parity with the C# initialisers — IDE0055 forbids the C#
-form and the section above says so. SQL keeps the column on its own merits: a
-statement inside a raw string literal is invisible to every analyser and
-formatter in the toolchain, so nothing will fight it, and one assignment per
-line with the names in a column is what makes `SET` read as the row shape it
-produces rather than as a wrapped list.
+The `=` signs line up in a column here, and that alignment is deliberate. It
+does **not** rest on parity with the C# initialisers, even though those keep a
+column too: theirs survives because `.editorconfig` declines to police that
+spacing, which is a decision someone could reverse. SQL keeps the column on
+its own merits: a statement inside a raw string literal is invisible to every
+analyser and formatter in the toolchain, so nothing will fight it, and one
+assignment per line with the names in a column is what makes `SET` read as the
+row shape it produces rather than as a wrapped list.
+
+**This sentence said IDE0055 forbids the C# form, and it did not.** The claim
+was inherited from the whitespace rule above, which overclaimed the same
+thing — so correcting one and leaving the other would have left the file
+citing itself for something neither half says any more.
 
 **A SQL list obeys the same rule as a C# one: one line, or one element per
 line, never a ragged middle.** That covers the column list after `INSERT`, the

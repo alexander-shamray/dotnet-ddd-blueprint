@@ -617,9 +617,11 @@ to reach both, and the guide is the master copy.
 - **A single statement may omit braces; two or more always take them — and so
   does one that wraps.** The one exception is a multi-line condition, whose
   body takes braces precisely so the four-space continuation is safe.
-- **One space before `=`, `=>` and `{`, never a column of them.** IDE0055 makes
-  a padded column a failed build. SQL inside a raw string literal is the
-  deliberate exception and keeps its alignment, because no analyser reads it.
+- **One space before `=`, `=>` and `{` in a declaration, never a column of
+  them.** IDE0055 makes a padded *declaration* a failed build. Two things
+  keep a column deliberately: SQL inside a raw string literal, which no
+  analyser reads, and an aligned `=` in an object initialiser, which
+  `.editorconfig` declines to police on purpose. The guide argues both.
 - **No `#pragma` suppressions and no real credentials**, in a sample or in
   source. A warranted suppression goes in `Directory.Build.props` with a
   comment; §14.1's local-development defaults are the one stated exception to
