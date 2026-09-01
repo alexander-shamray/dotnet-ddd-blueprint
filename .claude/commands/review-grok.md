@@ -86,9 +86,10 @@ pointer becomes a third copy of it.
    `/validate-blueprint`'s: two statements that cannot both be true, or a
    statement that cannot be true of the system described. An external reviewer
    does not know this repo's settled choices, and the ones it most often
-   flags are the ones `CLAUDE.md` tabulates deliberately — braceless single
-   statements, file-scoped namespaces, explicit types, British prose beside
-   real identifier spellings, the unpinned Aspire rows. Reject those by name.
+   flags are the ones `docs/style-guide.md` tabulates deliberately —
+   braceless single statements, file-scoped namespaces, explicit types,
+   British prose beside real identifier spellings, the unpinned Aspire rows.
+   Reject those by name.
 4. **Watch for the good class of finding.** External reviews have been right
    here about exactly one thing repeatedly: **register and version drift** —
    a package used in a sample but missing from `appendix-b-licences.md`, a

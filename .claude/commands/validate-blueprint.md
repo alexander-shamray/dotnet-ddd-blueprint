@@ -2,7 +2,7 @@
 description: Multi-pass self-consistency audit of the blueprint, its roadmap and docs/testing.md, and of the code against them
 argument-hint: "[chapter file or topic to focus on — omit for a full sweep]"
 allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
-disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(docs/superpowers/**), Edit(./docs/superpowers/**), Edit(docs/runbooks/**), Edit(./docs/runbooks/**), Edit(docs/pr-decision-log.md), Edit(./docs/pr-decision-log.md), Edit(docs/secrets.md), Edit(./docs/secrets.md), Edit(docs/lessons.md), Edit(./docs/lessons.md), Edit(docs/harness-boundaries.md), Edit(./docs/harness-boundaries.md), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
+disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(docs/superpowers/**), Edit(./docs/superpowers/**), Edit(docs/runbooks/**), Edit(./docs/runbooks/**), Edit(docs/pr-decision-log.md), Edit(./docs/pr-decision-log.md), Edit(docs/secrets.md), Edit(./docs/secrets.md), Edit(docs/lessons.md), Edit(./docs/lessons.md), Edit(docs/harness-boundaries.md), Edit(./docs/harness-boundaries.md), Edit(docs/repo-map.md), Edit(./docs/repo-map.md), Edit(docs/style-guide.md), Edit(./docs/style-guide.md), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
 Audit `docs/backend-architecture/` for internal contradictions — and, once the
@@ -175,10 +175,13 @@ clean. If you did not reach a clean pass, say so — do not round up.
 ## Do not
 
 - Do not rewrite prose you merely dislike.
-- Do not "fix" the settled choices `CLAUDE.md` tabulates — file-scoped
-  namespaces, expression-bodied members and braceless single statements are
-  deliberate in both docs and source. Note that `var` is **not** among them:
-  explicit types are the rule, with only the four exceptions CLAUDE.md lists.
+- Do not "fix" the settled choices `docs/style-guide.md` tabulates —
+  file-scoped namespaces, expression-bodied members and braceless single
+  statements are deliberate in both docs and source. Note that `var` is
+  **not** among them: explicit types are the rule, with only the four
+  exceptions that file lists. `CLAUDE.md` keeps a short list of the same
+  rules under *Style* and the guide is the master copy, so a finding that
+  survives one of them has to be checked against the other.
 - Do not renumber ADRs or chapters.
 - Do not revise an estimate in `docs/roadmap.md`, or its days-per-week ratio,
   or its one-engineer assumption. Recompute what rests on them; leave the
@@ -219,13 +222,22 @@ record and names as outside this command's scope in as many words, plus
 audit. All four were editable here because the exemption was written at the
 tree. They are denied by name now. Raised in review.
 
-**The list has since grown to six, and it grew the way the mechanism intends
-rather than the way the four arrived.** `lessons.md` and
-`harness-boundaries.md` were extracted from `CLAUDE.md`; both say in their own
-headers that they are outside this command's scope, and both are denied by
-name. The difference worth keeping is that the original four were *found*
-editable in review, where these two were refused by a red build before they
-could ever be written to — which is the check below doing its job, once.
+**The list has grown twice since, and both times it grew the way the
+mechanism intends rather than the way the four arrived.** `lessons.md` and
+`harness-boundaries.md` were extracted from `CLAUDE.md`, and `repo-map.md`
+and `style-guide.md` after them; each says in its own header that it is
+outside this command's scope, and each is denied by name. The difference
+worth keeping is that the original four were *found* editable in review,
+where these were refused by a red build before they could ever be written
+to — which is the check below doing its job rather than a reviewer doing
+it.
+
+**No total opens that sentence any more, and dropping it is the fix rather
+than a recount.** It said six, and the extraction that added the repo map
+and the style guide made it eight inside the pull request that was
+correcting the sentence around it — the failure `CLAUDE.md` records against
+its own callout counts, arriving in a paragraph about a list that is read
+from `git ls-files` precisely so that nobody has to count it.
 
 `test_grok_helpers.py` reads the entries under `docs/` from `git ls-files` and
 asserts each is either in the audited scope or denied, so **a new file under
