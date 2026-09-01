@@ -1862,10 +1862,25 @@ degrades the filtered index scan.
 -- alone would delete the abandoned rows (Attempts >= 10, never processed)
 -- that the §13.6 alert exists to surface — turning permanent data loss into
 -- a clean, empty table.
-DELETE TOP (5000) FROM ordering.OutboxMessages
+--
+-- The cutoff arrives as a parameter and is not computed on the server:
+-- RetentionPurgeService works @Before out from the registered TimeProvider,
+-- which is the clock a test host substitutes. §8.5's marker statement is the
+-- one that departs from this, and says why.
+DELETE TOP (@BatchSize) FROM ordering.OutboxMessages
 WHERE ProcessedAt IS NOT NULL
-    AND ProcessedAt < DATEADD(day, -7, SYSDATETIMEOFFSET());
+    AND ProcessedAt < @Before;
 ```
+
+**Correction, and it is not part of the idempotency change beside it.** This
+sample printed `TOP (5000)` and `DATEADD(day, -7, SYSDATETIMEOFFSET())` from
+before `RetentionPurgeService` existed, and the shipped statement has taken
+both as parameters since it was built — the batch size from `RetentionPolicy`
+and the cutoff from the registered clock. Nothing depended on the difference
+until §8.5 gained a third statement that computes its cutoff in SQL *on
+purpose*; a chapter printing the server clock for all three would make that
+deliberate exception unreadable. §9.5's sample carried the same two literals
+and is corrected with it.
 
 ## 9.5 Idempotent consumers — the inbox
 
@@ -1938,8 +1953,12 @@ degrades with it:
 -- Older than the broker's maximum redelivery window. Pruning sooner would
 -- let a late redelivery through as if it were new, which is exactly the
 -- duplicate this table exists to stop.
-DELETE TOP (5000) FROM ordering.InboxMessages
-WHERE HandledAt < DATEADD(day, -7, SYSDATETIMEOFFSET());
+--
+-- Batch size and cutoff are parameters, for the reason §9.4's sample states:
+-- the window is a registered RetentionPolicy value and @Before comes from the
+-- registered TimeProvider a test host can substitute.
+DELETE TOP (@BatchSize) FROM ordering.InboxMessages
+WHERE HandledAt < @Before;
 ```
 
 The window is a real constraint, not a round number: it must exceed the
