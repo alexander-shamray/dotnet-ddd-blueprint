@@ -367,8 +367,25 @@ fresh retention
 So a command that ran for an hour has spent an hour of its own replay window,
 and a retry arriving after it is *refused* rather than answered. That is the
 price of the ordering, paid deliberately: the claim is taken before the marker
-is stamped, so the marker outlives the claim for every window at least as long
-— by construction, and with no margin to tune.
+is stamped, so the marker outlives the claim for every window at least as long.
+
+> **What holds by construction is the ordering of the two *start* events, and
+> not that the two windows are counted by one clock.** Redis expires the claim
+> after `Retention` elapsed by *Redis's* clock; §9.5's purge deletes the marker
+> after `IdempotencyWindow` elapsed by *SQL Server's*. Nothing couples the two
+> rates, so a forward step of the database's clock relative to Redis's — an NTP
+> correction, a host migration, a resumed snapshot — can carry the cutoff past
+> the marker while the claim is still live. What absorbs it is the handler's
+> runtime plus whatever the window exceeds the floor by: six days on the
+> shipped defaults, and nothing at all at the floor itself
+> ([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)).
+>
+> **Reinstating an allowance is not the answer, which is why the floor is still
+> the claim's window.** Five minutes never bounded a clock step either, and a
+> step is bounded by nothing this repository can assert — so a number there
+> would repeat in a third term the mistake
+> [ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)
+> removes from two. What closes it is one time source for both deadlines.
 
 **It is a field on the command, not an `Idempotency-Key` header**, and the
 reason is the dependency rule rather than taste. `IdempotencyBehavior` runs in

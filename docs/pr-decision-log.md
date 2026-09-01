@@ -208,6 +208,18 @@ same indent, and a flat set matched all of them.
 
 ### What is owed
 
+- **The two windows are still counted by two servers' clocks, and the
+  reviewer found the overclaim rather than the code.** Nothing couples Redis's
+  expiry rate to SQL Server's, so a forward step of the database's clock
+  relative to Redis's can carry the purge past the marker while the claim is
+  live; what absorbs it is the handler's runtime plus whatever the window
+  exceeds the floor by, which is six days on the shipped defaults and nothing
+  at the floor. The prose said the ordering held "by construction" and meant
+  the two *start* events; it now says which. Reinstating an allowance was
+  rejected — five minutes never bounded a clock step either, so a number there
+  repeats in a third term the mistake this PR removes from two — and the fix is
+  one time source for both deadlines, filed as
+  [#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171).
 - **The database's clock is now assumed to move forward.** An operator winding
   the server's clock back by more than the marker's window makes every existing
   marker look young and every new one look old, and the failure is the same

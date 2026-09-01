@@ -103,8 +103,8 @@ public interface IIdempotencyStore
     /// precedes it, by the commit's own tail. The marker then had to be kept
     /// for a margin covering a lag nothing bounds. Preserving what the claim
     /// had left starts its window at <see cref="TryClaimAsync"/>, which is
-    /// earlier than the stamp by construction, so the ordering is structural
-    /// and needs no margin
+    /// earlier than the stamp by construction, so the <em>start</em> events
+    /// are ordered without a margin
     /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168">#168</see>).
     /// </para>
     /// <para>

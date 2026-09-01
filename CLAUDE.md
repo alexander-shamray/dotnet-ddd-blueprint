@@ -349,8 +349,10 @@ dispatch would overwrite it mid-transaction — and the marker's own retention
 window is the only one of the three with a floor, because purging it early
 re-opens the duplicate at a boundary set by a housekeeping setting.
 
-**Since PR-33 that floor is the claim's window exactly, and the ordering it
-enforces holds by construction rather than by a margin.** It carried a
+**Since PR-33 that floor is the claim's window exactly, and the ordering of
+the two *start* events holds by construction rather than by a margin** — the
+two windows are still counted by Redis's clock and the database's, which is
+[#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171). It carried a
 five-minute allowance for two terms nothing bounded — the claim was re-armed
 after a commit the marker was stamped before, and one row was aged across two
 pods' clocks — and both are closed at the source

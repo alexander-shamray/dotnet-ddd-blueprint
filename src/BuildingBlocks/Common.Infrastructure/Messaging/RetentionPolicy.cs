@@ -92,9 +92,14 @@ public sealed record RetentionPolicy
     /// rather than removing either. §8.5's completion now preserves the claim's
     /// remaining life (#168) and the marker is stamped and aged on the database
     /// clock (#167), so the claim is taken before the marker is stamped and
-    /// expires before it is purged for every window at least as long — the
-    /// ordering is structural, and equal is the smallest window with no gap in
-    /// it. <see cref="IdempotencyRetention.MarkerFloor"/> argues it in full.
+    /// expires before it is purged for every window at least as long, so equal
+    /// is the smallest window with no gap in it.
+    /// <see cref="IdempotencyRetention.MarkerFloor"/> argues it in full — and
+    /// states what it does <em>not</em> cover, which is that the two windows
+    /// are still counted by two servers' clocks, so a forward step of the
+    /// database's relative to Redis's has only the handler's runtime to be
+    /// absorbed by at this floor
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>).
     /// </para>
     /// <para>
     /// Read rather than restated, for the reason

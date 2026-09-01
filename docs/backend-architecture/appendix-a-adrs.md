@@ -2474,13 +2474,29 @@ clock is a service that needs a different seam, not a different column.
   keeps the loser from corrupting the winner's entry is still the claim token
   (#127). That residual is §8.5's and is unchanged — and it is now the only one
   of the three, where it used to be one of three.
-- **It does assume the database's clock moves forward.** An operator who winds
-  the server's clock back by more than the marker's window makes every existing
-  marker look young and every new one look old, and the failure is the same
-  silent duplicate at the same boundary. That is a smaller and more visible
-  surface than three pods drifting apart — one clock, on the machine that owns
-  the data — but it is an assumption where there used to be a margin, and it is
-  stated rather than implied.
+- **What holds by construction is the ordering of the two *start* events, and
+  not that the two windows are counted by one clock.** This is the limit of the
+  decision and it is stated here rather than left for a reader to find. Redis
+  expires the claim after `Window` elapsed by *Redis's* clock; the purge deletes
+  the marker after `IdempotencyWindow` elapsed by *SQL Server's*. Nothing
+  couples the two rates, so a forward step of the database's clock relative to
+  Redis's — an NTP correction, a host migration, a resumed snapshot — can carry
+  the cutoff past the marker while the claim is still live, and what absorbs it
+  is the handler's runtime plus whatever the window exceeds the floor by: six
+  days on the shipped defaults, and nothing at all at the floor
+  ([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)).
+- **Reinstating an allowance is not the answer to that, which is why the floor
+  is still `Window`.** Five minutes never bounded a clock step either, and a
+  step is not bounded by anything this repository can assert — so a number there
+  would repeat in a third term the mistake this record removes from two. What
+  closes it is giving both deadlines one time source, which is a change to how
+  the claim is stored and belongs to its own record.
+- **The backwards direction is an assumption too, and a smaller one.** An
+  operator who winds the server's clock back by more than the marker's window
+  makes every existing marker look young and every new one look old. That is a
+  smaller and more visible surface than three pods drifting apart — one clock,
+  on the machine that owns the data — but it is an assumption where there used
+  to be a margin, and it is stated rather than implied.
 
 ---
 

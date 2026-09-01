@@ -73,6 +73,28 @@ public static class IdempotencyRetention
     /// wrong reason.
     /// </para>
     /// <para>
+    /// <b>What holds by construction is the ordering of the two <em>start</em>
+    /// events, and not that the two windows are counted by one clock.</b>
+    /// Redis expires the claim after this <see cref="Window"/> elapsed by
+    /// <em>Redis's</em> clock; the purge deletes the marker after
+    /// <c>IdempotencyWindow</c> elapsed by <em>SQL Server's</em>. Nothing
+    /// couples the two rates, so a forward step of the database's clock
+    /// relative to Redis's — an NTP correction, a host migration, an operator
+    /// setting the time — can carry the cutoff past the marker while the claim
+    /// is still live. The margin that absorbs it is the handler's runtime plus
+    /// whatever the configured window exceeds this floor by, which is six days
+    /// on the shipped defaults and nothing at all at the floor itself
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>).
+    /// </para>
+    /// <para>
+    /// <b>Reinstating an allowance is not the answer to that, which is why the
+    /// floor is still <see cref="Window"/>.</b> Five minutes never bounded a
+    /// clock step either — a step is not bounded by anything this repository
+    /// can assert — so a number here would repeat the mistake in a third term
+    /// rather than close it. What closes it is giving both deadlines one time
+    /// source, and that is a change to how the claim is stored.
+    /// </para>
+    /// <para>
     /// <b>The floor is still read rather than restated</b>, for the reason
     /// this type exists: a 24 written in two files agrees until one of them is
     /// edited. It stays a separate member even though it is now

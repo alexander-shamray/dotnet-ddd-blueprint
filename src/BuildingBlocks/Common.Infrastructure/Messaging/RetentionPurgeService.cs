@@ -199,10 +199,22 @@ public sealed class RetentionPurgeService : BackgroundService
         // computes the cutoff from the server's own clock (#167, ADR-038). An
         // int rather than a long: RetentionPolicy caps a window at ten years,
         // which is 315,360,000 seconds, and DATEADD's argument is an int.
+        //
+        // Rounded UP, and a cast would have rounded down. The window is a
+        // caller-supplied TimeSpan with sub-second resolution, so a cast sends
+        // 24 hours for a configured 24 hours and 500 milliseconds — purging the
+        // marker fractionally before the window the operator asked for, which
+        // is the one direction this setting may not be wrong in. Ceiling keeps
+        // the row slightly longer than asked instead, which costs nothing: the
+        // floor is a lower bound, so exceeding it is always admissible.
         int idempotency = await DeleteAsync(
             connection,
             _idempotencySql,
-            new { _policy.BatchSize, WindowSeconds = (int)_policy.IdempotencyWindow.TotalSeconds },
+            new
+            {
+                _policy.BatchSize,
+                WindowSeconds = (int)Math.Ceiling(_policy.IdempotencyWindow.TotalSeconds),
+            },
             ct);
         Purged(_log, idempotency, "idempotency", null);
 
