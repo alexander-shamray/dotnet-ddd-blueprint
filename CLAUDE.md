@@ -604,6 +604,13 @@ to reach both, and the guide is the master copy.
 - **Em dashes** (`—`) for asides, **en dashes** (`–`) for ranges, both literal
   Unicode rather than `--`. Cross-references take the section sign — `§9.3`,
   linked on first mention in a passage.
+- **Chapter headings are numbered** (`# 9. Messaging`, `## 9.1 Integration
+  events`) and third-level ones are unnumbered prose titles; **every chapter
+  ends with a rule and a nav footer**, separated by ` · `, with one `---`
+  and never two. The exact footer shape is in the guide, and `/new-chapter`
+  scaffolds it. This bullet is here because that command sends a chapter
+  author to *this* file for house style, and the conventions it means moved
+  — a pointer that lands on nothing is worse than one hop too many.
 - **Callouts are blockquotes whose opening sentence is bold**, no emoji and no
   admonition syntax. `**Trap — …**` and `**Decision — …**` are the two named
   forms; the guide keeps their counts and the argument for not keeping a total.

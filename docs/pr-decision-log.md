@@ -4297,9 +4297,10 @@ the `web-bff` route's service — and ten of its decisions bind what comes after
   second port is a named constant now.
 
   The rest of the scaffold reconciliation is the ordinary price
-  `docs/repo-map.md` already names: ten new files classified, the gRPC package, the `Protobuf`
-  item and both `Program.cs` blocks patched out, and the non-vacuity test
-  replaced by the comment that tells the next service when to add it back. A
+  `docs/repo-map.md` already names: ten new files classified, the gRPC
+  package, the `Protobuf` item and both `Program.cs` blocks patched out, and
+  the non-vacuity test replaced by the comment that tells the next service
+  when to add it back. A
   scaffolded service was rendered and **built** afterwards, because the Python
   suite never compiles one.
 
@@ -5003,10 +5004,9 @@ after:
 - **Catalog is the template, read at run time.** There is no template
   directory, so there is one copy of the wiring rather than two that drift, and
   the scaffold's tests render *this* repository. The consequence is stated in
-  `docs/repo-map.md`'s scaffold section and worth repeating here: a Catalog change can
-  turn
-  `tools/new-service`'s suite red, and reconciling the script belongs in the
-  same change.
+  `docs/repo-map.md`'s scaffold section and worth repeating here: a Catalog
+  change can turn `tools/new-service`'s suite red, and reconciling the script
+  belongs in the same change.
 - **The scaffold copies no domain.** The slice is excluded by name, so a new
   service is PR-07's state with the wiring accumulated through PR-16 on it —
   five service projects, three test projects and a `TestSupport` library
