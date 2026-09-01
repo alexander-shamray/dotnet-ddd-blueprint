@@ -98,8 +98,8 @@ without the default ages its rows on the writing pod's clock while the purge
 ages them on the server's — the skew that migration exists to remove, shipped
 to every new service by omission.
 
-The service builds and its eighty-two tests pass before you have written a
-line, and thirty-nine of them run against real SQL Server and RabbitMQ
+The service builds and its eighty-three tests pass before you have written a
+line, and forty of them run against real SQL Server and RabbitMQ
 containers:
 the migrator's exit code, §7.1's two-key boundary, the readiness probe — 200
 only once the bus connects — `EfUnitOfWork`'s commit, rollback and retry
@@ -112,16 +112,19 @@ Those two counts are measured rather than estimated, and they move whenever a
 PR adds to the template — they read forty-one and sixteen until PR-18
 recounted them against a rendered service, three PRs after they stopped being
 true, fifty-six until PR-22 did it again, seventy-eight until PR-32 rendered a
-service carrying §8.5's marker suite, and seventy-nine until PR-33 put three
-more into it.
+service carrying §8.5's marker suite, and seventy-nine until PR-33 put four
+more into it across two of its review rounds.
 
 **Adding to the number is not recounting it.** PR-22 put three tests into the
 template and the total moved by four, so the only way to know this pair is to
 render `Yankee` at 5199 and run all three of its suites — which is what PR-32
-did, twice: 1, 18 and 60. PR-33 did the same and read 1, 18 and 63; its three
+did, twice: 1, 18 and 60. PR-33 did the same and read 1, 18 and 64; its four
 were the marker's database-generated stamp, the default constraint behind it,
-and the scoped inbox reader's own subject test, all of which land in
-`Yankee.Api.Tests` and all of which want a container. The thirty-nine is the
+the scoped inbox reader's own subject test and the skewed-clock pass that
+separates the marker's cutoff from the other two, all of which land in
+`Yankee.Api.Tests` and all of which want a container. **It rendered twice**,
+because the fourth arrived in a later review round than the other three — the
+same reason PR-32 rendered twice, one pull request on. The forty is the
 `Category=Integration` count, which is a filter anyone can rerun rather than a
 tally somebody kept.
 
