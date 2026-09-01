@@ -96,21 +96,40 @@ public sealed record RetentionPolicy
     /// equal is then admitted, and is the smallest window that is.
     /// </para>
     /// <para>
-    /// <b>"Then" is doing work there, and it is two assumptions rather than a
-    /// connective.</b> The claim expiring before the marker is purged does not
-    /// follow from the order the two were written in: the windows have to be
-    /// counted at the same rate, and the marker has to reach the database inside the
-    /// claim's window. <see cref="IdempotencyRetention.MarkerFloor"/> argues
-    /// both in full. The two windows are still counted by two servers' clocks,
-    /// so a forward step of the database's relative to Redis's has only the
-    /// handler's runtime to be absorbed by at this floor
-    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>);
-    /// and a handler outrunning that same claim is stamped after it has already
-    /// expired, which is §8.5's long-handler residual
+    /// <b>"Then" was doing work there, and it was two assumptions rather than a
+    /// connective.</b> The claim expiring before the marker is purged did not
+    /// follow from the order the two were written in: the windows had to be
+    /// counted at the same rate, and the marker had to reach the database
+    /// inside the claim's window.
+    /// <see cref="IdempotencyRetention.MarkerFloor"/> argues both in full.
+    /// </para>
+    /// <para>
+    /// <b>The first is gone, and it went by removing the comparison rather than
+    /// by widening this number.</b> The two windows were counted by two
+    /// servers' clocks, so a forward step of the database's relative to Redis's
+    /// carried the purge past a live claim with only the handler's runtime to
+    /// absorb it at this floor. <see cref="RetentionPurgeService"/> now selects
+    /// markers by age and then asks <c>IIdempotencyStore.UnheldAsync</c> which
+    /// of those keys the claim store has already let go of, so no window is
+    /// compared against any other
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>,
+    /// ADR-039).
+    /// </para>
+    /// <para>
+    /// <b>The second remains and is not a clock.</b> A handler outrunning that
+    /// same claim is stamped after it has already expired, which is §8.5's
+    /// long-handler residual
     /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/127">#127</see>)
-    /// reaching this floor from the other end. Neither is a reason to raise the
-    /// floor: a number here bounds a clock step no better than the five minutes
-    /// it replaced, and bounds a runtime not at all.
+    /// reaching this floor from the other end. It is not a reason to raise the
+    /// floor: a number here bounds a runtime not at all.
+    /// </para>
+    /// <para>
+    /// <b>So what this setting chooses is the length of §8.5's guarantee and
+    /// not its truth.</b> At the floor a marker becomes deletable the moment
+    /// its claim expires; above it the marker outlives the claim by the
+    /// difference and the guarantee runs that much longer. Neither is a gap,
+    /// because the purge will not delete a marker whose claim is live at any
+    /// setting.
     /// </para>
     /// <para>
     /// Read rather than restated, for the reason
@@ -228,19 +247,19 @@ public sealed record RetentionPolicy
             : throw new ArgumentOutOfRangeException(
                 member,
                 value,
-                $"{member} must be at least {floor} — how long §8.5's Redis claim survives — and " +
-                "the order of the two expiries is the whole of why. A shorter window purges the " +
-                "marker first; the claim then expires with nothing left to remember the commit, " +
-                "so the next retry claims a free key and runs the command a second time, and the " +
-                "write this platform guarantees happens once happens twice at a boundary set by " +
-                "a retention setting. Matching the claim exactly is admitted, on what is " +
-                "unconditional: the claim is taken before the marker is stamped, on one thread " +
-                "inside one dispatch. That the marker then outlives the claim additionally " +
-                "assumes the two windows are counted at one rate and that the marker reaches " +
-                "the database inside the claim's own — see IdempotencyRetention.MarkerFloor, " +
-                "which argues " +
-                "both. Neither is a reason to set this higher: a number here bounds a clock step " +
-                "no better than the allowance it replaced, and bounds a runtime not at all.");
+                $"{member} must be at least {floor} — how long §8.5's Redis claim survives — " +
+                "because a shorter window asks for a guarantee shorter than the claim already " +
+                "gives, which is a setting that cannot do what it says. The purge deletes a " +
+                "marker only once IIdempotencyStore reports the claim behind its key gone " +
+                "(ADR-039), so a window below the claim's does not shorten anything: the row " +
+                "still survives until the claim expires, and the number written here would be " +
+                "one nothing acts on. It used to be refused for a stronger reason — a shorter " +
+                "window purged the marker first, the claim then expired with nothing left to " +
+                "remember the commit, and the next retry ran a committed command a second " +
+                "time. That is what ADR-039 closed. What this floor bounds now is how long " +
+                "the guarantee lasts rather than whether it holds, and matching the claim " +
+                "exactly is the smallest window that means anything. Setting it higher is the " +
+                "supported way to extend the guarantee; see IdempotencyRetention.MarkerFloor.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

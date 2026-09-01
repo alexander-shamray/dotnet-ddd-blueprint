@@ -14,8 +14,10 @@ namespace Ordering.Api.Tests;
 /// §9.4's, §9.5's and §8.5's retention purges, driven a pass at a time against
 /// the real tables. The predicate that separates them is the whole subject: the
 /// outbox deletes on <c>ProcessedAt IS NOT NULL</c> <em>and</em> age, the inbox
-/// and the marker on age alone, and getting the first one wrong is silent,
-/// permanent data loss.
+/// on age alone, and the marker on age <em>and</em> the claim store having let
+/// its key go — age selects there and no longer decides (ADR-039). Getting the
+/// outbox's wrong is silent, permanent data loss; getting the marker's wrong is
+/// a duplicate write.
 /// </summary>
 [Collection(nameof(IntegrationCollection))]
 public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
@@ -208,6 +210,70 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
 
         IdempotencyMarker survivor = (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
         survivor.CommittedAt.ShouldBeGreaterThan(LongAgo);
+    }
+
+    [Fact]
+    public async Task A_marker_whose_claim_is_still_held_survives_however_old_the_row_is()
+    {
+        // #171, staged from the only side a test can reach it. The failure was
+        // a forward step of the DATABASE's clock relative to Redis's, and no
+        // test here owns the container's clock — but the step's whole effect is
+        // that a row reads as past its window while the claim behind it is
+        // still live, and a row staged thirty days old under a live claim is
+        // that state arrived at from the other end.
+        //
+        // Age alone deletes this row: A_marker_is_purged_on_age_alone stages
+        // the same LongAgo and asserts it goes. What keeps it is the pass
+        // asking the store that owns the claim (ADR-039).
+        string key = Key();
+
+        await fixture.StageIdempotencyMarkersAsync(new IdempotencyMarker(key, LongAgo));
+
+        string? claim = await fixture.IdempotencyClaims.TryClaimAsync(
+            key,
+            IdempotencyRetention.Window,
+            TestContext.Current.CancellationToken);
+
+        claim.ShouldNotBeNull("the key is this test's own, so nothing else can be holding it");
+
+        (await fixture.PurgeRetentionAsync()).Idempotency.ShouldBe(
+            0,
+            "the claim behind this key is still live, so the row that refuses its retry may not go");
+
+        // The table as well as the count, because a pass that deleted the row
+        // and miscounted is a different defect from one that kept it.
+        (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task The_same_row_goes_once_the_claim_behind_it_has_been_released()
+    {
+        // The companion, and what makes the test above about the claim rather
+        // than about anything else that might keep a row. Same row, same age,
+        // same pass; the one thing that differs is whether the store still
+        // holds the key. Without it, a pass that had simply stopped deleting
+        // markers would satisfy the assertion above and nothing would notice —
+        // a gate that stops covering what it claims to, which is this
+        // repository's most-repeated failure.
+        string key = Key();
+
+        await fixture.StageIdempotencyMarkersAsync(new IdempotencyMarker(key, LongAgo));
+
+        string? claim = await fixture.IdempotencyClaims.TryClaimAsync(
+            key,
+            IdempotencyRetention.Window,
+            TestContext.Current.CancellationToken);
+
+        claim.ShouldNotBeNull();
+
+        await fixture.IdempotencyClaims.ReleaseAsync(
+            key,
+            claim,
+            TestContext.Current.CancellationToken);
+
+        (await fixture.PurgeRetentionAsync()).Idempotency.ShouldBe(1);
+
+        (await fixture.IdempotencyMarkersAsync()).ShouldBeEmpty();
     }
 
     [Fact]

@@ -118,19 +118,26 @@ public interface IIdempotencyStore
     /// the same dispatch.
     /// </para>
     /// <para>
-    /// <b>That the marker then outlives the claim is not promised here, on two
-    /// counts independent of each other.</b> The two windows are counted by two
-    /// servers' clocks — this one's by Redis, the marker's by SQL Server — so a
-    /// forward step of the database's relative to Redis's can purge the marker
-    /// while the claim is still live
-    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>).
-    /// And a handler that outruns the retention it was claimed with reaches
-    /// this method with the claim already expired, so the stamp lands after the
-    /// claim has gone for reasons no clock is involved in — §8.5's long-handler
-    /// residual, whose damage the claim token bounds rather than removes
-    /// (#127). Both are argued in full on
+    /// <b>That the marker then outlives the claim is not promised here, and it
+    /// is no longer this contract's to promise.</b> It used to want two things
+    /// beyond the start ordering, and the first is gone: the two windows were
+    /// counted by two servers' clocks — this one's by Redis, the marker's by
+    /// SQL Server — so a forward step of the database's relative to Redis's
+    /// purged the marker while the claim was still live. The purge no longer
+    /// counts. It reads <see cref="UnheldAsync"/> and deletes only what this
+    /// store has already let go, so the ordering is decided by the claim
+    /// itself rather than by two windows racing
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>,
+    /// ADR-039).
+    /// </para>
+    /// <para>
+    /// <b>The second is unchanged and is not a clock.</b> A handler that
+    /// outruns the retention it was claimed with reaches this method with the
+    /// claim already expired, so the stamp lands after the claim has gone —
+    /// §8.5's long-handler residual, whose damage the claim token bounds
+    /// rather than removes (#127). It is argued in full on
     /// <see cref="IdempotencyRetention.MarkerFloor"/>; a consumer reading this
-    /// contract alone should assume neither.
+    /// contract alone should assume nothing about it.
     /// </para>
     /// </remarks>
     Task CompleteAsync(string key, string claim, string payload, CancellationToken ct);
@@ -156,6 +163,48 @@ public interface IIdempotencyStore
     /// </para>
     /// </remarks>
     Task ReleaseAsync(string key, string claim, CancellationToken ct);
+
+    /// <summary>
+    /// Which of <paramref name="keys"/> this store no longer holds — the ones
+    /// whose claim has expired or been released, in any order.
+    /// </summary>
+    /// <remarks>
+    /// <b>This exists so the marker's purge can stop comparing two clocks.</b>
+    /// Everything else about the marker outliving the claim was made
+    /// structural by <see cref="IdempotencyRetention.MarkerFloor"/>'s two
+    /// closures, and one term survived them both: the claim's window is
+    /// counted by <em>this</em> store's clock and the marker's by the
+    /// database's, so a forward step of one relative to the other carried the
+    /// purge's cutoff past a marker whose claim was still live
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>).
+    /// No margin bounds a clock step, and the two preceding attempts to bound
+    /// one are why the third is not tried. **So the purge asks instead of
+    /// counting**: this store owns the claim, and whether the claim is gone is
+    /// a question only it can answer.
+    /// <para>
+    /// <b>Absent rather than expired is the only answer available, and the
+    /// name says so.</b> A key this store has never seen is indistinguishable
+    /// here from one whose retention ran out — both are simply not held. That
+    /// suits the one caller, which asks about keys it read out of the marker
+    /// table and which therefore were claimed: <em>not held</em> means
+    /// <em>no longer held</em> for every key it passes.
+    /// </para>
+    /// <para>
+    /// <b>Deliberately not token-checked</b>, on <see cref="GetAsync"/>'s
+    /// reasoning and more strongly. This answers a question about the key, and
+    /// its caller is housekeeping that holds no claim and never held one.
+    /// </para>
+    /// <para>
+    /// <b>An implementation must answer for every key it is given or throw.</b>
+    /// Reporting a key as unheld because a lookup failed deletes the marker
+    /// that refuses a duplicate, which is the failure this member exists to
+    /// remove — so a partial answer is not one, and the caller is written to
+    /// keep every marker when this throws.
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyCollection<string>> UnheldAsync(
+        IReadOnlyCollection<string> keys,
+        CancellationToken ct);
 }
 
 /// <summary>

@@ -31,9 +31,11 @@ public static class IdempotencyRetention
     /// <summary>
     /// The floor a marker retention window has to clear, and it is
     /// <see cref="Window"/> itself: equal is admitted, and is the smallest
-    /// window that is. Whether it leaves a gap is a separate question the
-    /// remarks answer, and the answer is conditional. Read by
-    /// <c>RetentionPolicy.IdempotencyWindow</c> rather than restated there.
+    /// window that is. What it bounds is how long §8.5's guarantee lasts rather
+    /// than whether it holds — the purge refuses to delete a marker whose claim
+    /// is live at any setting (ADR-039) — and the remarks argue the difference.
+    /// Read by <c>RetentionPolicy.IdempotencyWindow</c> rather than restated
+    /// there.
     /// </summary>
     /// <remarks>
     /// <b>It was <c>Window</c> plus a five-minute <c>MarkerLeadAllowance</c>,
@@ -62,43 +64,41 @@ public static class IdempotencyRetention
     /// so both ends are the database's clock and there is no skew term.
     /// </para>
     /// <para>
-    /// <b>What is left is one ordering that holds by construction and one that
-    /// holds under two assumptions, and the difference is the whole of what a
-    /// reader has to carry away from here.</b> The claim is taken at <c>t0</c>
+    /// <b>The ordering no longer rests on that arithmetic at all, and this is
+    /// the part to carry away from here.</b> The claim is taken at <c>t0</c>
     /// and the marker is stamped at some <c>t1 &gt;= t0</c> — the same thread,
-    /// the same dispatch, §6.3 running inside the claim this behaviour took.
-    /// <em>That</em> is the unconditional half, and it is all the removed
-    /// allowance was ever standing in for. The other half is arithmetic over
-    /// two windows: the claim expires at <c>t0 + Window</c>, the marker
+    /// the same dispatch, §6.3 running inside the claim this behaviour took —
+    /// which is what the removed allowance was standing in for. What used to
+    /// follow was a sum: the claim expires at <c>t0 + Window</c>, the marker
     /// survives until <c>t1 + IdempotencyWindow</c>, and with
     /// <c>IdempotencyWindow &gt;= Window</c> the marker outlives the claim for
-    /// every value of <c>t1</c> — <b>provided the two sums are counted at the
-    /// same rate, and provided <c>t1</c> falls inside the claim's own
-    /// window.</b> Neither follows from <c>t1 &gt;= t0</c>, and each has a
-    /// paragraph below. Where both hold, equality is admitted rather than
-    /// refused — and an allowance that stood for two closed terms would now be
-    /// unexplained slack, which is the shape a later reader deletes for the
-    /// wrong reason.
+    /// every value of <c>t1</c>. <b>The purge does not evaluate that sum any
+    /// more.</b> It selects markers past their own window and then asks
+    /// <c>IIdempotencyStore.UnheldAsync</c> which of those keys the claim store
+    /// has already let go of, deleting only those — so a marker whose claim is
+    /// live survives however old the row is, and no window is compared against
+    /// any other
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>,
+    /// ADR-039).
     /// </para>
     /// <para>
-    /// <b>The first assumption is that the two windows are counted at one rate,
-    /// and nothing in this platform couples them.</b> The arithmetic above adds
-    /// all four quantities on a single elapsed-time axis, and there is no such
-    /// axis: Redis expires the claim after this <see cref="Window"/> elapsed by
-    /// <em>Redis's</em> clock, while the purge deletes the marker after
-    /// <c>IdempotencyWindow</c> elapsed by <em>SQL Server's</em>. So a forward
-    /// step of the database's clock relative to Redis's — an NTP correction, a
-    /// host migration, an operator setting the time — can carry the cutoff past
-    /// the marker while the claim is still live. The margin that absorbs it is
-    /// the handler's runtime plus whatever the configured window exceeds this
-    /// floor by, which is six days on the shipped defaults and nothing at all
-    /// at the floor itself
-    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>).
+    /// <b>What that removed was the last term the sum could not account for:
+    /// the two windows were counted at different rates.</b> Redis expires the
+    /// claim after this <see cref="Window"/> elapsed by <em>Redis's</em> clock,
+    /// while the purge deleted the marker after <c>IdempotencyWindow</c>
+    /// elapsed by <em>SQL Server's</em>. Nothing coupled them, so a forward
+    /// step of the database's clock — an NTP correction, a host migration, an
+    /// operator setting the time — carried the cutoff past a marker whose claim
+    /// was still live, and what absorbed it was the handler's runtime plus
+    /// whatever the configured window exceeded this floor by: six days on the
+    /// shipped defaults, and <em>nothing at all at the floor itself</em>. That
+    /// the exposure was worst at the value this section recommends narrowing
+    /// towards is why it was closed rather than documented again.
     /// </para>
     /// <para>
-    /// <b>The second assumption is that the marker reaches the database inside
-    /// the claim's window, and it fails with every clock in the platform
-    /// correct.</b> Nothing bounds a command's runtime against
+    /// <b>One assumption is left, and it fails with every clock in the
+    /// platform correct: that the marker reaches the database inside the
+    /// claim's window.</b> Nothing bounds a command's runtime against
     /// <see cref="Window"/>, and the deadline is later than it first reads:
     /// §6.3 stamps the marker only after the handler has returned, after §7.5's
     /// domain-event dispatch and after §2.3's aggregate count, and the row
@@ -114,20 +114,29 @@ public static class IdempotencyRetention
     /// what the claim token buys is that the loser can no longer corrupt the
     /// winner's entry
     /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/127">#127</see>)
-    /// rather than that the second attempt is refused. <b>Note the two
-    /// assumptions pull opposite ways on one quantity</b>: the handler's
-    /// runtime is the slack that absorbs a clock step in the paragraph above,
-    /// and past <see cref="Window"/> it is itself what opens the gap.
+    /// rather than that the second attempt is refused. It is not a retention
+    /// question at all, which is why no value of this floor reaches it.
     /// </para>
     /// <para>
-    /// <b>Reinstating an allowance answers neither of them, which is why the
-    /// floor is still <see cref="Window"/>.</b> Five minutes never bounded a
-    /// clock step either — a step is not bounded by anything this repository
-    /// can assert — so a number here would repeat the mistake in a third term
-    /// rather than close it, and it bounds a handler's runtime no better. What
-    /// closes the first is giving both deadlines one time source, which is a
-    /// change to how the claim is stored; the second is not a retention
-    /// question at all, and #127 is where it is carried.
+    /// <b>Reinstating an allowance would have answered neither, which is why
+    /// the floor is still <see cref="Window"/> and why the clock term was
+    /// closed at the source instead.</b> Five minutes never bounded a clock
+    /// step — a step is bounded by nothing this repository can assert — so a
+    /// number here would have repeated in a third term the mistake ADR-038
+    /// removed from two, and it bounds a handler's runtime no better.
+    /// </para>
+    /// <para>
+    /// <b>What the floor bounds now is how long the guarantee lasts, not
+    /// whether it holds.</b> That is a smaller claim than it used to make and a
+    /// checkable one. At this floor exactly, a marker becomes deletable the
+    /// moment its claim expires, so <em>at most one commit per key while the
+    /// marker survives</em> ends where the claim does; above it, the marker
+    /// outlives the claim by the difference and the guarantee runs that much
+    /// longer. Neither is a gap — the purge cannot delete a marker whose claim
+    /// is live at any setting — so what an operator is choosing here is the
+    /// length of the promise rather than its truth, which is the distinction
+    /// this floor could not draw while it was the thing making the ordering
+    /// true.
     /// </para>
     /// <para>
     /// <b>The floor is still read rather than restated</b>, for the reason

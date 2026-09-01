@@ -20,7 +20,7 @@ namespace Common.Infrastructure.Redis;
 /// </remarks>
 internal sealed class RedisIdempotencyStore(
     [FromKeyedServices(RedisConnections.Coordination)] IConnectionMultiplexer redis,
-    RedisKeys keys,
+    RedisKeys redisKeys,
     ILogger<RedisIdempotencyStore> log)
     : IIdempotencyStore
 {
@@ -81,9 +81,12 @@ internal sealed class RedisIdempotencyStore(
     // construction — so this term needs no margin at all.
     //
     // That is the start ordering and not the expiry ordering, which #168 alone
-    // does not buy: the marker outliving the claim additionally wants the two
-    // windows counted at one rate (#171) and the marker to reach the database inside this
-    // one (#127). IdempotencyRetention.MarkerFloor argues both.
+    // does not buy. The expiry ordering is not arithmetic any more either:
+    // §9.5's purge reads UnheldAsync below and deletes only markers this store
+    // has already let go, so it no longer counts a window of its own against
+    // this one (#171, ADR-039). What remains is the marker reaching the
+    // database inside this window at all (#127), which
+    // IdempotencyRetention.MarkerFloor argues.
     private const string CompleteScript =
         """
         local current = redis.call('get', KEYS[1])
@@ -133,7 +136,7 @@ internal sealed class RedisIdempotencyStore(
         // exists to let exactly one caller win.
         bool claimed = await redis
             .GetDatabase()
-            .StringSetAsync(keys.Idempotency(key), Value(token, InProgressMarker), retention, When.NotExists);
+            .StringSetAsync(redisKeys.Idempotency(key), Value(token, InProgressMarker), retention, When.NotExists);
 
         return claimed ? token : null;
     }
@@ -143,7 +146,7 @@ internal sealed class RedisIdempotencyStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ct.ThrowIfCancellationRequested();
 
-        RedisValue value = await redis.GetDatabase().StringGetAsync(keys.Idempotency(key));
+        RedisValue value = await redis.GetDatabase().StringGetAsync(redisKeys.Idempotency(key));
 
         if (!value.HasValue)
             return null;
@@ -197,16 +200,17 @@ internal sealed class RedisIdempotencyStore(
         //
         // Its start, and not its expiry. That the marker then outlives the
         // claim is a conclusion drawn from the ordering rather than the
-        // ordering itself, and it assumes two things this line cannot supply:
-        // that the two windows are counted at one rate, where Redis counts
-        // this one and SQL Server the marker's (#171), and that the handler
-        // reaches the database inside this window at all (#127). IdempotencyRetention's
-        // MarkerFloor argues both.
+        // ordering itself, and it used to assume something this line cannot
+        // supply: that the marker's window and this one were counted at one
+        // rate, where Redis counts this and SQL Server counted that (#171).
+        // The purge no longer counts — it asks UnheldAsync — so what is left
+        // to assume is that the handler reaches the database inside this
+        // window at all (#127). IdempotencyRetention's MarkerFloor argues it.
         RedisResult written = await redis
             .GetDatabase()
             .ScriptEvaluateAsync(
                 CompleteScript,
-                [keys.Idempotency(key)],
+                [redisKeys.Idempotency(key)],
                 [Owner(claim), Value(claim, payload)]);
 
         if ((long)written == 0)
@@ -227,7 +231,7 @@ internal sealed class RedisIdempotencyStore(
         {
             RedisResult deleted = await redis
                 .GetDatabase()
-                .ScriptEvaluateAsync(ReleaseScript, [keys.Idempotency(key)], [Owner(claim)]);
+                .ScriptEvaluateAsync(ReleaseScript, [redisKeys.Idempotency(key)], [Owner(claim)]);
 
             // Not an error and not silent either. Nothing here can recreate
             // the claim, and the caller is already reporting a fault of its
@@ -251,6 +255,52 @@ internal sealed class RedisIdempotencyStore(
             // ConcurrentRequestException until the retention expires.
             ReleaseFailed(log, key, e);
         }
+    }
+
+    public async Task<IReadOnlyCollection<string>> UnheldAsync(
+        IReadOnlyCollection<string> keys,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        ct.ThrowIfCancellationRequested();
+
+        if (keys.Count == 0)
+            return [];
+
+        IDatabase database = redis.GetDatabase();
+
+        // Materialised once, because the answers are zipped back against this
+        // by position and an enumerable is not promised to be the same
+        // sequence twice.
+        string[] candidates = [.. keys];
+
+        // One EXISTS per key rather than one command over all of them, and the
+        // keyspace decides that rather than the round trips. These are issued
+        // without awaiting between them, so StackExchange.Redis pipelines them
+        // onto the one connection and the batch costs about what a single
+        // multi-key command would. A genuine multi-key EXISTS is one command
+        // whose keys must share a hash slot, and §8.3's prefix leaves
+        // {subject}:{operation}:{commandId} varying — so every key hashes
+        // somewhere different, and on a clustered coordination instance that
+        // form is a CROSSSLOT error rather than an optimisation.
+        bool[] held = await Task.WhenAll(
+            candidates.Select(key => database.KeyExistsAsync(redisKeys.Idempotency(key))));
+
+        // Nothing is caught here, and the omission is the port's "answer for
+        // every key or throw". A key reported unheld because its lookup failed
+        // is a marker deleted while its claim is alive — the duplicate #171 is
+        // about, arriving through the mechanism that closes it. The caller
+        // keeps every marker when this throws, which is the direction that
+        // costs a purge rather than a guarantee.
+        List<string> unheld = [];
+
+        for (int index = 0; index < candidates.Length; index++)
+        {
+            if (!held[index])
+                unheld.Add(candidates[index]);
+        }
+
+        return unheld;
     }
 
     // What the scripts compare against: the token AND its separator, so a

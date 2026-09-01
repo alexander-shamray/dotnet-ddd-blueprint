@@ -56,10 +56,13 @@ public class RetentionPolicyTests
     public void The_marker_window_cannot_be_shorter_than_the_claim_it_backs_up()
     {
         // §8.5's Redis claim expires; the marker is what refuses a retry after
-        // that. Purging markers sooner leaves a stretch in which the key is
-        // claimable again and nothing remembers the commit — the duplicate
-        // write this platform guarantees does not happen, arriving at a
-        // boundary set by a retention number.
+        // that. A window below the claim's asks for a guarantee shorter than
+        // the claim already gives, and since ADR-039 that is a setting that
+        // cannot do what it says rather than one that re-opens the duplicate:
+        // the purge deletes a marker only once the claim behind its key is
+        // gone, so a shorter number is one nothing acts on. Refused either way,
+        // and the reason moved — which is why the assertions below are about
+        // the relationship rather than about what a wrong value would cost.
         Should.Throw<ArgumentOutOfRangeException>(
             () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window - OneSecond });
 
@@ -75,19 +78,22 @@ public class RetentionPolicyTests
         // the database's clock (#167), so no pod's clock is party to its age.
         // The allowance is gone, and equal is admissible again.
         //
-        // WHAT IS ADMITTED IS NOT A GUARANTEE OF NO GAP, and this test must not
-        // read as one. What holds by construction is the START ordering: the
-        // claim is taken before the marker is stamped, one thread inside one
-        // dispatch. That the marker's purge then falls after the claim's expiry
-        // is a conclusion drawn from it, and it wants two more things — the two
-        // windows counted at one rate, where Redis counts the claim's and the
-        // database the marker's (#171), and the marker's INSERT committing
-        // inside the claim's own window — later than "the handler returned",
-        // since §6.3 stamps after dispatch and the row lands only at
-        // SaveChangesAsync (#127). IdempotencyRetention.MarkerFloor
-        // argues both. A regression test asserting a guarantee the
-        // implementation declines to make is worse than no test, because it is
-        // the line the next reader trusts instead of the contract.
+        // WHAT IS ADMITTED IS STILL NOT A GUARANTEE OF NO GAP, and this test
+        // must not read as one — but one of the two things it used to want is
+        // gone. What holds by construction is the START ordering: the claim is
+        // taken before the marker is stamped, one thread inside one dispatch.
+        // That the marker's purge then falls after the claim's expiry wanted
+        // the two windows counted at one rate, where Redis counted the claim's
+        // and the database the marker's (#171); the purge now asks
+        // IIdempotencyStore whether the claim is gone instead of counting, so
+        // that term is closed rather than assumed (ADR-039). What is left is
+        // the marker's INSERT committing inside the claim's own window — later
+        // than "the handler returned", since §6.3 stamps after dispatch and the
+        // row lands only at SaveChangesAsync (#127).
+        // IdempotencyRetention.MarkerFloor argues it. A regression test
+        // asserting a guarantee the implementation declines to make is worse
+        // than no test, because it is the line the next reader trusts instead
+        // of the contract.
         //
         // The floor is READ rather than restated, so this assertion is about
         // the relationship and not about a duration — it stays correct if

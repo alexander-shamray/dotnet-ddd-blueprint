@@ -713,6 +713,20 @@ public sealed class ServiceFixture : IAsyncLifetime
     }
 
     /// <summary>
+    /// §8.5's claim store, so a retention test can put a live claim behind a
+    /// staged marker and take it away again.
+    /// </summary>
+    /// <remarks>
+    /// <b>The registered store against the real container, rather than a
+    /// double.</b> ADR-039 makes the purge ask this store whether a claim is
+    /// gone, so a test of that has to leave the store able to say no — and a
+    /// substitute would be asserting the test's own idea of the answer against
+    /// a pass that reads the real one.
+    /// </remarks>
+    public IIdempotencyStore IdempotencyClaims =>
+        Factory.Services.GetRequiredService<IIdempotencyStore>();
+
+    /// <summary>
     /// Ages a processed outbox row, which is how a retention test reaches the
     /// window without a fake clock: the purge resolves <c>TimeProvider</c> from
     /// its own scope inside the host, and moving a row backwards is both
@@ -748,6 +762,7 @@ public sealed class ServiceFixture : IAsyncLifetime
             Factory.Services.GetRequiredService<OutboxTable>(),
             Factory.Services.GetRequiredService<InboxTable>(),
             Factory.Services.GetRequiredService<IdempotencyMarkerTable>(),
+            Factory.Services.GetRequiredService<IIdempotencyStore>(),
             policy,
             Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
 
@@ -794,6 +809,7 @@ public sealed class ServiceFixture : IAsyncLifetime
             Factory.Services.GetRequiredService<OutboxTable>(),
             Factory.Services.GetRequiredService<InboxTable>(),
             Factory.Services.GetRequiredService<IdempotencyMarkerTable>(),
+            Factory.Services.GetRequiredService<IIdempotencyStore>(),
             policy,
             Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
 

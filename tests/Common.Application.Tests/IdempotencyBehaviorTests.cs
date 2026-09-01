@@ -515,6 +515,11 @@ public class IdempotencyBehaviorTests
 
         public Task ReleaseAsync(string key, string claim, CancellationToken ct) =>
             inner.ReleaseAsync(key, claim, ct);
+
+        public Task<IReadOnlyCollection<string>> UnheldAsync(
+            IReadOnlyCollection<string> keys,
+            CancellationToken ct) =>
+            inner.UnheldAsync(keys, ct);
     }
 }
 

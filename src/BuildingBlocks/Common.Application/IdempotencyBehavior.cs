@@ -64,14 +64,16 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     /// </para>
     /// <para>
     /// <b>That start ordering is the only part of this that is by
-    /// construction.</b> Neither expiry ordering follows from it. The marker
-    /// outliving the claim needs the two windows counted at one rate, and they
-    /// are counted by two servers' clocks (#171); the claim outliving the stamp
-    /// needs the marker's INSERT to commit inside this value, which nothing bounds —
-    /// §8.5's long-handler residual (#127), whose damage the claim token bounds
-    /// rather than removes. A command that runs for an hour spends an hour of
-    /// its own replay window, and one that runs for longer than this reaches
-    /// §6.3's stamp with nothing left to spend.
+    /// construction, and neither expiry ordering ever followed from it.</b> The
+    /// marker outliving the claim used to need the two windows counted at one
+    /// rate, and they were counted by two servers' clocks; §9.5's purge no
+    /// longer counts, so that half is settled by asking this store rather than
+    /// by an ordering at all (#171, ADR-039). The claim outliving the stamp
+    /// still needs the marker's INSERT to commit inside this value, which
+    /// nothing bounds — §8.5's long-handler residual (#127), whose damage the
+    /// claim token bounds rather than removes. A command that runs for an hour
+    /// spends an hour of its own replay window, and one that runs for longer
+    /// than this reaches §6.3's stamp with nothing left to spend.
     /// </para>
     /// </summary>
     private static readonly TimeSpan Retention = IdempotencyRetention.Window;
