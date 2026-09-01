@@ -220,13 +220,24 @@ same indent, and a flat set matched all of them.
   repeats in a third term the mistake this PR removes from two — and the fix is
   one time source for both deadlines, filed as
   [#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171).
-- **The database's clock is now assumed to move forward.** An operator winding
-  the server's clock back by more than the marker's window makes every existing
-  marker look young and every new one look old, and the failure is the same
-  silent duplicate at the same boundary. That is a smaller and more visible
-  surface than three pods drifting apart, and it is an assumption where there
-  used to be a margin. Stated in ADR-038 rather than implied.
-- **§8.5's remaining residual is unchanged and is now the only one.** Nothing
+- **A second assumption came out of the review, and it has nothing to do with
+  clocks.** The expiry ordering also wants the handler to finish inside the
+  claim's own window: one that outruns it reaches §6.3's stamp after its claim
+  has already expired, so the marker is written with no claim left in front of
+  it. That is §8.5's long-standing overrun residual (#127) reaching a
+  conclusion nobody had connected it to, and it holds with every clock in the
+  platform correct.
+- **A backward step of the server's clock is *not* a third one**, and this
+  bullet said it was. Both ends of the purge predicate read the clock that
+  moves, so a marker stamped after a backward step is aged against a cutoff on
+  the same shifted timeline and expires on schedule, while rows stamped before
+  it merely survive longer — the direction the floor exists to produce. Only
+  the forward correction that follows is a hazard, and that is #171's step
+  rather than a second issue. The claim was written into ADR-038, the pull
+  request's description and here; a reviewer disproved it in all three, and it
+  is corrected rather than softened because a documented failure mode that
+  cannot occur costs the next reader the time to rule it out.
+- **§8.5's remaining residual is unchanged.** Nothing
   bounds the claim's retention against a handler's runtime, so past the claim's
   expiry a successor may claim the key and both attempts run; the claim token
   keeps the loser from corrupting the winner's entry (#127) and no more.
