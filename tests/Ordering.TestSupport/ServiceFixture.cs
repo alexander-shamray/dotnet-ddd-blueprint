@@ -350,14 +350,22 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// latent rather than theoretical.</b> <c>Unschedule</c> is a no-op on
     /// ADR-021's scheduler, so every saga test leaves its timeouts armed in
     /// the collection-wide RabbitMQ. One landing mid-run would cross
-    /// <c>InboxFilter</c> and write a row — and <c>InboxFilterTests</c>
-    /// asserts <c>ShouldBeEmpty()</c> over the whole table, in this same
-    /// collection. What stops it is only that the shortest schedule is five
-    /// minutes and this collection runs in about eighty seconds. **A runner
-    /// four times slower makes that a flake in a test that has nothing to do
-    /// with sagas**, so read the PR-21 entry in the decision log before
+    /// <c>InboxFilter</c> and write a row into a table another class is
+    /// asserting over. What stops it is only that the shortest schedule is
+    /// five minutes and this collection runs in about eighty seconds. **A
+    /// runner four times slower makes that a flake in a test that has nothing
+    /// to do with sagas**, so read the PR-21 entry in the decision log before
     /// chasing it. Copilot raised it; the fix is a broker per saga class and
     /// was judged too expensive for the hazard.
+    /// <para>
+    /// <b>This paragraph named <c>InboxFilterTests</c>' whole-table
+    /// <c>ShouldBeEmpty()</c> as the target and no longer can</b> — since #166
+    /// that suite reads through <see cref="InboxAsync(Guid)"/> and asserts
+    /// about its own message id, so a stray row does not reach it. The hazard
+    /// is unchanged and its remaining targets are the reads whose subject
+    /// really is the table, <c>RetentionPurgeTests</c> above all. Narrowing
+    /// one consumer of a shared fixture does not narrow the fixture.
+    /// </para>
     /// </para>
     /// <para>
     /// <b>It deadlocks against whatever is still consuming, and the retry below
@@ -626,6 +634,43 @@ public sealed class ServiceFixture : IAsyncLifetime
             .ToListAsync(TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// The inbox rows <em>one message</em> wrote, untracked (§9.5) — the read
+    /// an assertion about the filter wants, and the one
+    /// <see cref="InboxAsync()"/> cannot be.
+    /// </summary>
+    /// <remarks>
+    /// <b>An unscoped read makes every assertion two claims at once, and only
+    /// one of them is the filter's guarantee.</b>
+    /// <c>(await InboxAsync()).ShouldHaveSingleItem()</c> asserts both that the
+    /// duplicate was suppressed and that no other row exists anywhere in the
+    /// schema. The second is a property of test isolation rather than of
+    /// <c>InboxFilter&lt;T&gt;</c>, and it is the half that breaks: classes in
+    /// <c>IntegrationCollection</c> share this fixture and run in sequence, so
+    /// a message an earlier class published and a consumer handled after this
+    /// class's <see cref="ResetAsync"/> is a second row under an assertion with
+    /// nothing to do with it. Seen once in CI (#166) and not reproduced in ten
+    /// local runs, which is what that shape looks like from the outside.
+    /// <para>
+    /// The precedent is <c>CatalogEventEndpointTests</c>, which already filters
+    /// on <c>MessageId</c> inline at its own call site. This is that filter
+    /// moved into the helper every test already calls, which is where a barrier
+    /// leaves nothing to forget. <see cref="InboxAsync()"/> stays for the
+    /// assertions whose subject genuinely <em>is</em> the table — the retention
+    /// purge counts rows it never keyed.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<InboxMessage>> InboxAsync(Guid messageId)
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+
+        return await db.InboxMessages
+            .AsNoTracking()
+            .Where(m => m.MessageId == messageId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+    }
+
     /// <summary>Every idempotency marker, untracked, for asserting over (§8.5).</summary>
     public async Task<IReadOnlyList<IdempotencyMarker>> IdempotencyMarkersAsync()
     {
@@ -707,6 +752,125 @@ public sealed class ServiceFixture : IAsyncLifetime
             Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
 
         return purge.PurgeAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// One pass under a policy of the test's own <em>and</em> a registered
+    /// clock moved forward by <paramref name="skew"/>. It exists because
+    /// nothing else in this suite can tell the marker's cutoff from the other
+    /// two.
+    /// </summary>
+    /// <remarks>
+    /// <b>The outbox's and the inbox's cutoffs are computed by the application
+    /// and the marker's is computed by the server</b> — <c>DATEADD(second,
+    /// -@WindowSeconds, SYSDATETIMEOFFSET())</c>, which is #167's fix and
+    /// ADR-038's decision, against a <c>@Before</c> the service subtracts from
+    /// the registered <c>TimeProvider</c> for the other two. Every other
+    /// retention test stages rows against <c>DateTimeOffset.UtcNow</c> and the
+    /// test host's clock agrees with the container's, so all three statements
+    /// read what is effectively one clock and a marker statement that had
+    /// regressed to <c>@Before</c> passes every one of them. Moving the
+    /// registered clock and leaving the server's alone is the only thing that
+    /// separates them, and a pass that then purges the first two tables while
+    /// keeping the marker has <em>read</em> which clock each statement used
+    /// rather than assumed it.
+    /// <para>
+    /// A wrapped <see cref="IServiceScopeFactory"/> rather than a second host,
+    /// because the service resolves <c>TimeProvider</c> from the scope it
+    /// creates and from nowhere else — so one delegating provider reaches it,
+    /// and every other service the pass resolves is the registered one. The
+    /// alternative is a whole second <c>WebApplicationFactory</c> with its own
+    /// containers, for one substituted singleton.
+    /// </para>
+    /// </remarks>
+    public Task<(int Outbox, int Inbox, int Idempotency)> PurgeWithSkewedClockAsync(
+        RetentionPolicy policy,
+        TimeSpan skew)
+    {
+        RetentionPurgeService purge = new(
+            new SkewedScopeFactory(
+                Factory.Services.GetRequiredService<IServiceScopeFactory>(),
+                new SkewedClock(skew)),
+            Factory.Services.GetRequiredService<OutboxTable>(),
+            Factory.Services.GetRequiredService<InboxTable>(),
+            Factory.Services.GetRequiredService<IdempotencyMarkerTable>(),
+            policy,
+            Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
+
+        return purge.PurgeAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// The system clock plus a fixed offset, which is what a test skewing one
+    /// end of a two-clock comparison needs.
+    /// </summary>
+    /// <remarks>
+    /// Hand-written rather than <c>FakeTimeProvider</c>: that package is pinned
+    /// centrally, but this project does not reference it and adding a
+    /// dependency to move a clock forward by two days would buy a licence
+    /// register entry for four lines of code. A frozen clock is not wanted here
+    /// either — the pass is compared against rows staged in real time, so the
+    /// substitute has to keep running and simply run ahead.
+    /// </remarks>
+    private sealed class SkewedClock(TimeSpan skew) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => TimeProvider.System.GetUtcNow() + skew;
+    }
+
+    /// <summary>
+    /// Hands out scopes whose <see cref="TimeProvider"/> is
+    /// <see cref="SkewedClock"/> and whose every other service is the host's.
+    /// </summary>
+    private sealed class SkewedScopeFactory(IServiceScopeFactory inner, TimeProvider clock)
+        : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => new SkewedScope(inner.CreateScope(), clock);
+    }
+
+    /// <summary>
+    /// A real scope wearing a substituted provider. <see cref="IAsyncDisposable"/>
+    /// as well as <see cref="IDisposable"/>, because <c>AsyncServiceScope</c>
+    /// asks for the first and silently falls back to the second — and the
+    /// purge's own scope holds a <c>DbContext</c>, which is exactly the kind of
+    /// service that owes its disposal an <c>await</c>.
+    /// </summary>
+    private sealed class SkewedScope : IServiceScope, IAsyncDisposable
+    {
+        private readonly IServiceScope _inner;
+
+        public SkewedScope(IServiceScope inner, TimeProvider clock)
+        {
+            _inner = inner;
+            ServiceProvider = new SkewedProvider(inner.ServiceProvider, clock);
+        }
+
+        public IServiceProvider ServiceProvider { get; }
+
+        public void Dispose() => _inner.Dispose();
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_inner is IAsyncDisposable disposable)
+            {
+                await disposable.DisposeAsync();
+                return;
+            }
+
+            _inner.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// One service substituted and everything else delegated. Deliberately not
+    /// <c>ISupportRequiredService</c>: <c>GetRequiredService</c> falls back to
+    /// <see cref="GetService"/> when a provider does not implement it, so the
+    /// one override is enough and there is no second lookup path to keep in
+    /// step with this one.
+    /// </summary>
+    private sealed class SkewedProvider(IServiceProvider inner, TimeProvider clock) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(TimeProvider) ? clock : inner.GetService(serviceType);
     }
 
     /// <summary>Markers §8.5 holds for one key — nought or one, and which is the point.</summary>

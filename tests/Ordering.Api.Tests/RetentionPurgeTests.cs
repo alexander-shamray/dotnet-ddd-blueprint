@@ -1,5 +1,6 @@
 using Ordering.TestSupport;
 using Ordering.TestSupport.Outbox;
+using Common.Application;
 using Common.Infrastructure.Idempotency;
 using Common.Infrastructure.Inbox;
 using Common.Infrastructure.Messaging;
@@ -207,6 +208,69 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
 
         IdempotencyMarker survivor = (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
         survivor.CommittedAt.ShouldBeGreaterThan(LongAgo);
+    }
+
+    [Fact]
+    public async Task A_skewed_clock_purges_the_outbox_and_the_inbox_and_leaves_the_marker()
+    {
+        // The property #167 exists to establish, and the one thing the rest of
+        // this suite cannot see. Every other test here stages rows against
+        // DateTimeOffset.UtcNow while the test host's clock and the container's
+        // agree, so all three statements read what is effectively one clock —
+        // and a marker statement that had regressed to the application-supplied
+        // `@Before` the other two still use would pass every one of them
+        // unchanged. Nothing would go red, and ADR-038's whole decision would be
+        // untested.
+        //
+        // So: two clocks, one age, opposite outcomes. The registered
+        // TimeProvider runs two days fast, the window is one day, and three rows
+        // of the same real age go into the three tables. The outbox's and the
+        // inbox's cutoffs are `now - window` on that skewed clock, so their rows
+        // are a day past a window they are seconds into and both are deleted.
+        // The marker's cutoff is DATEADD over SYSDATETIMEOFFSET() on the server,
+        // which nothing substituted in this process can reach, so it survives.
+        //
+        // The window is read rather than restated: RetentionPolicy refuses an
+        // idempotency window below §8.5's claim, so this is the smallest one the
+        // test may ask for — and the skew is twice it rather than some margin
+        // over it, so the outbox and inbox rows clear their windows by a whole
+        // window and nothing here sits near a boundary.
+        TimeSpan window = IdempotencyRetention.MarkerFloor;
+
+        RetentionPolicy oneDay = new()
+        {
+            OutboxWindow = window,
+            InboxWindow = window,
+            IdempotencyWindow = window
+        };
+
+        // One instant for all three rows, so what the assertions below vary is
+        // which clock a statement read and nothing else.
+        DateTimeOffset justNow = DateTimeOffset.UtcNow;
+
+        OutboxMessage row = OutboxRows.Healthy(fixture);
+        await fixture.StageOutboxAsync(row);
+        await fixture.SetOutboxProcessedAtAsync(row.MessageId, justNow);
+
+        await fixture.StageInboxAsync(
+            new InboxMessage(Guid.CreateVersion7(), "ordering-inventory-events", justNow));
+
+        await fixture.StageIdempotencyMarkersAsync(new IdempotencyMarker(Key(), justNow));
+
+        (int outbox, int inbox, int idempotency) =
+            await fixture.PurgeWithSkewedClockAsync(oneDay, window * 2);
+
+        outbox.ShouldBe(1, "the outbox cutoff is subtracted from the registered clock, which is two days ahead");
+        inbox.ShouldBe(1, "§9.5 keeps the inbox on that same application-computed cutoff, deliberately");
+        idempotency.ShouldBe(
+            0,
+            "the marker's cutoff is DATEADD over SYSDATETIMEOFFSET(), so skewing this process's clock " +
+            "cannot move it — a regression to @Before deletes this row, and this line is what says so " +
+            "(ADR-038)");
+
+        // The table as well as the count, because a pass that deleted the row
+        // and miscounted is a different defect from one that kept it.
+        (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
     }
 
     [Fact]

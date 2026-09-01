@@ -71,13 +71,26 @@ internal sealed class RedisIdempotencyStore(
     // check and an act that are two operations are two operations the claim
     // can expire between, and the loser then overwrites the winner's entry
     // with no error and no log line (#127).
+    //
+    // KEEPTTL, and it is the whole of #168. This wrote 'PX' with a fresh
+    // retention, which started the entry's window at the COMMIT while §6.3
+    // stamps its marker inside the transaction that precedes it — so the claim
+    // outlived the marker by the commit's tail, ordinarily milliseconds and
+    // unbounded in principle. Preserving what the claim had left makes the
+    // claim's window start at the claim, which is earlier than the stamp by
+    // construction — so this term needs no margin at all.
+    //
+    // That is the start ordering and not the expiry ordering, which #168 alone
+    // does not buy: the marker outliving the claim additionally wants the two
+    // windows counted at one rate (#171) and the marker to reach the database inside this
+    // one (#127). IdempotencyRetention.MarkerFloor argues both.
     private const string CompleteScript =
         """
         local current = redis.call('get', KEYS[1])
         if current == false or string.sub(current, 1, string.len(ARGV[1])) ~= ARGV[1] then
             return 0
         end
-        redis.call('set', KEYS[1], ARGV[2], 'PX', ARGV[3])
+        redis.call('set', KEYS[1], ARGV[2], 'KEEPTTL')
         return 1
         """;
 
@@ -169,30 +182,32 @@ internal sealed class RedisIdempotencyStore(
             : new IdempotencyEntry(false, state);
     }
 
-    public async Task CompleteAsync(
-        string key,
-        string claim,
-        string payload,
-        TimeSpan retention,
-        CancellationToken ct)
+    public async Task CompleteAsync(string key, string claim, string payload, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentException.ThrowIfNullOrWhiteSpace(claim);
         ArgumentNullException.ThrowIfNull(payload);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(retention, TimeSpan.Zero);
         ct.ThrowIfCancellationRequested();
 
-        // Re-arming the retention rather than preserving what the claim had
-        // left. The claim's window measures how long an attempt may run; this
-        // one measures how long the answer stays replayable, and starting it
-        // at the commit is what makes the stated 24 hours the retention a
-        // caller actually gets.
+        // No retention to pass, because the script preserves the claim's own.
+        // What the caller gets is the remainder of the window the claim opened
+        // rather than a fresh one starting at the commit — the trade #168
+        // records, and the reason the claim's window now STARTS before §6.3's
+        // stamp by construction instead of by an allowance.
+        //
+        // Its start, and not its expiry. That the marker then outlives the
+        // claim is a conclusion drawn from the ordering rather than the
+        // ordering itself, and it assumes two things this line cannot supply:
+        // that the two windows are counted at one rate, where Redis counts
+        // this one and SQL Server the marker's (#171), and that the handler
+        // reaches the database inside this window at all (#127). IdempotencyRetention's
+        // MarkerFloor argues both.
         RedisResult written = await redis
             .GetDatabase()
             .ScriptEvaluateAsync(
                 CompleteScript,
                 [keys.Idempotency(key)],
-                [Owner(claim), Value(claim, payload), (long)retention.TotalMilliseconds]);
+                [Owner(claim), Value(claim, payload)]);
 
         if ((long)written == 0)
             ClaimLost(log, key, null);

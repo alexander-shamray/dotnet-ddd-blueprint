@@ -260,9 +260,17 @@ correction, but a residual PR-28's own row *names as owed*, so the debt was
 declared in the section and the only thing missing was a row saying who would
 pay it. It passes the same test — ADR-037 retires the exception in §8.5's
 opening guarantee — which is what a row records and a commit body cannot.
+**PR-33 is PR-30's kind, arriving against a row two rows old**: PR-32
+delivered what ADR-037 specified and filed two issues against its own margin
+on the way past, and closing them moved the rule ADR-037 had just set —
+`RetentionPolicy`'s floor is the claim's window exactly, where ADR-037 made it
+the claim's window plus an allowance (ADR-038). A row records that, and the
+size of the diff is not what earned it — which is why no inventory of that diff
+appears here: the sentence's whole point is that the count is irrelevant, and a
+count written beside it is one more figure nothing recomputes.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,086 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,095 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -342,6 +350,20 @@ dispatch would overwrite it mid-transaction — and the marker's own retention
 window is the only one of the three with a floor, because purging it early
 re-opens the duplicate at a boundary set by a housekeeping setting.
 
+**Since PR-33 that floor is the claim's window exactly, and the ordering of
+the two *start* events holds by construction rather than by a margin** — the
+two windows are still counted by Redis's clock and the database's, which is
+[#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171). It carried a
+five-minute allowance for two terms nothing bounded — the claim was re-armed
+after a commit the marker was stamped before, and one row was aged across two
+pods' clocks — and both are closed at the source
+([ADR-038](docs/backend-architecture/appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)):
+§8.5's completion preserves what the claim had left, and `CommittedAt` is
+written and compared on the database's clock. **The marker is the one retention
+table aged that way**, and §9.5 keeps the outbox and the inbox on the registered
+`TimeProvider` deliberately, so a change moving all three to one clock is a
+change to a decision rather than a tidy-up.
+
 **Two commands opt in and the third is a decision, not an omission.**
 `PlaceOrderCommand` and `PublishProductCommand` carry a `CommandId` and
 `IIdempotentCommand`; `CancelOrderCommand` carries neither, because
@@ -405,7 +427,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 869 of 1,086, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 869 of 1,095, no daemon
 ```
 
 **[`docs/testing.md`](docs/testing.md) is the operational reference and this is
@@ -457,8 +479,8 @@ defect in the branch.
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
 category runs a smaller suite and says which. `Category!=Integration` is 869 of
-the 1,086 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 217, needing the daemon
+the 1,095 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 226, needing the daemon
 exactly as before.
 
 Adding a migration needs the pinned tool and a startup project:
@@ -643,7 +665,7 @@ to reach both, and the guide is the master copy.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-038) and keep the
+  (currently ADR-039) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

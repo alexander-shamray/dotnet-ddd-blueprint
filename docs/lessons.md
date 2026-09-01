@@ -883,3 +883,30 @@ own line rather than sending a reader to a file that does not hold it.
   stage is not under test — the stub said so, and four cases were written past
   the sentence anyway.
 
+- **A margin that stands in for an unbounded quantity is a guess with a number
+  on it, and the number is the part that reads as rigour.** §8.5's retention
+  floor carried a five-minute allowance covering two terms that reordered a
+  claim's expiry against a marker's: the lag between two writes, which a
+  process stall stretches arbitrarily, and the skew between two pods' clocks,
+  which is bounded only by NTP working. Five minutes covered every ordinary
+  value of each and the shipped default carried six days of margin regardless,
+  so nothing was ever exposed — and **nothing detected either term exceeding
+  it**, in a mechanism whose whole purpose is that a write happens once and
+  whose failure is silent. Both were closable at the source for a change
+  smaller than the allowance's own documentation: start the two windows at
+  events with a fixed order, and compare one row's age on one clock. **The tell
+  is a constant whose own comment says it bounds rather than removes** —
+  written honestly, and honest about being a guess. Ask what makes the quantity
+  unbounded before choosing the number that covers it.
+- **A test that pins a design correctly is the thing you have to edit when the
+  design changes, and the edit is where the change gets hidden.** Two tests
+  asserted the behaviour the two fixes above inverted — that completing an
+  idempotency claim *re-armed* its TTL, and that a marker window equal to the
+  claim's was *refused* — and both were good: one had already been strengthened
+  by a review round so that it could fail, and the other carried its argument
+  in place. Neither is evidence against the change and neither may be quietly
+  flipped either. **Rewrite the assertion, keep the history in the comment, and
+  where you can, move the assertion's subject off the number and onto the
+  relationship** — the floor's test now also asserts that the floor *equals* the
+  claim's window, so a later reader who reinstates an allowance fails a test
+  about the rule rather than one about a duration.

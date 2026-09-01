@@ -1558,13 +1558,21 @@ failed claim twice a second from its first boot — the outbox itself with its
 empty allow-list mapper, §9.5's inbox filter and retention purge, §11.3's JWT
 validation, both images ([§15.2](15-cicd-deployment.md)) and
 §4.2's architecture gates. The migrations it copies are `InitialCreate`,
-`AddOutbox`, `AddInbox`, `AddOutboxRetentionIndex` and `AddIdempotencyMarkers`
-— the messaging tables ship with the dispatcher that reads them, because a
-service carrying the dispatcher without its table logs a failed claim twice a
-second from its first boot, and §8.5's marker table ships on a sharper version
-of the same argument: without it the service fails a retention purge every hour
-and then fails the first idempotent command it is ever given
+`AddOutbox`, `AddInbox`, `AddOutboxRetentionIndex`, `AddIdempotencyMarkers` and
+`IdempotencyMarkerCommittedAtDefault` — the messaging tables ship with the
+dispatcher that reads them, because a service carrying the dispatcher without
+its table logs a failed claim twice a second from its first boot, and §8.5's
+marker table ships on a sharper version of the same argument: without it the
+service fails a retention purge every hour and then fails the first idempotent
+command it is ever given
 ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
+**The last of the six is the marker's `CommittedAt` default and travels for
+the reason the table itself does**: the `SYSDATETIMEOFFSET()` default and the
+cutoff `RetentionPurgeService` computes in SQL are two halves of one guarantee
+([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)),
+so a service scaffolded with the table and without the default ages its markers
+on the writing pod's clock while the purge ages them on the server's — the skew
+that migration exists to remove, reintroduced in every new service by omission.
 It then edits seven shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)), the broker
@@ -1583,11 +1591,11 @@ be a second implementation of which substring each rule matches — and a
 fingerprint matching nothing is a stale entry that fails the build. Where
 `.github/secret-scan/` is absent it writes nothing and says nothing, which is
 the case in the scaffold suite's own synthetic root. The new service
-builds and its **seventy-nine** tests pass before a line of it is written,
-**thirty-six** of them against real SQL Server and RabbitMQ containers —
+builds and its **eighty-three** tests pass before a line of it is written,
+**forty** of them against real SQL Server and RabbitMQ containers —
 counts measured against a rendered service, by PR-18 when they read forty-one
 and sixteen three PRs after they stopped being true, again by PR-22 when they
-read fifty-six, and twice by PR-32. The thirty-six is the
+read fifty-six, twice by PR-32, and twice by PR-33. The forty is the
 `Category=Integration` count of §12.4, which is a filter rather than a tally.
 
 **Arithmetic is not a remeasurement, and the two rules that follow from that
@@ -1598,7 +1606,13 @@ PR-32 did when ADR-037's marker suite joined the template: rendered, built, and
 run as `Yankee.Domain.Tests` (1), `Yankee.Application.Tests` (18) and
 `Yankee.Api.Tests` (60) — **twice**, because the first render predated a test
 that the same pull request later added to the template, and the figures were
-stale between one commit and the next. The second rule is that this is the only figure in
+stale between one commit and the next. PR-33 rendered again and read 1, 18 and
+64, its four additions all landing in the API suite and all wanting a
+container; it recounted because a reviewer noticed the figures had gone stale
+inside the pull request that made them so, and then rendered a second time
+because a later round of the same review added a fourth test — which is PR-32's
+own two-render story arriving for the same reason one pull request on. The
+second rule is that this is the only figure in
 this section a reader cannot check from the tree, so it is the one to distrust
 first — a number three PRs stale here looks exactly like a number taken
 yesterday.
@@ -1649,6 +1663,17 @@ be removed, and its own doc comment says so.
 §14.1 and in `deploy/compose/README.md`; a script that guessed one would
 quietly disagree with a printed chapter. The run refuses a port another service
 already publishes.
+
+**It refuses a *name* on the same terms, and the collision is one the rename
+creates rather than one the operator could see.** §7.1's runtime key is
+`ConnectionStrings__<Service>`, so a service named after one of §14.1's
+infrastructure connections renders a key the api block already declares — and
+nothing else catches it: the rename is correct, no template token is left
+behind, and duplicate keys leave the YAML well formed, so whatever parses the
+file keeps one of the two values and discards the other. The guard is a
+predicate over the rendered `environment:` mappings and never a list of the
+names it happens to catch today, because a list goes stale the moment §14.1
+gives that block another `ConnectionStrings__*` key.
 
 Three things are outside it, and none is silently missing: the gateway route
 ([§10.2](10-api-gateway.md)) — the route belongs to the gateway's

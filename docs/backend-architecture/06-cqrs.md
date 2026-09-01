@@ -586,6 +586,11 @@ public sealed class TransactionBehavior<TCommand, TResult>(
                 // is after the guard above deliberately: a command this
                 // transaction is about to refuse must leave nothing behind that
                 // would refuse its retry.
+                //
+                // No timestamp passed, and that is the row's clock rather than
+                // an omission: CommittedAt carries a SYSDATETIMEOFFSET() column
+                // default, so the row is aged by the database that stores it
+                // and not by this pod (§8.5, ADR-038).
                 if (key is not null)
                     await markers.MarkAsync(key, token);
 
@@ -637,6 +642,15 @@ dispatch publishes nothing, no count check makes principle 3 advisory.
 > aggregate count means a command *this* transaction is about to refuse leaves
 > no marker behind — otherwise a refused command would permanently refuse its
 > own retry, which is the opposite of what the mechanism is for.
+>
+> **What this behaviour does not supply is the timestamp, and that is the one
+> thing about the row it deliberately leaves to somebody else.** `MarkAsync`
+> passes a key and nothing more: `CommittedAt` is written by a
+> `SYSDATETIMEOFFSET()` column default, so the row is aged by the database it
+> commits to rather than by whichever replica ran the command. §8.5 and
+> [ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)
+> carry the argument; what matters here is that this behaviour has no clock in
+> it to get wrong.
 >
 > **The key is read once, before anything runs, and that is a guard rather than
 > a style.** A command dispatched from inside a command handler runs its own

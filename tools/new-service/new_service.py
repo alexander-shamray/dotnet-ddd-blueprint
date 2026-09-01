@@ -1209,13 +1209,14 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // apply every migration in sequence, and a count alone would pass on\n"
             "        // a shorter prefix of them applied twice.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(6);\n"
+            "        applied.Length.ShouldBe(7);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddProducts\");\n"
             "        applied[2].ShouldEndWith(\"_AddOutbox\");\n"
             "        applied[3].ShouldEndWith(\"_AddInbox\");\n"
             "        applied[4].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n"
-            "        applied[5].ShouldEndWith(\"_AddIdempotencyMarkers\");\n",
+            "        applied[5].ShouldEndWith(\"_AddIdempotencyMarkers\");\n"
+            "        applied[6].ShouldEndWith(\"_IdempotencyMarkerCommittedAtDefault\");\n",
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
             "\n"
             "        // Named and ordered, not merely counted: the migrator's job is to\n"
@@ -1223,15 +1224,16 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // a shorter prefix of them applied twice. What a scaffolded service\n"
             "        // starts with is the schema, then §9.4's outbox table, §9.5's inbox,\n"
             "        // the index the retention purge deletes through and §8.5's marker\n"
-            "        // table — all of them wiring every service has rather than anything\n"
-            "        // this one chose.\n"
+            "        // table with the database clock it is aged by — all of them wiring\n"
+            "        // every service has rather than anything this one chose.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(5);\n"
+            "        applied.Length.ShouldBe(6);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddOutbox\");\n"
             "        applied[2].ShouldEndWith(\"_AddInbox\");\n"
             "        applied[3].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n"
-            "        applied[4].ShouldEndWith(\"_AddIdempotencyMarkers\");\n",
+            "        applied[4].ShouldEndWith(\"_AddIdempotencyMarkers\");\n"
+            "        applied[5].ShouldEndWith(\"_IdempotencyMarkerCommittedAtDefault\");\n",
         ),
     ),
 }
@@ -1487,6 +1489,16 @@ RETENTION_INDEX_MIGRATION = re.compile(r"^\d{14}_AddOutboxRetentionIndex(\.Desig
 # first idempotent command it is ever given, both against a table that is
 # simply not there.
 IDEMPOTENCY_MIGRATION = re.compile(r"^\d{14}_AddIdempotencyMarkers(\.Designer)?\.cs$")
+
+# The marker's `CommittedAt` default (#167). It travels for the reason the
+# table itself does: the column default and the SQL cutoff that reads it are
+# two halves of one guarantee, so a service scaffolded with the table and
+# without the default ages its markers on the writing pod's clock while the
+# purge ages them on the server's — which is the skew this migration exists to
+# remove, shipped to every new service by omission.
+COMMITTED_AT_DEFAULT_MIGRATION = re.compile(
+    r"^\d{14}_IdempotencyMarkerCommittedAtDefault(\.Designer)?\.cs$"
+)
 LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 
 # The migrations a scaffolded service starts with, in the order they are
@@ -1504,6 +1516,7 @@ TEMPLATE_MIGRATIONS = (
     INBOX_MIGRATION,
     RETENTION_INDEX_MIGRATION,
     IDEMPOTENCY_MIGRATION,
+    COMMITTED_AT_DEFAULT_MIGRATION,
 )
 
 # The name each shape above is known by in a diagnostic, in the same order and
@@ -1519,6 +1532,7 @@ MIGRATION_LABELS = (
     "AddInbox",
     "AddOutboxRetentionIndex",
     "AddIdempotencyMarkers",
+    "IdempotencyMarkerCommittedAtDefault",
 )
 
 # The two files that accumulate a block per service, and the markers that bound
@@ -1526,6 +1540,16 @@ MIGRATION_LABELS = (
 # span only until a second service exists.
 SERVICE_KEY = re.compile(r"^  ([A-Za-z0-9][A-Za-z0-9_-]*):$")
 ENV_MARKER = re.compile(r"^# ([A-Za-z0-9]+)'s two §7\.1 keys")
+
+# One service's `environment:` mapping in that same file, and the keys inside
+# it — read back off the block this script has just rendered rather than off
+# the template it was lifted from, because the collision below is something the
+# rename creates. Indent is the whole selector: a mapping opens at the
+# service's own level and its keys sit one level inside it, so `build:`'s
+# nested pair, `depends_on:`'s entries and every comment are excluded by
+# position rather than by a list of names to skip past.
+ENVIRONMENT_BLOCK = re.compile(r"^    environment:$")
+ENVIRONMENT_KEY = re.compile(r"^      ([A-Za-z0-9_]+):(?:\s|$)")
 
 # Docker publishes 1–65535 and nothing else. §14.1 allocates 51xx by
 # convention, which is a decision rather than a rule, so the guard is the
@@ -2087,6 +2111,7 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
                 "_AddInbox.Designer.cs",
                 "_AddOutboxRetentionIndex.Designer.cs",
                 "_AddIdempotencyMarkers.Designer.cs",
+                "_IdempotencyMarkerCommittedAtDefault.Designer.cs",
             )):
             text = without_slice_entity(text)
 
@@ -2205,6 +2230,40 @@ def update_solution(repo_root: Path, names: Names) -> str:
     return restore("".join(lines), newline)
 
 
+def environment_keys(block: str) -> list[list[str]]:
+    """The mapping keys of every `environment:` block, one list per mapping.
+
+    **Per mapping and never one flat set**, because §14.1's pair rule renders
+    two services and each declares its own: a key appearing in both is two
+    containers agreeing about a variable, which is ordinary, while the same key
+    twice in one mapping is a service saying one thing twice, which is the
+    defect. Flattening the two would report the first as a collision and lose
+    the second in the noise.
+
+    **Returned rather than judged, so that what this reads is testable.** A
+    duplicate check is only as good as the keys handed to it, and a pattern
+    that stops matching the template's shape hands it nothing — over which
+    every name there is passes. That is this repository's most-repeated
+    failure, so the extraction is a value a test can assert about instead of a
+    step buried inside the caller.
+    """
+    mappings: list[list[str]] = []
+    keys: list[str] | None = None
+    for line in block.split("\n"):
+        if ENVIRONMENT_BLOCK.fullmatch(line):
+            keys = []
+            mappings.append(keys)
+        elif keys is None:
+            continue
+        elif line.strip() and not line.startswith("      "):
+            # Anything back out at the service's own level ends the mapping —
+            # `ports:`, `depends_on:`, the next service. A blank line does not.
+            keys = None
+        elif (key := ENVIRONMENT_KEY.match(line)) is not None:
+            keys.append(key.group(1))
+    return mappings
+
+
 def update_compose(repo_root: Path, names: Names, port: int) -> str:
     """Catalog's own pair, lifted out of the file being edited and renamed.
 
@@ -2262,6 +2321,62 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
             f"(§14.1 binds every mapping to loopback)"
         )
     block = block.replace(published.group(0), f'ports: [ "{LOOPBACK}:{port}:8080" ]')
+
+    # §7.1's runtime key is `ConnectionStrings__<Service>` and the rename is
+    # what writes it, so a service named after one of §14.1's infrastructure
+    # connections renders a key the api block already declares. Nothing above
+    # can see it: the rename worked exactly as specified, the straggler check
+    # finds no template token left, and duplicate keys leave the YAML well
+    # formed — so the run reports success and the file quietly means one of the
+    # two values.
+    #
+    # A predicate over the rendered block, never the three names it happens to
+    # catch today. A list of names goes stale the moment §14.1 gives this block
+    # a sixth `ConnectionStrings__*` key, and a gate that silently stops
+    # covering the newest surface is this repository's most-repeated failure.
+    #
+    # **Compared casefolded, because the loader on the other side of this file
+    # is.** §14.2 states it in the one line where it costs an Aspire resource
+    # name: configuration is case-insensitive but not punctuation-insensitive.
+    # So `ConnectionStrings__Rabbitmq` and `ConnectionStrings__RabbitMq` are
+    # two YAML keys and one configuration key, and the first version of this
+    # check — a case-sensitive `in seen` — saw two distinct strings and passed.
+    # That handed the exact defect it was written for back to every spelling of
+    # an infrastructure connection with different capitals, `RabbitMQ` (the
+    # product's own) among them. The same predicate again, one level less
+    # literal: a list of names would have gone stale, and so does an equality
+    # that is stricter than the thing it is standing in for.
+    #
+    # `casefold` rather than `lower`, which is the spelling Python defines for
+    # case-insensitive comparison — it folds what `lower` leaves alone, and the
+    # cost of choosing the weaker one is a refusal that does not fire.
+    for mapping in environment_keys(block):
+        seen: dict[str, str] = {}
+        for key in mapping:
+            if (first := seen.get(key.casefold())) is not None:
+                # Both spellings, and never one of them twice: the collision is
+                # a fact about the configuration loader rather than about the
+                # YAML, so a message quoting `ConnectionStrings__RabbitMq` and
+                # blaming "the same key twice" reads as simply false to whoever
+                # hit it having typed `Rabbitmq`.
+                collision = (
+                    f"renders {key} twice in one environment: mapping"
+                    if first == key
+                    else f"renders both {first} and {key} into one environment: mapping"
+                )
+                raise ScaffoldError(
+                    f"'{names.pascal}' {collision}. .NET configuration keys are "
+                    f"case-insensitive (§14.2), so those two collapse onto one another the "
+                    f"moment configuration loads: the loader keeps one of the values and "
+                    f"discards the other, and which one survives is its choice rather than "
+                    f"this script's. This service's own §7.1 connection key takes the "
+                    f"service's name, and §14.1 already declares an infrastructure "
+                    f"connection under that name in the same block. Nothing else refuses "
+                    f"it: the rename is correct, no template token is left, and two "
+                    f"spellings are two valid YAML keys — so the file stays well formed and "
+                    f"the run reports success. Give the service a different name."
+                )
+            seen[key.casefold()] = key
 
     # After the last application block, so services accumulate in the order
     # they were created. `build:` is what marks one — a structural test rather

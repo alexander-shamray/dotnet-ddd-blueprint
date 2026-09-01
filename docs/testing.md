@@ -280,11 +280,13 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
-> twenty-six tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy-two — 98 in total, with no
+> twenty-seven tests of the three classes in the collection and
+> `Category!=Integration` selects the other seventy-two — 99 in total, with no
 > third state and nothing counted twice. Those figures read ten/81, then
-> twenty/91, then twenty-three/94, then twenty-four/95, then twenty-six/97, and
-> every retake up to that one was the suite growing while the callout did not —
+> twenty/91, then twenty-three/94, then twenty-four/95, then twenty-six/97,
+> then twenty-six/98, and
+> every retake up to the last two was the suite growing while the callout did
+> not —
 > the drift the paragraph below is about, arriving in the paragraph above it.
 > **How many retakes is not written down**, for the reason the figures keep
 > demonstrating.
@@ -308,21 +310,29 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **And it went back up on the next branch**, which is the same lesson from the
 > other side: [ADR-037](backend-architecture/appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)'s
 > floor on `RetentionPolicy.IdempotencyWindow` brought two cases with it, so
-> the fast half is seventy-two and the total is 98. A figure that has
+> the fast half went to seventy-two and the total to 98. A figure that has
 > moved in both directions inside two branches is one nobody should reason
 > about at all.
 >
+> **And it moved again on the branch that retired that floor's allowance**,
+> which is the third direction: one integration case joined
+> `RedisIdempotencyStoreTests` for the claim's inherited expiry
+> ([ADR-038](backend-architecture/appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)),
+> so the fast half is unchanged at seventy-two and the total is 99. The floor's
+> own cases were rewritten rather than added to, which is why only one of the
+> two numbers moved.
+>
 > **Those are the runner's numbers, and `--list-tests` answers a different
 > question.** For this project the two now agree — discovery and execution both
-> report 98, measured rather than assumed on each retake — and they have not
+> report 99, measured rather than assumed on each retake — and they have not
 > always: the gap was 82 against 81 when this callout was written, and mixing a
 > partition quoted from `--list-tests` with a total from `dotnet test` is how it
-> first came to claim 72 and 82. The 1,086 is summed from `dotnet test`
+> first came to claim 72 and 82. The 1,095 is summed from `dotnet test`
 > output, so quote what ran. **Agreement today is a measurement and not a
 > guarantee** —
 > which is why the rule outlives the discrepancy that produced it.
 >
-> Across the solution the split is **869 and 217 of 1,086**, and the fast half
+> Across the solution the split is **869 and 226 of 1,095**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -358,7 +368,7 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **851** and **217**, summing to the 1,086
+on this repository they are **18**, **851** and **226**, summing to the 1,095
 the whole suite runs — which is the arithmetic the callout below asks for. The
 architecture stage is the one that has not moved: it is 18 gates, measured
 again on the branch that took the other two figures.
@@ -400,8 +410,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 869 and 217 summing to
-> 1,086 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 869 and 226 summing to
+> 1,095 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

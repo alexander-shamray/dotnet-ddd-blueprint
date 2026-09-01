@@ -234,6 +234,39 @@ would have no reason to look for any of that.
 |---|---|---|---|
 | **32** | `fix(common): §8.5's durable idempotency marker` | 28 | `IIdempotencyMarkerStore`, `IdempotencyContext`, `CommandAlreadyCommittedException` and `IdempotencyRetention` in `Common.Application`; `IdempotencyMarker`, `IdempotencyMarkerTable` and `EfIdempotencyMarkerStore` in `Common.Infrastructure`; `CommandAlreadyCommittedExceptionHandler` in `Common.Web`; and per service a mapped table, a migration, a third registered schema and a third retention purge with `RetentionPolicy.IdempotencyWindow` — the one window with a floor, because purging a marker early re-opens the duplicate at a boundary set by a housekeeping setting. **§6.3 does the reading and the writing**, and each of the three positions is argued rather than convenient: the key is captured **once** before the unit opens, because a nested dispatch would overwrite the scoped carrier mid-transaction; the marker is read **before** `next()`, so a command that already committed does no work rather than losing it to a constraint violation on the way out; and it is written **after** the failure guard and §2.3's aggregate-count check, so a command this transaction is about to refuse leaves nothing behind to refuse its retry with. **Holding the Redis claim was the cheaper alternative and does not work**: §8.5's own release table already says holding *postpones* the duplicate rather than preventing it — every entry has a TTL, so the attempt after expiry claims a free key and runs the command again — and it would cost every ordinary fault its retry for a day to buy that postponement. A row has no TTL. **Three things were found by building it.** The scaffold's `snapshot_from_designer` hard-coded `AddOutboxRetentionIndex` as the last template migration's class name, so a fifth migration made that literal the *second*-to-last and **every anchor in the function missed at once** — the run stopped, loudly, which was luck rather than design: it derives the name from the file the caller already holds now. And the two behaviours' broken forms are refused by the **build**, not by a test — deleting `idempotency.Claim(key)` is CS9113 for an unread primary-constructor parameter, and a `Claim` that assigns nothing is CA2245 or CA1822 — so the counterfactual for *is the key published at all* is the compiler, and the tests that needed a measured counterfactual are the ones about **where** each call sits. And **restoring a file with `shutil.copy2` restores its mtime along with its bytes**, so MSBuild found nothing to rebuild and the next `--no-build` run executed the assembly compiled from the broken version — five tests reported as failing against source that was already correct. That is the converse of this repository's existing rule about a counterfactual that does not rebuild, and it cost the most time of the three. It also closes [#161](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/161), because one pull request is one row: §4.5's scaffold now runs the real secret scanner over what it has rendered and writes one accepted-finding line per distinct finding into `.github/secret-scan/allowed-secrets.txt` — the seventh shared file it edits, and the difference between a service that renders and a service that can be committed. The fingerprints are the gate's own; a scaffold that computed them would be a second implementation of which substring each rule matches, wrong in silence. It degrades to writing nothing where `.github/secret-scan/` is absent, which is the scaffold suite's synthetic root |
 
+**The sixth row is PR-30's kind, and it corrects the row above it.** PR-32
+delivered exactly what [§8.5](08-caching-redis.md) and
+[ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)
+specified, and filed two issues against its own work on the way past —
+[#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167)
+and
+[#168](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168),
+the two terms its retention floor's five-minute allowance stood in for. So
+nothing was missing from the plan's coverage and nothing was mis-delivered.
+**The specification was wrong**, in the same way §9.8's was: it asked for a
+margin where the ordering it wanted could be made structural.
+
+**Three rules move, which is the test every row here has to pass.**
+`RetentionPolicy.IdempotencyWindow`'s floor goes from *strictly greater than
+the claim's window* to *equal admitted*, and `IdempotencyRetention` loses a
+member. That window is the one setting this platform calls a correctness
+setting rather than housekeeping, which is what makes its floor worth a row.
+`IIdempotencyStore.CompleteAsync` loses a parameter, which is a change to an
+application port §8.5 specifies and carries a cost a reader of
+the rows above would have no reason to look for: an outcome now stays
+replayable for the remainder of the window the claim opened rather than for a
+full retention starting at the commit. And [§9.5](09-messaging.md)'s "the
+registered clock rather than `DateTimeOffset.UtcNow`" gains a **stated
+exception** — one of the three purge statements computes its cutoff in SQL and
+one of the three tables is stamped by a column default
+([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+§4.5's scaffold gains a sixth migration with them, so the template's shape
+changed too.
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **33** | `fix(common): the marker and its claim are ordered by construction` | 32 | `IIdempotencyStore.CompleteAsync` without a retention, over a Lua `SET … KEEPTTL` — so a claim's window runs from `TryClaimAsync` and the completion never re-arms it. `IdempotencyMarker.CommittedAt` written by a `SYSDATETIMEOFFSET()` column default declared `ValueGeneratedOnAdd`, `EfIdempotencyMarkerStore` without its `TimeProvider`, and `RetentionPurgeService`'s marker statement computing `DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())` where the outbox's and the inbox's keep the `@Before` they were given. `IdempotencyRetention.MarkerLeadAllowance` retired and `MarkerFloor` reduced to `Window`, so a marker window equal to the claim's is admitted. Per service a migration, and §4.5's scaffold carrying it. **Both halves are needed and neither is sufficient**: a column default with an application-computed cutoff still compares two clocks, and a SQL cutoff against an application-stamped column does the same — which is why one row delivers both. **Two tests had to be inverted, and both were good tests.** One asserted that completing *re-armed* the TTL, and an earlier review round had already shortened the key first so that the assertion could fail; the other asserted that a window equal to the claim's was *refused*, and carried the argument in place. A test that pins a design correctly is the thing you edit when the design changes, which is the moment the change gets hidden — so each keeps its history in the comment, and the floor's test now also asserts that `MarkerFloor` equals `Window`, making its subject the relationship rather than a number. It also closes [#166](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/166) and [#164](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/164), because one pull request is one row: an inbox assertion that claimed both *the filter suppressed the duplicate* and *no other row exists anywhere in the schema* now reads by message id through the fixture helper every test calls, and §4.5's scaffold refuses a service name whose §7.1 connection key would collide with a §14.1 infrastructure one — by reading the environment keys back off the block it has just rendered rather than by holding a list of names that would go stale the first time the template gained a key |
+
 ## C.3 Dependency graph
 
 ```mermaid

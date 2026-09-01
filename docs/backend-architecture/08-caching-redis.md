@@ -358,6 +358,42 @@ is what makes the ambiguous case decidable and outlives every TTL. The bound is
 still real and is now the marker's retention window, which §9.5's purge sets
 and `RetentionPolicy` refuses to put below the claim's own.
 
+**What it does not buy is a *replay* for that whole time, and the difference
+belongs here rather than in a footnote.** The recorded outcome lives in the
+Redis entry, whose window runs from the claim and is never extended:
+`CompleteAsync` preserves whatever the claim had left instead of re-arming a
+fresh retention
+([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+So a command that ran for an hour has spent an hour of its own replay window,
+and a retry arriving after it is *refused* rather than answered. That is the
+price of the ordering, paid deliberately: the claim is taken before the marker
+is stamped, so the claim's window *starts* before the stamp — same thread and
+same dispatch, and that much is unconditional. **The conclusion is a step past
+it and carries two assumptions.** That the marker then outlives the claim for
+every window at least as long holds while the two clocks tick at the same rate,
+which the callout below states, and while the marker reaches the database
+inside the
+claim's window, which is the overrun this section carries as a residual at *A
+claim carries a token* further down.
+
+> **What holds by construction is the ordering of the two *start* events, and
+> not that the two windows are counted by one clock.** Redis expires the claim
+> after `Retention` elapsed by *Redis's* clock; §9.5's purge deletes the marker
+> after `IdempotencyWindow` elapsed by *SQL Server's*. Nothing couples the two
+> rates, so a forward step of the database's clock relative to Redis's — an NTP
+> correction, a host migration, a resumed snapshot — can carry the cutoff past
+> the marker while the claim is still live. What absorbs it is the handler's
+> runtime plus whatever the window exceeds the floor by: six days on the
+> shipped defaults, and nothing at all at the floor itself
+> ([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)).
+>
+> **Reinstating an allowance is not the answer, which is why the floor is still
+> the claim's window.** Five minutes never bounded a clock step either, and a
+> step is bounded by nothing this repository can assert — so a number there
+> would repeat in a third term the mistake
+> [ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)
+> removes from two. What closes it is one time source for both deadlines.
+
 **It is a field on the command, not an `Idempotency-Key` header**, and the
 reason is the dependency rule rather than taste. `IdempotencyBehavior` runs in
 `Common.Application`, which knows nothing about HTTP ([§4.2](04-solution-structure.md)) — it cannot read a
@@ -387,7 +423,20 @@ public interface IIdempotencyStore
     Task<string?> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct);
 
     Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct);
-    Task CompleteAsync(string key, string claim, string payload, TimeSpan retention, CancellationToken ct);
+
+    /// <summary>
+    /// Records the outcome against a key this claim still owns, preserving the
+    /// claim's remaining life rather than starting a new one.
+    ///
+    /// There is no retention parameter, and its absence is the contract rather
+    /// than a simplification. This took one and re-armed the entry to a full
+    /// window, which started the claim's life at the COMMIT — later than the
+    /// marker §6.3 stamps inside the transaction that precedes it. Preserving
+    /// what the claim had left starts the window at TryClaimAsync instead,
+    /// which is earlier than the stamp by construction (ADR-038).
+    /// </summary>
+    Task CompleteAsync(string key, string claim, string payload, CancellationToken ct);
+
     Task ReleaseAsync(string key, string claim, CancellationToken ct);
 }
 
@@ -400,9 +449,12 @@ public sealed record IdempotencyEntry(bool InProgress, string? Payload);
 /// clothes. §6.3 is therefore the only caller, because it is the only code
 /// holding the transaction open.
 ///
-/// No retention here, and the asymmetry with the store above is the point.
-/// Every entry there has a TTL; a marker is a row, and what deletes it is
-/// §9.5's purge on a window the service chooses.
+/// No retention here, and what is left of the asymmetry with the store above
+/// is the point. Neither port takes one on completion any more — the claim
+/// carries a single TTL, set when it is taken and never renewed — but a marker
+/// is a row and carries none at all: what deletes it is §9.5's purge on a
+/// window the service chooses. That is what makes the two expiries orderable
+/// rather than merely comparable, and the ordering is the guarantee.
 /// </summary>
 public interface IIdempotencyMarkerStore
 {
@@ -468,6 +520,15 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     // From IdempotencyRetention, because RetentionPolicy reads the same value
     // to refuse a marker window shorter than it — a 24 in two files agrees
     // until one of them is edited.
+    //
+    // Passed once, on the claim, and the completion below does not extend it.
+    // The window therefore runs from TryClaimAsync whatever the handler does,
+    // which is what puts the claim's window BEFORE the marker's stamp by
+    // construction rather than by a margin (ADR-038). Its START, and not its
+    // expiry: a handler outrunning the retention is stamped after the claim
+    // has already gone, and the two windows are still counted by two servers'
+    // clocks (#171). A command that runs for an hour spends an hour of its own
+    // replay window.
     private static readonly TimeSpan Retention = IdempotencyRetention.Window;
 
     // "null" and not the empty string. IdempotencyEntry carries a Payload the
@@ -569,7 +630,14 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
             return result;
         }
 
-        await store.CompleteAsync(key, claim, Capture(result), Retention, CancellationToken.None);
+        // No retention here, and the omission is the fix rather than a shorter
+        // call. Passing one re-armed the entry at the COMMIT, which is after
+        // §6.3 stamped its marker inside the transaction — so the claim
+        // outlived the marker by the commit's own tail, and the marker's
+        // window had to carry a margin for a lag nothing bounds. The store now
+        // keeps what the claim had left, so the outcome stays replayable for
+        // the remainder of that window rather than for a fresh one (ADR-038).
+        await store.CompleteAsync(key, claim, Capture(result), CancellationToken.None);
         return result;
     }
 
@@ -782,8 +850,10 @@ not the transaction committed, which the next callout is about.
 >
 > **The stored payload has the same problem one field over, and it is worse
 > because nothing throws.** `Capture` writes the success value with default
-> options, so the entry carries an implicit schema for the whole 24-hour
-> retention. Change the shape of a result DTO and a new pod reading an old
+> options, so the entry carries an implicit schema for as long as it lives —
+> up to the full 24 hours, since the window runs from the claim and a command
+> that ran for a minute has spent a minute of it. Change the shape of a result
+> DTO and a new pod reading an old
 > pod's entry either fails to deserialise it — a 500 on a retry of work that
 > committed — or, for an added or renamed member, **silently defaults it** and
 > replays a success that is quietly wrong. Neither is visible to a rolling
@@ -842,7 +912,8 @@ not the transaction committed, which the next callout is about.
 > against a `CompleteAsync` failure: every Redis entry has a TTL, so a held key
 > expires and the attempt after that claims a free key and runs the command a
 > second time — a postponement rather than a fix. It would also cost every
-> ordinary fault its retry for a full retention, which is a large availability
+> ordinary fault its retry for whatever the claim had left, which on a fault
+> raised early is very nearly the full retention and is a large availability
 > price for a postponement. A row has no TTL; what deletes it is §9.5's purge
 > on a window `RetentionPolicy` refuses to set below this store's own.
 >
@@ -852,7 +923,11 @@ not the transaction committed, which the next callout is about.
 > hand back. On the other, and it is the commoner one, the command succeeded
 > and `CompleteAsync` recorded its payload; the claim then expired at
 > `Retention` while the marker lived on, so a retry inside the marker's window
-> finds the outcome *gone* rather than never written.
+> finds the outcome *gone* rather than never written. **`Retention` is counted
+> from the claim and not from the completion**, because the completion
+> preserves the window rather than re-arming it (ADR-038) — so a command that
+> ran slowly reaches this state sooner than a fast one, the handler's runtime
+> having come out of the same window.
 > `CommandAlreadyCommittedException` answers §10.5's 409 saying the command was
 > applied and its result is no longer available — not that it was never
 > recorded, which would be false on the path most callers take. Read the
@@ -863,8 +938,11 @@ not the transaction committed, which the next callout is about.
 > marker, a retry after the claim expired ran the command again — which is
 > precisely why the guarantee was bounded by `Retention` and said so. It is now
 > refused for as long as the marker survives, which on the shipped windows is
-> six days longer. That is a loss against both a replay and a re-run, and it is
-> strictly better than the second order it replaces.
+> **at least** six days longer — the claim runs 24 hours from the claim, the
+> marker seven days from a stamp that is later, so the stretch between the two
+> expiries is six days plus however long the command took to commit. That is a
+> loss against both a replay and a re-run, and it is strictly better than the
+> second order it replaces.
 >
 > **The residual it leaves is one this section already priced, and PR-14 is
 > why.** With the outbox in place a re-run republishes the same fact, which is
@@ -902,8 +980,9 @@ precisely because nothing commits.
 > what happens to the rows, and it is still open when this behaviour makes up
 > its mind. Both sides break. A nested refusal may have written rows the outer
 > command goes on to commit, so releasing lets a retry write them twice; and a
-> nested *success* is completed here for 24 hours against work the outer
-> transaction may still roll back, so a retry replays a success for an order
+> nested *success* is completed here for the remainder of its claim's window
+> against work the outer transaction may still roll back, so a retry replays a
+> success for an order
 > that does not exist — which is worse than the duplicate, because the client
 > cannot see it. `IdempotencyBehavior` is registered outside
 > `TransactionBehavior` (§6.3), so a nested idempotent command genuinely lands
@@ -940,13 +1019,34 @@ find out what a command returned — presence is the whole answer, exactly as it
 is in the inbox one table over.
 
 ```csharp
-public sealed class IdempotencyMarker(string key, DateTimeOffset committedAt)
+// The default is what leaves CommittedAt to the database. The column carries a
+// SYSDATETIMEOFFSET() default and EF omits a property still holding its
+// sentinel from the insert, so new IdempotencyMarker(key) ages the row on the
+// same clock the purge reads its cutoff from (ADR-038). Passing a value
+// explicitly still writes it, which is what lets a fixture stage a marker at a
+// controlled age; that is the only caller that should.
+public sealed class IdempotencyMarker(string key, DateTimeOffset committedAt = default)
 {
     public string Key { get; private set; } = key;
 
     public DateTimeOffset CommittedAt { get; private set; } = committedAt;
 }
 ```
+
+**What makes that default reachable is `ValueGenerated.OnAdd` over it, and the
+mapping writes both calls rather than leaning on the one that implies the
+other.** The service's `IEntityTypeConfiguration` writes
+`.HasDefaultValueSql("SYSDATETIMEOFFSET()")` **and** `.ValueGeneratedOnAdd()`
+on the property: the first supplies the DDL default, the second is what leaves
+the column out of the insert while the property holds its sentinel and reads
+the generated value back. **The second call is redundant and is made anyway**,
+because EF's relational convention already infers `OnAdd` from a store default
+— measured on this solution's own model snapshot, where
+`ProductPrice.IsAvailable` is configured with `.HasDefaultValue(true)` and
+nothing else and records `.ValueGeneratedOnAdd()` all the same. Writing it puts
+the property on the record instead of resting on a convention the reader has to
+already know. Both services carry a migration for the default, and §4.5's
+scaffold ships it with the template.
 
 **The key is the whole primary key, and it is already scoped by
 construction** — `{subject}:{operation}:{commandId}` puts the caller, the
@@ -978,13 +1078,19 @@ suppresses one redelivery, this refuses every later attempt at a command that
 never committed.
 
 ```csharp
-public sealed class EfIdempotencyMarkerStore(DbContext db, TimeProvider clock) : IIdempotencyMarkerStore
+public sealed class EfIdempotencyMarkerStore(DbContext db) : IIdempotencyMarkerStore
 {
     public Task<bool> ExistsAsync(string key, CancellationToken ct) =>
         db.Set<IdempotencyMarker>().AnyAsync(marker => marker.Key == key, ct);
 
+    // No TimeProvider, and this type took one until the column default replaced
+    // it. The row's age was then the purging pod's clock minus a timestamp the
+    // writing pod stamped, across §15.3's three replicas — so the marker's
+    // retention floor had to bound the skew between them rather than remove it.
+    // Constructing the marker without a timestamp is what leaves the column to
+    // its SYSDATETIMEOFFSET() default (ADR-038).
     public async Task MarkAsync(string key, CancellationToken ct) =>
-        await db.Set<IdempotencyMarker>().AddAsync(new IdempotencyMarker(key, clock.GetUtcNow()), ct);
+        await db.Set<IdempotencyMarker>().AddAsync(new IdempotencyMarker(key), ct);
 }
 ```
 
@@ -1016,33 +1122,81 @@ window below the claim's own life leaves a stretch in which the key is claimable
 again and nothing remembers the commit. It reads the value rather than restating
 it: two 24s in two files agree until one of them is edited.
 
-> **The floor is the claim's window *plus* an allowance, and matching the claim
-> exactly is refused.** It reads as the exact fit with no waste in it, and it is
-> a knife-edge, because two independent things reorder the expiries.
+**Its statement is the third the purge composes, and it is the one that does
+not take a cutoff.** §9.4's and §9.5's are handed a `@Before` the service
+computed from its registered `TimeProvider`; this one is handed the window as a
+duration and works the cutoff out on the server:
+
+```sql
+-- Age alone, and for a stronger version of the inbox's reason: every row here
+-- records a command that committed, so there is no unfinished state a
+-- predicate could protect. What protects a live marker is the window.
+--
+-- The cutoff is computed HERE rather than handed in, which is the one place
+-- this statement departs from the two above it. CommittedAt is written by a
+-- SYSDATETIMEOFFSET() column default, so it is the server's own clock whichever
+-- replica ran the command — and a cutoff computed from a pod's clock would then
+-- age the row across two of them.
+-- Seconds and not days because the window is a caller-supplied TimeSpan;
+-- DATEADD takes an int, which the policy's ten-year ceiling clears.
+DELETE TOP (@BatchSize) FROM ordering.IdempotencyMarkers
+WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
+```
+
+> **The floor is the claim's window exactly, and it was the claim's window
+> *plus* an allowance until both of the things that reordered the two expiries
+> were closed.** Equality reads as the exact fit with no waste in it, and it
+> was a knife-edge for two reasons that were independent of each other and of
+> the numbers. Both are recorded here rather than deleted with the allowance,
+> because a reader who does not know why it existed is a reader who re-adds it.
 >
-> **The windows do not start at the same event.** §6.3 stamps `CommittedAt`
-> *inside* the transaction, before the commit; §8.5 re-arms the claim in
-> `CompleteAsync` only after that transaction has returned. So the claim's
-> window starts later than the marker's by the commit's own tail — milliseconds
-> ordinarily, and unbounded in principle, since a stall between those points
-> stretches it — and Redis outlives the marker by exactly that lag even with
-> perfect clocks.
+> **The windows did not start at the same event, and the completion is what
+> closed that.** §6.3 stamps `CommittedAt` *inside* the transaction, before the
+> commit; §8.5 re-armed the claim in `CompleteAsync`, which runs only after
+> that transaction has returned. The claim's window therefore started later
+> than the marker's by the commit's own tail — milliseconds ordinarily, and
+> unbounded in principle, since a stall between those points stretches it — so
+> Redis outlived the marker by exactly that lag even with perfect clocks.
+> `CompleteAsync` now preserves what the claim had left, so the window starts
+> at `TryClaimAsync`, which is *earlier* than the stamp by construction. **What
+> that cost is the replay window**, and this section opens with it: an outcome
+> stays replayable for the remainder of the claim's window rather than for a
+> fresh one, so a slow command spends its own.
 >
-> **And they are not counted by the same clock.** The marker's age is the
-> purging pod's clock minus a timestamp the writing pod stamped, and §15.3 runs
-> three replicas of each service; a purger leading the writer by δ deletes the
-> marker δ early. Either term alone lets the claim expire into a table that has
-> forgotten the commit, and the next retry runs the command again.
+> **And they were not counted by the same clock, which the column default
+> closed.** The marker's age was the purging pod's clock minus a timestamp the
+> writing pod stamped, and §15.3 runs three replicas of each service; a purger
+> leading the writer by δ deleted the marker δ early. `CommittedAt` now
+> defaults to `SYSDATETIMEOFFSET()` and the statement above computes its cutoff
+> in SQL, so both ends of the comparison are the database's own clock and there
+> is no skew term left to bound. **What that cost is the substitutable clock**:
+> this is the one retention window a test host cannot move by registering a
+> fake `TimeProvider`, and its tests stage rows at explicit ages against the
+> real clock instead — comfortably either side of the window, so what they
+> assert is the predicate rather than arithmetic near a boundary.
 >
-> `IdempotencyRetention.MarkerLeadAllowance` is five minutes and bounds their
-> **sum**, chosen for the asymmetry of being wrong rather than from a
-> measurement — too generous costs a row kept longer, too mean is the duplicate.
-> **It bounds both terms rather than removing either, and they need different
-> fixes**: ageing the row from the database's clock removes the skew
-> ([#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167)),
-> while not re-arming the claim at completion removes the lag
-> ([#168](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168))
-> at the cost of what §8.5 promises about how long an outcome stays replayable.
+> **What is left is a *start* ordering that holds by construction rather than
+> by a margin.** The claim is taken at `t0` and the marker is stamped at some
+> `t1` no earlier than it, on the same thread in the same dispatch — that much
+> nothing can falsify. The rest is arithmetic laid over it: the claim expires
+> at `t0 + Window`, the marker survives until `t1 + IdempotencyWindow`, and for
+> any `IdempotencyWindow` at least as long as `Window` the marker outlives the
+> claim, so equality is admitted rather than refused. **Two assumptions carry
+> that arithmetic and neither is construction.** The two sums are counted by
+> two servers' clocks, so it needs their rates to agree
+> ([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171));
+> and a handler outrunning `Window` reaches the stamp after `t0 + Window` has
+> already passed, leaving a stretch covered by neither — the overrun above,
+> whose damage the claim token bounds rather than closes.
+> `IdempotencyRetention.MarkerLeadAllowance` is
+> gone and `MarkerFloor` is `Window` unchanged — still a separate member,
+> because what it names is a *relationship* between two windows and not a
+> duration, and the next change to either is a change to it. A margin left
+> standing for two terms that no longer exist would be unexplained slack, which
+> is the shape a later reader deletes for the wrong reason
+> ([#167](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167),
+> [#168](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168),
+> ADR-038).
 
 > **The uniqueness of the key is a backstop and not the mechanism.** Two
 > attempts that somehow reach the write concurrently produce a constraint
@@ -1100,6 +1254,27 @@ internal sealed class RedisIdempotencyStore(
     // Compare and act in ONE script, exactly as RedisDistributedLock's release
     // does and for the same reason: a check and an act that are two operations
     // are two operations the claim can expire between.
+    //
+    // KEEPTTL is where the ordering is actually bought. This wrote the value
+    // with a fresh retention, which started the entry's window at the COMMIT
+    // while §6.3 stamps its marker inside the transaction that precedes it —
+    // so the claim outlived the marker by the commit's own tail. Preserving
+    // what the claim had left starts the window at the claim, which is earlier
+    // than the stamp by construction, and this term needs no margin at all
+    // (ADR-038).
+    private const string CompleteScript =
+        """
+        local current = redis.call('get', KEYS[1])
+        if current == false or string.sub(current, 1, string.len(ARGV[1])) ~= ARGV[1] then
+            return 0
+        end
+        redis.call('set', KEYS[1], ARGV[2], 'KEEPTTL')
+        return 1
+        """;
+
+    // The same comparison, and the delete is the worse half of it to get
+    // wrong: an unconditional one frees a SUCCESSOR's live claim rather than
+    // corrupting the record of a duplicate.
     private const string ReleaseScript =
         """
         local current = redis.call('get', KEYS[1])
@@ -1109,8 +1284,10 @@ internal sealed class RedisIdempotencyStore(
         return 0
         """;
 
-    // GetAsync / CompleteAsync / ReleaseAsync follow the same key shaping,
-    // and the last two evaluate a script rather than writing directly.
+    // GetAsync / CompleteAsync / ReleaseAsync follow the same key shaping, and
+    // the last two evaluate the scripts above rather than writing directly. A
+    // refused write is logged and never thrown: the caller is either already
+    // reporting a fault or has already committed.
 }
 ```
 

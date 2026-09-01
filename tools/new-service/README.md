@@ -81,7 +81,8 @@ everything the delivery plan has built into the template so far:
 `DbContext` and conventions, `EfUnitOfWork`, the connection factory, the
 readiness checks, the §7.4 migrator host, the `InitialCreate` migration that
 creates the schema and the `AddOutbox`, `AddInbox`,
-`AddOutboxRetentionIndex` and `AddIdempotencyMarkers` ones beside it, §9.4's
+`AddOutboxRetentionIndex`, `AddIdempotencyMarkers` and
+`IdempotencyMarkerCommittedAtDefault` ones beside it, §9.4's
 outbox with its dispatcher and allow-list mapper, §9.5's inbox filter, §8.5's
 durable idempotency marker and the retention purge over all three of their
 tables, the §9 bus
@@ -90,8 +91,15 @@ registration — a scaffolded host refuses to start without
 scheme, both Dockerfiles, the Compose pair, and the architecture gates of
 [§4.2](../../docs/backend-architecture/04-solution-structure.md).
 
-The service builds and its seventy-nine tests pass before you have written a
-line, and thirty-six of them run against real SQL Server and RabbitMQ
+**The last of those migrations travels for a stronger reason than the table
+it alters.** The column default and the SQL cutoff that reads it are two
+halves of one guarantee, so a service scaffolded with the marker table and
+without the default ages its rows on the writing pod's clock while the purge
+ages them on the server's — the skew that migration exists to remove, shipped
+to every new service by omission.
+
+The service builds and its eighty-three tests pass before you have written a
+line, and forty of them run against real SQL Server and RabbitMQ
 containers:
 the migrator's exit code, §7.1's two-key boundary, the readiness probe — 200
 only once the bus connects — `EfUnitOfWork`'s commit, rollback and retry
@@ -103,14 +111,22 @@ cap and loud failure on a `Local` row with no registered handler.
 Those two counts are measured rather than estimated, and they move whenever a
 PR adds to the template — they read forty-one and sixteen until PR-18
 recounted them against a rendered service, three PRs after they stopped being
-true, fifty-six until PR-22 did it again, and seventy-eight until PR-32 rendered a
-service carrying §8.5's marker suite.
+true, fifty-six until PR-22 did it again, seventy-eight until PR-32 rendered a
+service carrying §8.5's marker suite, and seventy-nine until PR-33 put four
+more into it across two of its review rounds.
 
 **Adding to the number is not recounting it.** PR-22 put three tests into the
 template and the total moved by four, so the only way to know this pair is to
 render `Yankee` at 5199 and run all three of its suites — which is what PR-32
-did, twice: 1, 18 and 60. The thirty-six is the `Category=Integration` count now,
-which is a filter anyone can rerun rather than a tally somebody kept.
+did, twice: 1, 18 and 60. PR-33 did the same and read 1, 18 and 64; its four
+were the marker's database-generated stamp, the default constraint behind it,
+the scoped inbox reader's own subject test and the skewed-clock pass that
+separates the marker's cutoff from the other two, all of which land in
+`Yankee.Api.Tests` and all of which want a container. **It rendered twice**,
+because the fourth arrived in a later review round than the other three — the
+same reason PR-32 rendered twice, one pull request on. The forty is the
+`Category=Integration` count, which is a filter anyone can rerun rather than a
+tally somebody kept.
 
 **The outbox arrives wired and empty**, which is the state to expect: the
 allow-list mapper has no entries, so every domain event this service raises is

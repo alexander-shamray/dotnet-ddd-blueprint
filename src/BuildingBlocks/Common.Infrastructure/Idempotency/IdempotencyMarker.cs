@@ -20,8 +20,20 @@ namespace Common.Infrastructure.Idempotency;
 /// guarantee §8.5 opens with is now bounded by that window rather than by a
 /// Redis TTL.
 /// </para>
+/// <para>
+/// <b>It is stamped by the <em>database</em>, and the default parameter is how
+/// the caller says so.</b> The column carries a
+/// <c>SYSDATETIMEOFFSET()</c> default and EF omits it from the insert while the
+/// property holds its sentinel — so
+/// <c>new IdempotencyMarker(key)</c> ages the row on the same clock the purge
+/// reads its cutoff from, and no pod's <c>TimeProvider</c> is party to it
+/// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167">#167</see>,
+/// ADR-038). Passing a value explicitly still writes it, which is what lets a
+/// fixture stage a marker at a controlled age; that is the only caller that
+/// should.
+/// </para>
 /// </remarks>
-public sealed class IdempotencyMarker(string key, DateTimeOffset committedAt)
+public sealed class IdempotencyMarker(string key, DateTimeOffset committedAt = default)
 {
     public string Key { get; private set; } = key;
 

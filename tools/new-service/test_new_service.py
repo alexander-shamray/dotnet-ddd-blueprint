@@ -30,6 +30,7 @@ from new_service import (
     Plan,
     ScaffoldError,
     apply,
+    environment_keys,
     load_scan_gate,
     main,
     plan,
@@ -1330,6 +1331,96 @@ class RefusesToRun(unittest.TestCase):
             with self.assertRaises(ScaffoldError):
                 render(repo_root=root)
 
+    def test_a_name_that_collides_with_an_infrastructure_connection_key(self):
+        # §7.1's runtime key is ConnectionStrings__<Service> and the rename is
+        # what writes it, while §14.1's api block already declares
+        # ConnectionStrings__RabbitMq, ConnectionStrings__RedisCache and
+        # ConnectionStrings__RedisCoordination beside it. A service named after
+        # one of those renders the same mapping key twice — and this was the
+        # sixth bad name and the only one whose failure was silent: the rename
+        # worked, the straggler check saw no template token, the YAML stayed
+        # valid, and one of the two connection strings was discarded by
+        # whatever read the file.
+        for name in ("RabbitMq", "RedisCache", "RedisCoordination"):
+            with self.assertRaises(ScaffoldError) as raised:
+                render(name=name)
+            self.assertIn(f"ConnectionStrings__{name}", str(raised.exception), name)
+
+    def test_a_name_that_collides_with_an_infrastructure_connection_key_in_another_casing(self):
+        # The same defect through a spelling the first fix did not cover, and a
+        # test of its own rather than more names in the loop above, because the
+        # two halves of the collision differ: those three render one key twice,
+        # while these render two YAML keys that .NET's configuration reads as
+        # one. §14.2 states the rule in the one line where it costs an Aspire
+        # resource name — configuration is case-insensitive but not
+        # punctuation-insensitive — so the refusal has to compare casefolded or
+        # it is watching the spelling rather than the key.
+        #
+        # `NAME` admits all of these: `^[A-Z][A-Za-z0-9]*$` says nothing about
+        # the capitals after the first. `RabbitMQ` is the product's own
+        # spelling and the likeliest of the seven to be typed by somebody who
+        # is not thinking about this file at all.
+        #
+        # Every pair below was verified by rendering before it was asserted
+        # about — the render was read back and BOTH keys were found in the api
+        # block's mapping — because "`RABBITMQ` presumably behaves like
+        # `Rabbitmq`" is an assumption, and the rename is exactly the step that
+        # could have made it false.
+        for name, declared in (
+            ("Rabbitmq", "ConnectionStrings__RabbitMq"),
+            ("RABBITMQ", "ConnectionStrings__RabbitMq"),
+            ("RabbitMQ", "ConnectionStrings__RabbitMq"),
+            ("Rediscache", "ConnectionStrings__RedisCache"),
+            ("REDISCACHE", "ConnectionStrings__RedisCache"),
+            ("Rediscoordination", "ConnectionStrings__RedisCoordination"),
+            ("REDISCOORDINATION", "ConnectionStrings__RedisCoordination"),
+        ):
+            with self.assertRaises(ScaffoldError) as raised:
+                render(name=name)
+            message = str(raised.exception)
+            # BOTH spellings, because a message naming only one of them reads
+            # as wrong to the person who typed the other and cannot find it in
+            # the file — and the case-insensitivity is the whole reason this is
+            # a collision at all, so a message that omits it is a refusal the
+            # reader has no way to check.
+            self.assertIn(f"ConnectionStrings__{name}", message, name)
+            self.assertIn(declared, message, name)
+            self.assertIn("case-insensitive", message, name)
+
+    def test_the_duplicate_key_check_is_looking_at_the_environment_mappings(self):
+        # The subject test for the refusal above, and the reason it is a
+        # predicate rather than those three names: the check is only as good as
+        # the keys handed to it, and a pattern that stops matching the
+        # template's shape hands it nothing — over which every name there is
+        # passes. So this asserts what environment_keys extracted, not what the
+        # caller concluded from it.
+        compose = render().updated["deploy/compose/docker-compose.yml"].replace("\r\n", "\n")
+        lines = compose.split("\n")
+        # Sliced the way update_compose slices, with the script's own reader:
+        # §14.1's pair rule renders a migrator and an api, so the block is the
+        # two service keys from the migrator to the third one after it.
+        starts = [i for i, line in enumerate(lines) if new_service.SERVICE_KEY.fullmatch(line)]
+        at = starts.index(lines.index(f"  {PROBE.lower()}-migrator:"))
+        end = starts[at + 2] if at + 2 < len(starts) else len(lines)
+        block = "\n".join(lines[starts[at]:end])
+
+        mappings = environment_keys(block)
+
+        # Two, one per service, and each with something in it. Flattening them
+        # would be weaker as well as wrong — a key in both is two containers
+        # agreeing about a variable, not one saying a thing twice.
+        self.assertEqual(2, len(mappings), block)
+        for mapping in mappings:
+            self.assertTrue(mapping, block)
+
+        keys = [key for mapping in mappings for key in mapping]
+        # Both halves of the collision, read out of the rendered block itself:
+        # the key the rename writes from the service's name, and one §14.1
+        # wrote long before it. Lose either and the check above is watching a
+        # surface the defect is not on.
+        self.assertIn(f"ConnectionStrings__{PROBE}", keys, block)
+        self.assertIn("ConnectionStrings__RabbitMq", keys, block)
+
     def test_a_port_docker_cannot_publish(self):
         # Collision was the only check once, so -1 and 70000 planned happily
         # and were written into Compose.
@@ -1731,7 +1822,7 @@ class TheCommandLine(unittest.TestCase):
             # `6 updated` and not 7: this root has no `.github/`, so §15.1's
             # allow-list step degrades — which is `TheAllowListStep`'s subject
             # and is asserted there from both sides.
-            self.assertIn("59 files created, 6 updated", out)
+            self.assertIn("61 files created, 6 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

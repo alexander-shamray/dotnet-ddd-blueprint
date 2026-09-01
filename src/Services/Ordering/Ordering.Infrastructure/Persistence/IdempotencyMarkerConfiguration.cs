@@ -46,6 +46,34 @@ internal sealed class IdempotencyMarkerConfiguration : IEntityTypeConfiguration<
             // identity; neither is promised to be ASCII by anything.
             .UseCollation("Latin1_General_BIN2");
 
+        // Stamped by the database and never by a pod (#167, ADR-038). Both
+        // ends of the comparison the purge makes are then the one clock: this
+        // default writes the row, and RetentionPurgeService computes its cutoff
+        // with SYSDATETIMEOFFSET() in the same statement that reads it. The
+        // marker is the only one of the three retention tables that gets this,
+        // because it is the only one whose window is a correctness setting —
+        // the outbox's and the inbox's stay on the registered TimeProvider a
+        // test host can substitute (§9.5).
+        //
+        // What makes the default reachable is ValueGenerated.OnAdd over it: EF
+        // omits a property still holding its sentinel from the insert and reads
+        // the generated value back, so a marker constructed WITH a timestamp
+        // still writes it — which is what lets a fixture stage one at a
+        // controlled age.
+        //
+        // The call below is REDUNDANT and is made anyway. EF's relational
+        // convention derives OnAdd from a store default, measured on this
+        // solution rather than read off the documentation: two properties in
+        // Ordering's model configure a default and nothing else, and the
+        // snapshot records ValueGeneratedOnAdd beside each. Spelling it here
+        // states the behaviour the sentinel argument above depends on at the
+        // one site that depends on it, rather than leaving a correctness
+        // property to a convention a later EF version could narrow.
+        builder
+            .Property(marker => marker.CommittedAt)
+            .HasDefaultValueSql("SYSDATETIMEOFFSET()")
+            .ValueGeneratedOnAdd();
+
         // The purge's predicate (§8.5). Non-covering and non-filtered, like the
         // inbox's and for the same reason: every row here records work that
         // committed, so there is no unfinished subset to narrow to, and the

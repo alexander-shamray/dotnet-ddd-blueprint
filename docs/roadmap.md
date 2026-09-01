@@ -126,7 +126,7 @@ PR-11 has since landed, and it changes what PR-18 is an estimate *of* rather
 than what it costs. The scaffold renders the wiring and none of the domain
 ([§4.5](backend-architecture/04-solution-structure.md)): a new service arrives
 with its five projects, its migrator, its schema migration, both images, its
-Compose pair and seventy-nine passing tests, and with no aggregate, no command,
+Compose pair and eighty-three passing tests, and with no aggregate, no command,
 no query and no endpoint. So PR-18's three days are now three days of Ordering's
 *domain* — which is the shape the estimate always assumed, and was the first
 thing on this page that could be checked against a delivered pull request rather
@@ -277,13 +277,14 @@ decision rather than a gap.**
 | **30** | `fix(ordering): the saga's transactional outbox` | — | — | — |
 | **31** | `fix(messaging): the broker has a per-service identity` | — | — | — |
 | **32** | `fix(common): §8.5's durable idempotency marker` | — | — | — |
+| **33** | `fix(common): the marker and its claim are ordered by construction` | — | — | — |
 
 **Nothing in this file would produce a number for them.** Every estimate above
 was quoted before any code existed, against a specification that was already
 finished, and *What these numbers are* says outright that none has since been
 re-priced against a pull request that has actually landed. **Not one of them
 was priced before it was built** — PR-28 and PR-29 were rowed after they
-landed, and PR-30, PR-31 and PR-32 are each rowed by the pull request doing the
+landed, and every row after them is written by the pull request doing the
 work — so a figure
 here would be either invented, which the *Basis* section's own terms forbid
 because an invented day is not an argument about relative size, or an actual

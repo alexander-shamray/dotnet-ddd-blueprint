@@ -1862,10 +1862,25 @@ degrades the filtered index scan.
 -- alone would delete the abandoned rows (Attempts >= 10, never processed)
 -- that the §13.6 alert exists to surface — turning permanent data loss into
 -- a clean, empty table.
-DELETE TOP (5000) FROM ordering.OutboxMessages
+--
+-- The cutoff arrives as a parameter and is not computed on the server:
+-- RetentionPurgeService works @Before out from the registered TimeProvider,
+-- which is the clock a test host substitutes. §8.5's marker statement is the
+-- one that departs from this, and says why.
+DELETE TOP (@BatchSize) FROM ordering.OutboxMessages
 WHERE ProcessedAt IS NOT NULL
-    AND ProcessedAt < DATEADD(day, -7, SYSDATETIMEOFFSET());
+    AND ProcessedAt < @Before;
 ```
+
+**Correction, and it is not part of the idempotency change beside it.** This
+sample printed `TOP (5000)` and `DATEADD(day, -7, SYSDATETIMEOFFSET())` from
+before `RetentionPurgeService` existed, and the shipped statement has taken
+both as parameters since it was built — the batch size from `RetentionPolicy`
+and the cutoff from the registered clock. Nothing depended on the difference
+until §8.5 gained a third statement that computes its cutoff in SQL *on
+purpose*; a chapter printing the server clock for all three would make that
+deliberate exception unreadable. §9.5's sample carried the same two literals
+and is corrected with it.
 
 ## 9.5 Idempotent consumers — the inbox
 
@@ -1938,8 +1953,12 @@ degrades with it:
 -- Older than the broker's maximum redelivery window. Pruning sooner would
 -- let a late redelivery through as if it were new, which is exactly the
 -- duplicate this table exists to stop.
-DELETE TOP (5000) FROM ordering.InboxMessages
-WHERE HandledAt < DATEADD(day, -7, SYSDATETIMEOFFSET());
+--
+-- Batch size and cutoff are parameters, for the reason §9.4's sample states:
+-- the window is a registered RetentionPolicy value and @Before comes from the
+-- registered TimeProvider a test host can substitute.
+DELETE TOP (@BatchSize) FROM ordering.InboxMessages
+WHERE HandledAt < @Before;
 ```
 
 The window is a real constraint, not a round number: it must exceed the
@@ -1999,6 +2018,39 @@ committed. That is why `RetentionPolicy.IdempotencyWindow` is the one window
 with a **floor** — it may not be shorter than the Redis claim it backs up, or
 the duplicate returns at a boundary set by a retention setting
 ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
+Matching the claim exactly is admitted, and that is the floor's whole shape
+rather than a rounding of it: the claim is taken before the marker is stamped,
+so the marker outlives it for every window at least as long. **Only the two
+*start* events are ordered by construction, and the conclusion drawn from them
+carries two assumptions** — that Redis's clock and this server's tick at the
+same rate, since the two windows are counted by one each
+([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)),
+and that the marker reaches the database inside the claim's window, which
+[§8.5](08-caching-redis.md) carries as a residual of its own
+([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+
+**Its statement is also the one of the three that computes its own cutoff**,
+and the departure is deliberate. The two above are handed a `@Before` this
+service worked out from the registered `TimeProvider`; the marker's takes the
+window as a duration in seconds and subtracts it from `SYSDATETIMEOFFSET()`,
+because `CommittedAt` is written by a column default and is therefore the
+database's own clock whichever replica ran the command — and ageing a row
+across two clocks is what the floor used to have to bound.
+[§8.5](08-caching-redis.md) prints the statement and argues the
+trade: the outbox's and the inbox's windows are housekeeping, where a clock a
+test host can move is worth more than one nothing can, and the marker's window
+is a correctness property, where one clock on both ends is worth more than a
+substitutable one.
+
+**What the carve-out costs is smaller than it reads, and saying so is cheaper
+than letting a reader discover it.** No retention test here substitutes the
+clock at all: every one of them reaches a window by *ageing a row* instead,
+which is simpler and closer to what the table actually looks like. The marker's
+do the same, at ages far enough either side of the window that nothing rests on
+the staging clock and the server's agreeing to the second. So what the marker
+gives up is a seam nothing currently uses. The argument for keeping it on the
+other two is that theirs are the windows this chapter tells a reader to check
+against their broker — not that a test is exercising the substitution today.
 
 Two of its details are decisions rather than defaults. It **logs and swallows**
 a failed pass, because an exception out of `ExecuteAsync` stops the host and a
@@ -2103,9 +2155,17 @@ public sealed class InboxFilter<T>(
         await next.Send(context);
 
         // Added AFTER the consumer, not before it — see the trap below. The
-        // registered clock, never DateTimeOffset.UtcNow: the purge reads its
-        // cutoff from TimeProvider, and two clocks for one window make a new
-        // row look expired or an old one immortal.
+        // registered clock, never DateTimeOffset.UtcNow: the purge computes
+        // this table's cutoff from TimeProvider, and two clocks for one window
+        // make a new row look expired or an old one immortal.
+        //
+        // One clock per window is the rule; WHICH clock is a choice, and the
+        // marker table makes the other one. Its window is a correctness
+        // property rather than housekeeping, so both ends of its comparison are
+        // the database's own — a column default writes the row and the purge
+        // subtracts from SYSDATETIMEOFFSET() (§8.5, ADR-038). Here a
+        // substitutable clock is worth more, because nothing about the inbox
+        // breaks when a test moves it.
         db.Set<InboxMessage>().Add(new InboxMessage(messageId, endpoint, clock.GetUtcNow()));
         await db.SaveChangesAsync(context.CancellationToken);
     }
@@ -3848,10 +3908,17 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork, TimeProvid
                     AND Reason = @Reason);
             """,
             // The registered clock, not SYSDATETIMEOFFSET(), which this sample
-            // also printed. RetentionPurgeService already computes its cutoff
-            // from TimeProvider for the reason that applies here: a test host
-            // substitutes the clock, and a row written on the server's wall
-            // clock is one no substituted clock can reason about.
+            // also printed. RetentionPurgeService computes two of its three
+            // cutoffs from TimeProvider for the reason that applies here: a
+            // test host substitutes the clock, and a row written on the
+            // server's wall clock is one no substituted clock can reason about.
+            //
+            // Its third statement — §8.5's marker — deliberately does the
+            // opposite, and the carve-out is narrower than it reads. That row
+            // is written at one end and deleted at the other, and the interval
+            // between them is a correctness property, so one clock on both ends
+            // beats a movable one (ADR-038). RaisedAt has no such pairing:
+            // nothing purges it, and what reads it is §13.6 against wall time.
             new { command.OrderId, command.Reason, RaisedAt = clock.GetUtcNow() },
             ct);
 
