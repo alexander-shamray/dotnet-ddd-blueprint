@@ -78,8 +78,12 @@ internal sealed class RedisIdempotencyStore(
     // outlived the marker by the commit's tail, ordinarily milliseconds and
     // unbounded in principle. Preserving what the claim had left makes the
     // claim's window start at the claim, which is earlier than the stamp by
-    // construction, so the marker outlives the claim with no margin needed for
-    // this term at all.
+    // construction — so this term needs no margin at all.
+    //
+    // That is the start ordering and not the expiry ordering, which #168 alone
+    // does not buy: the marker outliving the claim additionally wants the two
+    // windows counted at one rate (#171) and the handler to finish inside this
+    // one (#127). IdempotencyRetention.MarkerFloor argues both.
     private const string CompleteScript =
         """
         local current = redis.call('get', KEYS[1])
@@ -188,8 +192,16 @@ internal sealed class RedisIdempotencyStore(
         // No retention to pass, because the script preserves the claim's own.
         // What the caller gets is the remainder of the window the claim opened
         // rather than a fresh one starting at the commit — the trade #168
-        // records, and the reason the marker's expiry now leads the claim's by
-        // construction instead of by an allowance.
+        // records, and the reason the claim's window now STARTS before §6.3's
+        // stamp by construction instead of by an allowance.
+        //
+        // Its start, and not its expiry. That the marker then outlives the
+        // claim is a conclusion drawn from the ordering rather than the
+        // ordering itself, and it assumes two things this line cannot supply:
+        // that the two windows are counted at one rate, where Redis counts
+        // this one and SQL Server the marker's (#171), and that the handler
+        // finishes inside this window at all (#127). IdempotencyRetention's
+        // MarkerFloor argues both.
         RedisResult written = await redis
             .GetDatabase()
             .ScriptEvaluateAsync(
