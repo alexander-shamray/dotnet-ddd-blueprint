@@ -157,7 +157,10 @@ csharp_new_line_before_members_in_anonymous_types = true
 # only one in this file's remit that is.
 
 # --- .NET / C# style ---
-# At warning, so EnforceCodeStyleInBuild fails on it. docs/style-guide.md
+# At warning, which is the level EnforceCodeStyleInBuild acts on — and it is
+# TreatWarningsAsErrors that turns the resulting warning into a failed build.
+# The two are one policy and not one switch; `Directory.Build.props` states
+# the split, and this line used to credit the wrong half. docs/style-guide.md
 # states this one without exception and notes it binds source only. The
 # samples carry exactly two `using` lines, both `using static` (§9.6's saga
 # imports Endpoints, §12.4's subject suite imports Principals), and both sit
