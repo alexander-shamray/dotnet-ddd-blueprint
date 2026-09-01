@@ -158,6 +158,48 @@ public class JwtAuthenticationTests
         context.Result.ShouldBeNull();
     }
 
+    [Fact]
+    public async Task A_token_exactly_at_the_bound_is_accepted_and_a_second_more_is_not()
+    {
+        // The boundary, both sides, because a ceiling asserted only from the
+        // outside is a ceiling that could be anywhere below the value tested.
+        // The comparison is `<=`, so the bound itself is admitted.
+        TokenValidatedContext atBound = Validated(AuthenticationExtensions.RevocationBound);
+        await Options().Events.OnTokenValidated(atBound);
+        atBound.Result.ShouldBeNull();
+
+        TokenValidatedContext overBound =
+            Validated(AuthenticationExtensions.RevocationBound + TimeSpan.FromSeconds(1));
+        await Options().Events.OnTokenValidated(overBound);
+        overBound.Result?.Failure.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void The_longest_window_this_guard_admits_is_the_bound_plus_the_skew()
+    {
+        // The skew is spent twice and this is where the cost is measured rather
+        // than argued. A token admitted at the ceiling has RevocationBound left;
+        // ValidateLifetime then accepts it until `exp` plus ClockSkew — so the
+        // longest acceptance window is 360 seconds, where ADR-033's bound for a
+        // CONFORMING realm is 330. Both numbers are real and they answer
+        // different questions, which is why this asserts the sum rather than
+        // quietly restating the smaller one.
+        //
+        // Capping the ceiling at AccessTokenLifetime would make the two equal
+        // and was rejected: a host lagging the issuer by any amount reads a
+        // fresh 300-second token as having more than 300 left, so every token a
+        // correct realm issues would be refused. The assertion below is what
+        // makes that trade visible instead of implicit.
+        TimeSpan skew = Options().TokenValidationParameters.ClockSkew;
+
+        (AuthenticationExtensions.RevocationBound + skew).ShouldBe(TimeSpan.FromSeconds(360));
+
+        AuthenticationExtensions.RevocationBound.ShouldBeGreaterThan(
+            AuthenticationExtensions.AccessTokenLifetime,
+            "the ceiling has to exceed the lifetime by the drift a lagging host reads into it, " +
+            "or a correct realm's tokens are refused");
+    }
+
     /// <summary>
     /// The context <c>OnTokenValidated</c> is handed, carrying a token with
     /// <paramref name="remaining"/> left to live.

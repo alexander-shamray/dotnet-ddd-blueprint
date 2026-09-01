@@ -189,19 +189,19 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_marker_is_purged_on_age_alone()
+    public async Task An_unclaimed_marker_past_its_window_is_purged_and_a_recent_one_is_not()
     {
-        // The inbox's asymmetry one table over, and the marker's window is the
-        // one that is not housekeeping: a purged marker loses the row that
-        // refuses a retry of a command that already committed. Age alone,
-        // because every row here records work that finished — so what protects
-        // a live marker is the window and nothing else.
+        // The window half of the predicate, isolated. Neither key here was ever
+        // claimed, so the store reports both unheld and what separates them is
+        // age alone — which is a statement about this test's staging, not about
+        // the pass: since ADR-039 a marker goes only when it is past its window
+        // AND its claim is gone. The test above it supplies the other half.
         //
         // Two rows rather than one, which is the whole point. The combined pass
         // below stages a single already-old marker, so a DELETE with no WHERE —
         // or one that ignored CommittedAt — would satisfy it: every row it is
-        // given is purgeable. This is the test that fails when the predicate
-        // goes, and the recent row is what makes it one.
+        // given is purgeable. This is the test that fails when the window drops
+        // out of the predicate, and the recent row is what makes it one.
         await fixture.StageIdempotencyMarkersAsync(
             new IdempotencyMarker(Key(), LongAgo),
             new IdempotencyMarker(Key(), Recently));

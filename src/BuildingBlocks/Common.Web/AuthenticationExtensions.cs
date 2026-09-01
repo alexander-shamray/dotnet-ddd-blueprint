@@ -196,11 +196,33 @@ public static class AuthenticationExtensions
                 // The cost of measuring against our own clock is stated rather
                 // than hidden: a host lagging the issuer sees a fresh token as
                 // having more life left than it has, so the ceiling is the
-                // BOUND — lifetime plus skew — and not the lifetime. That
-                // tolerates exactly the drift §11.3 already declares tolerable
-                // and no more. A realm at 330 seconds passes and a realm at 320
-                // passes; five hours, thirty minutes and six minutes do not,
-                // which is the class of misconfiguration this closes.
+                // BOUND — lifetime plus skew — and not the lifetime. A realm at
+                // 330 seconds passes and a realm at 320 passes; five hours,
+                // thirty minutes and six minutes do not, which is the class of
+                // misconfiguration this closes.
+                //
+                // THE SKEW IS THEREFORE SPENT TWICE, and that is a real cost
+                // rather than an oversight. A token admitted at the ceiling has
+                // 330 seconds left, and ValidateLifetime below then accepts it
+                // until `exp` plus another 30 — so the longest window this
+                // guard admits is 360 seconds, not ADR-033's 330. That bound is
+                // unchanged for a CONFORMING realm, where it is produced by the
+                // realm's 300 and this ClockSkew and this check never binds at
+                // all; what the 360 bounds is a non-conforming token's
+                // acceptance, where the alternative was hours.
+                //
+                // Capping at AccessTokenLifetime would make it exactly 330 and
+                // was rejected, because it is a knife-edge rather than a
+                // tighter bound. A host whose clock lags the issuer's by δ
+                // reads a fresh 300-second token as having 300 + δ left, so any
+                // δ above zero refuses every token a correct realm issues —
+                // and the 30 seconds that would absorb it is the very term the
+                // cap removes. The exact form needs `exp - iat`, which the
+                // paragraph above declines for a reason that has not changed.
+                //
+                // Measured rather than reasoned about: the two boundary cases
+                // and the 360 are pinned by JwtAuthenticationTests, so the
+                // number in this comment fails a test when it stops being true.
                 //
                 // Refused, not logged. The posture is the one the authority
                 // guard above already takes for metadata over plain HTTP: a

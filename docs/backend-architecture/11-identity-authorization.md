@@ -305,14 +305,32 @@ because `ValidateLifetime` refuses a token without one before the check runs.
 **The inexact form costs something, and the ceiling is where that cost is
 paid.** A host whose clock lags the issuer's sees a fresh token as having more
 life left than it has, so what is refused is life beyond the *bound* — lifetime
-plus skew — rather than beyond the lifetime. That tolerates exactly the drift
-the skew above already declares tolerable and no more: a realm at 330 seconds
-passes and one at 320 passes; five hours, thirty minutes and six minutes do
-not, which is the class of misconfiguration this catches. **It is refused
+plus skew — rather than beyond the lifetime: a realm at 330 seconds passes and
+one at 320 passes; five hours, thirty minutes and six minutes do not, which is
+the class of misconfiguration this catches. **It is refused
 rather than logged**, which is the posture `RequireHttpsMetadata` and the
 authority guard below already take — a realm above the bound 401s every request
 instead of quietly widening the window between a revocation and its effect, and
 that availability cost is taken deliberately.
+
+> **The skew is spent twice, so the window this control admits is 360 seconds
+> and not the 330 above.** A token admitted at the ceiling has
+> `RevocationBound` left to live, and `ValidateLifetime` then accepts it until
+> `exp` plus `ClockSkew` again. **That does not move the bound this section
+> states**: for a conforming realm the 330 is produced by the realm's 300 and
+> this platform's 30, and the check never binds at all. What the 360 bounds is
+> a *non-conforming* token's acceptance, where the alternative was hours.
+>
+> **Capping the ceiling at the lifetime would make the two equal, and it is a
+> knife-edge rather than a tighter bound.** A host whose clock lags the
+> issuer's by δ reads a fresh 300-second token as having 300 + δ left, so any δ
+> above zero refuses every token a correct realm issues — and the 30 seconds
+> that would absorb it is the term the cap removes. The exact form is
+> `exp - iat`, declined above for a reason that has not changed, so there is no
+> third value.
+> [ADR-040](appendix-a-adrs.md#adr-040--the-access-token-lifetime-is-enforced-at-every-host)
+> takes the trade and `JwtAuthenticationTests` asserts the sum, so the 360 is
+> measured rather than inferred from this paragraph.
 
 > **This section separated the two quantities and then failed to add them.**
 > The paragraph above was written to stop a reader mistaking `ClockSkew`'s

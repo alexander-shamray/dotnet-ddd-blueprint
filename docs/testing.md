@@ -338,12 +338,12 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > report 106, measured rather than assumed on each retake — and they have not
 > always: the gap was 82 against 81 when this callout was written, and mixing a
 > partition quoted from `--list-tests` with a total from `dotnet test` is how it
-> first came to claim 72 and 82. The 1,109 is summed from `dotnet test`
+> first came to claim 72 and 82. The 1,111 is summed from `dotnet test`
 > output, so quote what ran. **Agreement today is a measurement and not a
 > guarantee** —
 > which is why the rule outlives the discrepancy that produced it.
 >
-> Across the solution the split is **872 and 237 of 1,109**, and the fast half
+> Across the solution the split is **874 and 237 of 1,111**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -379,7 +379,7 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **854** and **237**, summing to the 1,109
+on this repository they are **18**, **856** and **237**, summing to the 1,111
 the whole suite runs — which is the arithmetic the callout below asks for. The
 architecture stage is the one that has not moved: it is 18 gates, measured
 again on the branch that took the other two figures.
@@ -421,8 +421,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 872 and 237 summing to
-> 1,109 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 874 and 237 summing to
+> 1,111 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.
