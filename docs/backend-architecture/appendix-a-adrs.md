@@ -2356,6 +2356,132 @@ deletes it is a retention window this repository chooses.
   rather than two rows; what makes that case rare is the Redis claim, and what
   makes it loud is the primary key. Neither is asked to do the other's job.
 
+> **The floor consequence above is superseded by
+> [ADR-038](#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin),
+> and nothing here has been edited.** An ADR is superseded and never rewritten:
+> the decision this record took — the marker is a row in the command's own
+> transaction, read before the handler and written inside it — is untouched and
+> still binding, and so is every argument for it, including the one that the
+> window is a correctness setting and therefore the only one of the three with
+> a floor.
+>
+> **What moved is the floor's *composition*, not its existence.** This record
+> says the floor is the claim's window plus `MarkerLeadAllowance` and that
+> equality is refused, and names the two things that reordered the expiries —
+> the claim re-armed after a commit the marker was stamped before, and two
+> pods' clocks ageing one row. Both were closed at the source rather than
+> bounded, so `MarkerLeadAllowance` is gone and the floor is the claim's window
+> exactly. The two paragraphs above that describe those terms are the reason
+> the allowance existed, which is why they are worth keeping where somebody
+> reaching for one will read them.
+
+## ADR-038 — The marker and its claim are ordered by construction, not a margin
+
+**Decision.** [§8.5](08-caching-redis.md)'s Redis claim and [§6.3](06-cqrs.md)'s
+durable marker are ordered so that the marker outlives the claim for every
+configuration `RetentionPolicy` admits, with no margin standing in for
+anything. Two changes are needed and neither is sufficient alone.
+`IIdempotencyStore.CompleteAsync` **preserves what the claim had left** instead
+of re-arming a fresh retention, so the claim's window runs from the claim.
+`IdempotencyMarker.CommittedAt` is written by a `SYSDATETIMEOFFSET()` column
+default and the marker's purge cutoff is computed in SQL, so the row's age is
+one clock's arithmetic. `IdempotencyRetention.MarkerLeadAllowance` is retired,
+`MarkerFloor` is `Window` unchanged, and a marker window equal to the claim's
+is admitted.
+
+**Why.** ADR-037 put a correctness property at a boundary set by a retention
+number, and then could not make the two numbers alone decide it. The rule it
+needed — the marker outlives the claim — is a statement about two *instants*,
+and the two instants were produced by different events on different clocks. A
+five-minute allowance was added to the floor to cover both, which made every
+admissible configuration safe for ordinary values of each and left the rule
+itself untrue: nothing bounded either term, and nothing detected one exceeding
+the allowance. **A margin that stands in for an unbounded quantity is a
+guess with a number on it**, and the failure it guesses wrong about is a
+silent duplicate write.
+
+**The first term was the lag between two writes, and it was not the clock's
+fault.** §6.3 stamps `CommittedAt` inside the transaction, before
+`SaveChangesAsync`; §8.5's `CompleteAsync` runs only after `next()` has
+returned, which is after the commit. Re-arming there started the claim's window
+at the *commit* — later than the stamp by the commit's own tail, ordinarily
+milliseconds and unbounded in principle, since a suspension or a stalled
+connection between those two points stretches it. Redis then outlived the
+marker by exactly that lag with perfectly synchronised clocks. Preserving the
+claim's remaining life starts the window at `TryClaimAsync`, which precedes the
+stamp on the same thread in the same dispatch — so the ordering is a
+consequence of the code's shape rather than of any duration.
+
+**The second was that one row was aged by two clocks.** `CommittedAt` was
+stamped from the writing pod's `TimeProvider` and the purge cutoff computed on
+whichever pod ran the purge; [§15.3](15-cicd-deployment.md) ships three
+replicas of each service, so those were routinely two machines. A purger whose
+clock led the writer's by δ deleted the marker δ early, the claim then expired
+into a table that had already forgotten the commit, and the next retry ran the
+command a second time. A column default and a cutoff in SQL put both ends of
+the comparison on the server that owns the row, and the term disappears rather
+than being bounded.
+
+**Only the marker moves to the database's clock, and the asymmetry with the
+outbox and the inbox is the decision rather than an inconsistency to tidy
+later.** [§9.5](09-messaging.md) keeps those two on the registered
+`TimeProvider` with a stated reason: a test host substitutes the clock, and a
+row written on the server's wall clock is one no substituted clock can reason
+about. That reason is worth more where the window is housekeeping — a purged
+outbox row loses a debugging record, a purged inbox row loses a suppression the
+broker will not exercise again — and worth less than a single clock where the
+window *is* the guarantee. The marker's own suites stage rows at explicit ages
+against the real clock rather than a substituted one, so nothing was traded
+away to get this; a service that later needs the marker purge under a fake
+clock is a service that needs a different seam, not a different column.
+
+**Consequences.**
+
+- **§8.5's replay window is now the remainder of the window the claim opened,
+  and that is a change to what a caller is promised.** It was a full retention
+  starting at the commit, so the stated twenty-four hours were twenty-four
+  hours a caller actually got; it is now twenty-four hours from the claim,
+  which a command that ran for an hour has spent an hour of. The guarantee that
+  matters — at most one commit per key while the marker survives — is
+  unaffected, and it is the one the mechanism exists for. A caller who needs
+  the outcome after that reads the resource, exactly as ADR-037 already says.
+- **`CompleteAsync` loses its `retention` parameter, and the absence is the
+  contract.** A signature that still took one would invite the next
+  implementation to use it. `TryClaimAsync` keeps its own, because the claim is
+  where the window is opened.
+- **The floor admits equality, and the sentence a review round once corrected
+  is correct again.** `RetentionPolicy.IdempotencyWindow` may now be set to
+  `IdempotencyRetention.Window` exactly — equal is the smallest window with no
+  gap in it — which is what makes narrowing the window towards the claim's own
+  length a supported way to buy back the late retry ADR-037 costs. The floor is
+  still read from `IdempotencyRetention.MarkerFloor` rather than restated, and
+  that member survives its own arithmetic becoming trivial because what it
+  names is a relationship between two windows and not a duration.
+- **Every service gains a migration, and §4.5's scaffold ships it.**
+  `IdempotencyMarkerCommittedAtDefault` alters one column in one table, and it
+  travels with the table for the reason the table travels: a service scaffolded
+  with the marker and without the default ages its rows on the writing pod's
+  clock while the purge ages them on the server's, which is precisely the skew
+  this record removes, reintroduced by omission on every new service.
+- **Staging a marker at a controlled age still works, and the mapping is why.**
+  `ValueGeneratedOnAdd` over a store default means EF omits the column while the
+  property holds its sentinel and writes it when it does not — a default is
+  what happens in the absence of a value, not a trigger overriding one. The two
+  `RetentionPurgeTests` suites depend on that and are unchanged.
+- **What this does not close is the claim expiring under a running handler.**
+  Nothing here bounds the retention against a handler's runtime; past the
+  claim's expiry a successor may claim the key and both attempts run, and what
+  keeps the loser from corrupting the winner's entry is still the claim token
+  (#127). That residual is §8.5's and is unchanged — and it is now the only one
+  of the three, where it used to be one of three.
+- **It does assume the database's clock moves forward.** An operator who winds
+  the server's clock back by more than the marker's window makes every existing
+  marker look young and every new one look old, and the failure is the same
+  silent duplicate at the same boundary. That is a smaller and more visible
+  surface than three pods drifting apart — one clock, on the machine that owns
+  the data — but it is an assumption where there used to be a margin, and it is
+  stated rather than implied.
+
 ---
 
 [← §15 CI/CD](15-cicd-deployment.md) · [Index](README.md) · [Appendix B →](appendix-b-licences.md)

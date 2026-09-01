@@ -68,6 +68,164 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-33 — the two terms an allowance stood in for, and what closed them
+
+**#167 and #168 were filed by the PR that created them, which is the part
+worth reading first.** PR-32 put a correctness property at a boundary set by a
+retention number and then discovered it could not make the two numbers alone
+decide it: the rule it needed — the marker outlives the claim — is a statement
+about two *instants*, and the two instants were produced by different events on
+different clocks. It shipped a five-minute `MarkerLeadAllowance` on the floor,
+covering both, and said in three places that the allowance bounded the terms
+rather than removing them. This PR removes them.
+
+**An allowance that stands in for an unbounded quantity is a guess with a
+number on it.** Both terms were unbounded in principle. The lag between
+stamping the marker and re-arming the claim is the commit's tail, which a
+process suspension or a stalled connection stretches arbitrarily; the skew
+between two pods' clocks is bounded by NTP working, which is not a property
+this repository can assert. Five minutes covered every ordinary value of each
+and the shipped default carried six days of margin regardless — and nothing
+detected either term exceeding it, in a mechanism whose whole purpose is that a
+write happens once and whose failure is silent.
+
+### The first term was the lag, and it was not the clock's fault
+
+§6.3 stamps `CommittedAt` inside the transaction, before `SaveChangesAsync`;
+§8.5's `CompleteAsync` runs only after `next()` has returned, which is after
+the commit. Re-arming there started the claim's window at the *commit* — later
+than the stamp — so Redis outlived the marker by exactly that lag with
+perfectly synchronised clocks.
+
+`CompleteAsync` now writes `SET … KEEPTTL` and takes no retention at all. The
+claim's window runs from `TryClaimAsync`, which precedes the stamp on the same
+thread in the same dispatch, so the ordering is a consequence of the code's
+shape rather than of any duration.
+
+**The parameter went with the behaviour, and that was the decision rather than
+a tidy-up.** A signature still taking a retention it no longer uses invites the
+next implementation to use it, and the next implementation is where a
+re-armed entry would come back with nothing to catch it.
+
+**What it costs is a change to what §8.5 promises, and PR-32's own issue said
+so before this PR existed.** An outcome now stays replayable for the remainder
+of the window the claim opened rather than for a full retention starting at the
+commit, so a command that ran for an hour has spent an hour of its own replay
+window. That is a real loss and it is priced against the guarantee it buys —
+*at most one commit per key while the marker survives* — which is the one the
+mechanism exists for. It is why #168 was filed rather than folded into PR-32:
+changing a stated guarantee is a decision, and a decision taken inside a PR
+about something else is a decision nobody reviewed.
+
+### The second was one row aged by two clocks
+
+`CommittedAt` was stamped from the writing pod's `TimeProvider` and the purge
+cutoff computed on whichever pod ran the purge, across §15.3's three replicas.
+The column now carries a `SYSDATETIMEOFFSET()` default and
+`RetentionPurgeService` computes the marker's cutoff as
+`DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())`, so both ends of the
+comparison belong to the server that owns the row.
+
+**Only the marker moves, and the asymmetry is argued rather than left to be
+tidied.** §9.5 states, twice and with a reason, that the purge reads its cutoff
+from `TimeProvider` and not from `SYSDATETIMEOFFSET()`, because a test host
+substitutes the clock. That reason is worth more where the window is
+housekeeping and worth less than a single clock where the window *is* the
+guarantee — so the marker is now the stated exception and the other two are
+unchanged. Nothing was traded to get it: the two `RetentionPurgeTests` suites
+stage rows at explicit ages against the real clock, not a substituted one,
+which was checked rather than assumed.
+
+**Both halves are needed and neither is sufficient**, which is why they landed
+together. A default with an application-computed cutoff still compares two
+clocks; a SQL cutoff against an application-stamped column does the same.
+
+### Two tests had to be inverted, and that is the interesting cost
+
+`RedisIdempotencyStoreTests.A_claim_carries_the_retention_as_a_time_to_live`
+asserted that completing **re-armed** the TTL, and it was a *good* test: an
+earlier version asserted only that the completed TTL was above zero, which a
+freshly claimed key satisfies whether the write inherited the expiry or
+replaced it, and a review round had already shortened the key first precisely
+so the assertion could fail. `RetentionPolicyTests` asserted that a window
+equal to the claim's was **refused**, and it too carried the argument for why
+in place.
+
+**A test that pins a design correctly is the thing you have to edit when the
+design changes, and the edit is where the design change gets hidden.** Both
+were rewritten to assert the opposite with the history kept in the comment, and
+the second now also asserts that `MarkerFloor` equals `Window` — so a later
+reader who reinstates an allowance fails a test whose subject is the
+relationship, not one whose subject is a number.
+
+The floor's own history is worth carrying for the same reason: `RetentionPolicy`
+first admitted equality, a review round established that it should not and
+added the allowance, and this PR admits it again. Somebody who does not know
+why the allowance existed will re-add it, so ADR-038 and both XML doc blocks
+name the two terms and say what closed each.
+
+### #166 — an assertion that was two claims
+
+`InboxFilterTests.A_redelivered_message_is_dropped_and_its_consumer_runs_once`
+failed once in CI with two inbox rows where it asserts one, and the filter was
+blameless in the very run that failed: the line above it, asserting the
+consumer ran once, passed. `ServiceFixture.InboxAsync()` returns every row in
+the schema, so the assertion claimed both *the filter suppressed the duplicate*
+and *no other row exists anywhere* — and only the first is the test's subject.
+
+The fix is `docs/lessons.md`'s own entry applied where it had not reached:
+fence on the message's own id, in the helper every test already calls. A scoped
+`InboxAsync(Guid)` joins the unscoped one, which stays for the assertions whose
+subject really is the table. **The waits were scoped as well as the
+assertions**, and that half is not cosmetic: an unscoped `Eventually(…,
+expected: 1)` returns on a leaked row, so the second publish then races the
+first delivery's commit and the filter has nothing to read.
+
+**The scoped read got a test whose subject is the scoping**, observed red
+against a predicate that ignored its argument. Without it a read matching
+nothing would make every assertion above it pass vacuously, which is this
+repository's most-repeated failure arriving inside the fix for it.
+
+### #164 — a predicate over the rendered block, not a list of names
+
+`new_service.py RabbitMq` rendered a Compose block carrying
+`ConnectionStrings__RabbitMq` twice: the service's own §7.1 key renames onto
+§14.1's broker key, one of the two values is discarded by whatever parses the
+file, and which one survives is the parser's choice. Nothing refused it — the
+rename was correct, no template token survived, and the YAML stayed valid.
+
+The issue offered a list of reserved names beside the SQL and Windows lists.
+**A list is the shape that goes stale**, and it would have gone stale the first
+time a sixth `ConnectionStrings__*` key joined the template's block. What
+landed instead reads the environment keys back off the block the script has
+just rendered and refuses a duplicate, so the check is a property of the file
+rather than of anybody's memory of it. `RedisCache` and `RedisCoordination`
+collide the same way and were measured, not assumed.
+
+Scoping the check per `environment:` mapping rather than over the whole block
+was load-bearing: `build:`'s nested pair and `depends_on:`'s entries sit at the
+same indent, and a flat set matched all of them.
+
+### What is owed
+
+- **The database's clock is now assumed to move forward.** An operator winding
+  the server's clock back by more than the marker's window makes every existing
+  marker look young and every new one look old, and the failure is the same
+  silent duplicate at the same boundary. That is a smaller and more visible
+  surface than three pods drifting apart, and it is an assumption where there
+  used to be a margin. Stated in ADR-038 rather than implied.
+- **§8.5's remaining residual is unchanged and is now the only one.** Nothing
+  bounds the claim's retention against a handler's runtime, so past the claim's
+  expiry a successor may claim the key and both attempts run; the claim token
+  keeps the loser from corrupting the winner's entry (#127) and no more.
+- **`Catalog.Api.Tests.DatabaseSmokeTests` still counts its migrations with a
+  literal.** #126 retired that shape in Ordering — `expected.Length` beside a
+  named list, so a new migration is one edit rather than two — and this PR
+  added the seventh entry to Catalog's literal `ShouldBe(7)` beside its seven
+  named rows because converting it is a change to a file §4.5's scaffold
+  patches by exact text. It is the same defect #126 named, still standing one
+  service over.
+
 ## The controls that were only ever written down (#45, #46, #49, #139)
 
 Three security claims and one style rule, and the shape they share is that
@@ -2822,6 +2980,14 @@ edited. That floor is the claim's `Window` **plus** `MarkerLeadAllowance`, and
 the margin is not slack — two independent things put the claim's expiry after
 the marker's, and both are invisible from the two numbers alone (#167, #168).
 
+> **Both terms were closed at the source by PR-33 and the allowance is gone**,
+> so `MarkerFloor` is now `Window` unchanged and a marker window equal to the
+> claim's is admitted
+> ([ADR-038](backend-architecture/appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+> Reconciled here rather than re-argued: the reasoning above is why the
+> allowance existed, which is exactly what a reader tempted to reinstate it
+> needs, and only the live claim about what the floor *is* has moved.
+
 **So the release stays, and it is now a decision rather than a default.** The
 retry it admits meets the marker, and is refused with
 `CommandAlreadyCommittedException` before a handler runs.
@@ -2935,6 +3101,24 @@ a boundary set by a retention setting. The default declines the narrowing
 anyway, because the question the marker answers is "did this already commit" and
 a wider window is the more conservative answer to it. A client that needs the
 outcome reads the resource.
+
+> **The floor permits equality again, and this paragraph is the third time that
+> sentence has changed direction.** It recommended equality, a review round
+> corrected it to the claim plus an allowance, and PR-33 closed both terms the
+> allowance stood in for — so `IdempotencyWindow` may now be narrowed to
+> `IdempotencyRetention.Window` exactly
+> ([ADR-038](backend-architecture/appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+> **The two terms named above are what changed, not the reasoning about them**:
+> the claim is no longer re-armed after the commit, and the marker is no longer
+> aged across two pods' clocks, so "matching the claim leaves no margin for
+> either" is true of a system that no longer exists.
+>
+> **The stretch it prices moved too, and in the direction that costs the
+> caller.** "Six days on the shipped windows" was measured from a claim whose
+> window started at the commit; the claim now expires earlier, so the stretch
+> in which a succeeded command's retry meets a 409 rather than a fresh
+> execution is *at least* six days. The narrowing advice is what buys it back,
+> and it is now able to buy all of it.
 
 ---
 
