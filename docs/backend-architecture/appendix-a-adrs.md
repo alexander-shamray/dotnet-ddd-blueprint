@@ -1966,7 +1966,7 @@ fill: it would owe a producer, a consumer reachable from every host including
 the two with no Redis today, and a fan-out rule across per-service keyspaces.
 
 > **The callout above is amended by
-> [ADR-040](#adr-040--the-access-token-lifetime-is-enforced-at-every-host),
+> [ADR-040](#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound),
 > and nothing here has been edited.** The decision this record took — a bounded
 > revocation window of 330 seconds, no denylist and no introspection call — is
 > untouched and still binding, and so is the arithmetic behind it.
@@ -2037,7 +2037,7 @@ unaffected — the realm keeps
 than leaving to a realm-file description.
 
 > **This record's own gap is *not* closed by
-> [ADR-040](#adr-040--the-access-token-lifetime-is-enforced-at-every-host),
+> [ADR-040](#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound),
 > and saying so is the point of this note.** ADR-033's lifetime became
 > enforceable at every host because a token carries how long it has left. A
 > refresh token carries nothing to a host: it passes between the browser and
@@ -2704,7 +2704,7 @@ This decision keeps the TTL and moves the question instead.
   makes the pair about the claim rather than about a purge that had stopped
   deleting markers.
 
-## ADR-040 — The access-token lifetime is enforced at every host
+## ADR-040 — No host accepts a token with more life left than the revocation bound
 
 **Decision.** Every host that composes `AddCommonWebDefaults` refuses an
 inbound access token carrying more than `AuthenticationExtensions.RevocationBound`
@@ -2713,7 +2713,16 @@ of remaining life — [ADR-033](#adr-033--revocation-is-bounded-by-the-token-lif
 states and the 30-second `ClockSkew` beside it. The number becomes a constant
 in `Common.Web` because something now reads it, and
 `RealmImportTests` reads the same constant instead of its own literal.
-ADR-034's refresh-token rule is **not** covered and stays an obligation.
+
+**This gates remaining life and does not enforce the issued lifetime, which is
+the whole of what the title says and the reason it says it.** A five-hour token
+is refused for four hours and fifty-four minutes and then admitted for its last
+330 seconds — contained, not detected. So **[#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+stays open in full**: a deployed realm still owes `accessTokenLifespan` 300 and
+no client-level override, and nothing here establishes that it has them. What
+this record buys is that a realm which ignores that obligation can no longer
+have any one of its tokens accepted for more than the bound. ADR-034's
+refresh-token rule is untouched and stays an obligation on the same terms.
 
 **Why.** ADR-033 and ADR-034 state platform-wide security guarantees whose
 settings live in a realm. `RealmImportTests` pins them against
@@ -2794,19 +2803,29 @@ paragraph above declines for a reason that has not changed.
   `AccessTokenLifetime + AllowedClockSkew`, and the skew is the same field
   `TokenValidationParameters.ClockSkew` is set from. A literal 330 beside a 300
   and a 30 is the arithmetic nobody redoes when one of them moves.
-- **ADR-033's gap is closed for the lifetime and ADR-034's is not, and the
-  asymmetry is a property of what a host can see.** A refresh token passes
-  between the browser and Keycloak and never reaches a service, so
-  `use.refresh.tokens`, `standardFlowEnabled` and `directAccessGrantsEnabled`
-  remain obligations on whoever provisions a deployed realm — the division
-  [§15.4](15-cicd-deployment.md) draws for every Secret, now applying to less
-  of the realm than it did. #157 stays open for that half rather than being
-  closed by a change that covers the other one.
-- **Nothing about the shipped realm changes**, and the two suites now agree by
-  construction: the realm sets 300, the control admits up to 330, and
+- **Neither of ADR-033's nor ADR-034's realm obligations is discharged, and
+  saying otherwise was this record's first mistake.** A five-hour token is
+  admitted in its final window, so the lifetime obligation is contained rather
+  than checked; a refresh token passes between the browser and Keycloak and
+  never reaches a service, so `use.refresh.tokens`, `standardFlowEnabled` and
+  `directAccessGrantsEnabled` cannot be seen at all. Both remain obligations on
+  whoever provisions a deployed realm — the division
+  [§15.4](15-cicd-deployment.md) draws for every Secret, undiminished — and
+  #157 stays open for the whole of it.
+- **The exact form is `exp - iat` with an absent `iat` failing closed, and it
+  is deferred rather than refused.** That would enforce the issued lifetime,
+  remove the double-spent skew, and need no clock of this platform's at all,
+  since both terms come from the issuer. What it costs is a token type from a
+  package `Common.Web` does not pin — so a licence-register row and a
+  dependency decision — and a hard refusal of any issuer that omits a claim RFC
+  7519 makes optional. Both are decisions rather than details, which is why
+  they belong to the record that takes them and not to this one.
+- **Nothing about the shipped realm changes**, and the two suites still agree:
+  the realm sets 300, the control admits up to 330 of remaining life, and
   `RealmImportTests` reads the constant the control is built from. A realm
-  edited to 400 fails that test *and* would fail every request, which is one
-  misconfiguration caught twice rather than two rules to keep in step.
+  edited to 400 fails that test, and its tokens would be refused for all but
+  the last 330 seconds of each — which is one misconfiguration caught twice,
+  and neither catch is the deploy-time check #157 asks for.
 
 ---
 

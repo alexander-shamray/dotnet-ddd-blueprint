@@ -150,7 +150,7 @@ that had simply stopped deleting markers fails rather than passing both. That
 is `CLAUDE.md`'s most-repeated failure in the shape a regression test takes it,
 and the reason the first test alone would have been worse than none.
 
-### The lifetime half of #157, because one pull request is one row
+### Containing #157's lifetime half, because one pull request is one row
 
 ADR-033's 330-second revocation bound and ADR-034's no-refresh-token rule were
 enforced by one file test over §14.1's Compose realm. Every chart points at an
@@ -167,11 +167,21 @@ turned into this repository's artefact.
 
 **The inexact form was chosen deliberately and the choice is argued in
 ADR-040.** `exp - iat` is sharper and needs `iat`, which RFC 7519 makes
-optional — so an issuer omitting the claim would switch the control off by
-omission, and a control any subject can decline is not one. Measuring remaining
-life against this host's clock instead makes the ceiling the *bound* rather
-than the lifetime, which tolerates exactly the drift §11.3 already declares
-tolerable. A realm at 320 or 330 seconds passes; five hours does not.
+optional — so an issuer omitting the claim would either switch the control off
+or have to be refused outright, and both are decisions rather than details.
+Measuring remaining life against this host's clock instead makes the ceiling
+the *bound* rather than the lifetime. A realm at 320 or 330 seconds passes;
+five hours does not.
+
+**It cost two review rounds to say what that actually enforces, and both
+corrections are the same shape.** The first: the ceiling is 330 and
+`ValidateLifetime` then adds its own 30, so the longest window admitted is 360.
+The second, and the larger: gating *remaining* life is not enforcing the
+*issued* lifetime at all. A five-hour token is refused for four hours and
+fifty-four minutes and then admitted for its last 330 seconds — **contained,
+not detected**. So the record's first title said the lifetime was enforced and
+was renamed to say what the control does, and **#157 stays open in full**
+rather than half-closed.
 
 **`RealmImportTests` said why it held a literal, and the condition it named is
 what changed.** "A constant nothing reads would be a registration standing in
@@ -183,13 +193,20 @@ constant without saying which would read as the reverse.
 
 ### What is owed
 
-- **ADR-034's half of #157 is not closed and cannot be closed this way.** A
-  refresh token passes between the browser and Keycloak and never reaches a
-  service, so `use.refresh.tokens`, `standardFlowEnabled` and
-  `directAccessGrantsEnabled` remain obligations on whoever provisions a
-  deployed realm. #157 stays open for exactly that, and both ADR-033's
-  amendment and ADR-034's note are written to keep a reader from carrying one
-  across to the other.
+- **#157 is not closed at all, and the first draft of this entry said it was
+  half closed.** ADR-034's half cannot be closed this way — a refresh token
+  passes between the browser and Keycloak and never reaches a service — and
+  ADR-033's half is contained rather than checked, because a token past its
+  ceiling becomes admissible again as it approaches expiry. A deployed realm
+  still owes `accessTokenLifespan` 300 and no client-level override, and
+  nothing here establishes that it has them.
+- **The exact form is owed and its price is known.** `exp - iat` with an absent
+  `iat` failing closed enforces the issued lifetime, removes the double-spent
+  skew and needs no clock of this platform's, since both terms are the
+  issuer's. It costs a package pin this assembly does not carry, a
+  licence-register row, and a hard refusal of any issuer omitting a claim RFC
+  7519 makes optional — a dependency decision and a compatibility decision,
+  which belong to the record that takes them.
 - **A misconfigured realm is now an outage rather than a weakened bound.** That
   is the posture the authority guard already takes for metadata over plain
   HTTP, and it is a real availability cost taken on purpose. Nothing here

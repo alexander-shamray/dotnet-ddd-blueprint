@@ -197,9 +197,18 @@ public static class AuthenticationExtensions
                 // than hidden: a host lagging the issuer sees a fresh token as
                 // having more life left than it has, so the ceiling is the
                 // BOUND — lifetime plus skew — and not the lifetime. A realm at
-                // 330 seconds passes and a realm at 320 passes; five hours,
-                // thirty minutes and six minutes do not, which is the class of
-                // misconfiguration this closes.
+                // 330 seconds passes and a realm at 320 passes; a fresh token
+                // from a realm set to five hours, thirty minutes or six minutes
+                // does not.
+                //
+                // GATING REMAINING LIFE IS NOT ENFORCING THE ISSUED LIFETIME,
+                // and the difference decides what #157 may claim. That
+                // five-hour token is refused for four hours and fifty-four
+                // minutes and then admitted for its last 330 seconds — so a
+                // non-conforming realm is CONTAINED rather than detected, and
+                // the issue stays open for the deploy-time check it actually
+                // asks for. What this buys is that no token from any realm is
+                // ever accepted for more than the window below.
                 //
                 // THE SKEW IS THEREFORE SPENT TWICE, and that is a real cost
                 // rather than an oversight. A token admitted at the ceiling has

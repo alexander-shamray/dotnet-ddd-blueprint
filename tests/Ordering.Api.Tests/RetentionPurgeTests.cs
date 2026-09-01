@@ -195,7 +195,7 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
         // claimed, so the store reports both unheld and what separates them is
         // age alone — which is a statement about this test's staging, not about
         // the pass: since ADR-039 a marker goes only when it is past its window
-        // AND its claim is gone. The test above it supplies the other half.
+        // AND its claim is gone. The two tests below supply that other half.
         //
         // Two rows rather than one, which is the whole point. The combined pass
         // below stages a single already-old marker, so a DELETE with no WHERE —
@@ -222,9 +222,10 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
         // still live, and a row staged thirty days old under a live claim is
         // that state arrived at from the other end.
         //
-        // Age alone deletes this row: A_marker_is_purged_on_age_alone stages
-        // the same LongAgo and asserts it goes. What keeps it is the pass
-        // asking the store that owns the claim (ADR-039).
+        // The window is not what keeps this row: the control test above stages
+        // the same LongAgo under keys nothing ever claimed and watches them go.
+        // What keeps this one is the pass asking the store that owns the claim,
+        // and finding it still held (ADR-039).
         string key = Key();
 
         await fixture.StageIdempotencyMarkersAsync(new IdempotencyMarker(key, LongAgo));

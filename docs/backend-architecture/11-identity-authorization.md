@@ -80,7 +80,7 @@ Validation is cheap; assume the network is hostile.
 >
 > **The access-token lifetime beside it was in the same position and is not any
 > more.** Since
-> [ADR-040](appendix-a-adrs.md#adr-040--the-access-token-lifetime-is-enforced-at-every-host)
+> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
 > every host refuses an inbound token carrying more remaining life than the
 > bound §11.3 derives, so that number is held to wherever the realm was
 > provisioned rather than asserted against the one this repository ships. **A
@@ -123,7 +123,7 @@ Validation is cheap; assume the network is hostile.
 > obligation on whoever provisions the deployed one, exactly as the
 > refresh-token attribute does. **The lifetime was the third item on that list
 > and is now the exception to it**:
-> [ADR-040](appendix-a-adrs.md#adr-040--the-access-token-lifetime-is-enforced-at-every-host)
+> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
 > holds every inbound token to the bound at every host, so the deployed realm's
 > answer to that one question is checked wherever it was provisioned. A flow
 > flag affords nothing of the kind: `standardFlowEnabled` and
@@ -275,7 +275,7 @@ it.** Five minutes, normative — not a realm default nobody chose, and not
 `ClockSkew`'s coincidentally equal *default* two paragraphs up, which is a
 different quantity that happens to share a number.
 
-**Since [ADR-040](appendix-a-adrs.md#adr-040--the-access-token-lifetime-is-enforced-at-every-host)
+**Since [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
 it is also a constant, because something reads it.**
 `AuthenticationExtensions.AccessTokenLifetime` is that declaration, and
 `RealmImportTests` compares the shipped realm against the field rather than
@@ -328,7 +328,7 @@ that availability cost is taken deliberately.
 > that would absorb it is the term the cap removes. The exact form is
 > `exp - iat`, declined above for a reason that has not changed, so there is no
 > third value.
-> [ADR-040](appendix-a-adrs.md#adr-040--the-access-token-lifetime-is-enforced-at-every-host)
+> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
 > takes the trade and `JwtAuthenticationTests` asserts the sum, so the 360 is
 > measured rather than inferred from this paragraph.
 
@@ -381,22 +381,30 @@ listing of a token denylist among Redis's contents.
 > `realm-export.json`; the charts point at an externally provisioned authority
 > this repository holds no configuration for. That is still true of the suite
 > and it stopped settling the question, which is the correction
-> [ADR-040](appendix-a-adrs.md#adr-040--the-access-token-lifetime-is-enforced-at-every-host)
+> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
 > makes to the sentence that used to follow it.
 >
 > **That sentence said the number above is *verified* only where the platform
-> provisions its own identity provider, which is locally — and it is now
-> verified wherever a token is presented.** The check is not in the suite and
-> could not be: a pipeline check needs admin credentials CI does not hold, a
-> startup assertion reads a discovery document that publishes no token lifetime
-> at all, and committing a production realm makes somebody's operational input
-> into this repository's artefact. It is in the host instead, because every
-> service already validates a token on every request and a token carries how
-> long it has left whatever the realm was configured to do. The two statements
-> now agree by construction rather than by habit: the realm sets 300, the
-> control admits up to 330, and `RealmImportTests` reads the constant the
-> control is built from, so a realm edited to 400 fails that test *and* would
-> fail every request.
+> provisions its own identity provider, which is locally, and it is still
+> true.** No check in this repository reads a deployed realm: a pipeline check
+> needs admin credentials CI does not hold, a startup assertion reads a
+> discovery document that publishes no token lifetime at all, and committing a
+> production realm makes somebody's operational input into this repository's
+> artefact. What ADR-040 adds is not verification but **containment** — every
+> service already validates a token on every request, and a token carries how
+> long it has left whatever the realm was configured to do, so no host will
+> accept one with more than the bound remaining.
+>
+> **Containment is weaker than verification and the difference is worth being
+> exact about, because a first draft of this callout was not.** The control
+> gates *remaining* life, not the *issued* lifetime: a realm set to five hours
+> has its tokens refused for four hours and fifty-four minutes and then
+> admitted for the last 330 seconds. That is a large reduction in what a stolen
+> token is worth and it is **not** the deploy-time check
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> asks for, so the issue stays open. A realm edited to 400 fails
+> `RealmImportTests` — which reads the constant the control is built from — and
+> would still serve requests in each token's final window.
 >
 > **The refresh-token attribute and the flow flags stay where this callout put
 > them, and the asymmetry is a property of what a host can see.**
