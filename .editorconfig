@@ -30,8 +30,9 @@ indent_size = 4
 
 [*.md]
 indent_size = 2
-# No max_line_length: prose wraps at 80 (see docs/style-guide.md), but tables,
-# fenced code legitimately run past it — hundreds of lines in the blueprint do,
+# No max_line_length: prose wraps at 80 (see docs/style-guide.md), but
+# tables, links and fenced code legitimately run past it — hundreds of lines
+# in the blueprint do,
 # and a hard limit here would flag every one of them.
 
 [*.{json,yml,yaml}]
@@ -109,7 +110,7 @@ csharp_new_line_before_members_in_object_initializers = true
 csharp_new_line_before_members_in_anonymous_types = true
 
 # No setting expresses these; docs/style-guide.md carries them and a reviewer
-# go looking for a key that does not exist:
+# should not go looking for a key that does not exist:
 #   - `=>` trails the signature of an expression-bodied member, with the body
 #     at the DECLARATION's indent + 4 (not the `=>` line's).
 #   - A broken fluent chain puts every call on its own line, first one included.
