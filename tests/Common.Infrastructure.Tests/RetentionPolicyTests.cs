@@ -63,18 +63,29 @@ public class RetentionPolicyTests
         Should.Throw<ArgumentOutOfRangeException>(
             () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window - OneSecond });
 
-        // MATCHING THE CLAIM EXACTLY IS REFUSED, and this assertion used to say
-        // the opposite — "equal is admitted, and it is the smallest window with
-        // no gap in it". It is not gap-free. `CompleteAsync` re-arms the
-        // claim's expiry at the commit, the same event that stamps
-        // `CommittedAt`, so equality aims both expiries at one nominal instant
-        // and leaves no margin; the two are then counted by different clocks —
-        // Redis's, against the purging pod's clock minus the writing pod's
-        // timestamp, across three replicas — and any skew in the wrong
-        // direction purges the marker first. The floor carries an allowance for
-        // that, so the smallest admissible window is the claim plus it.
-        Should.Throw<ArgumentOutOfRangeException>(
-            () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window });
+        // MATCHING THE CLAIM EXACTLY IS ADMITTED, and this assertion has now
+        // said both things — which is the part worth reading rather than the
+        // current direction. It first said equal was admitted; a review round
+        // established that it was not, because two things put the claim's
+        // expiry after the marker's, and a five-minute allowance was added to
+        // the floor to bound them. Both are now closed at the source: the
+        // completion preserves the claim's remaining life instead of re-arming
+        // it at the commit (#168), so the claim's window starts at the claim
+        // and therefore before the stamp; and the marker is written and aged on
+        // the database's clock (#167), so no pod's clock is party to its age.
+        // The ordering holds by construction, the allowance is gone, and equal
+        // is once again the smallest window with no gap in it.
+        //
+        // The floor is READ rather than restated, so this assertion is about
+        // the relationship and not about a duration — it stays correct if
+        // IdempotencyRetention.Window is retuned.
+        new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.Window }
+            .IdempotencyWindow
+            .ShouldBe(IdempotencyRetention.Window);
+
+        IdempotencyRetention.MarkerFloor.ShouldBe(
+            IdempotencyRetention.Window,
+            "the floor carried an allowance for two terms that are now closed");
 
         Should.Throw<ArgumentOutOfRangeException>(
             () => new RetentionPolicy { IdempotencyWindow = IdempotencyRetention.MarkerFloor - OneSecond });

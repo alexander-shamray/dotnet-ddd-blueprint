@@ -29,74 +29,57 @@ public static class IdempotencyRetention
     public static readonly TimeSpan Window = TimeSpan.FromHours(24);
 
     /// <summary>
-    /// How far the marker's expiry must lead the claim's. The marker is what
-    /// refuses a retry once the claim is gone, so it has to outlive the claim
-    /// under everything that can reorder the two — and two independent things
-    /// can.
+    /// The floor a marker retention window has to clear, and it is
+    /// <see cref="Window"/> itself: equal is the smallest window with no gap in
+    /// it. Read by <c>RetentionPolicy.IdempotencyWindow</c> rather than
+    /// restated there.
     /// </summary>
     /// <remarks>
-    /// <b>Equality is a knife-edge rather than the exact fit it reads as, and
-    /// this constant is the width of the knife.</b> A marker window equal to
-    /// <see cref="Window"/> looks like the tightest safe value and is not safe
-    /// at all, because the two expiries are neither started by the same event
-    /// nor counted by the same clock.
+    /// <b>It was <c>Window</c> plus a five-minute <c>MarkerLeadAllowance</c>,
+    /// and the allowance is gone because the two terms it bounded are
+    /// gone.</b> Equality read as the exact fit and was a knife-edge, for two
+    /// reasons that were independent of each other and of the numbers:
     /// <para>
-    /// <b>The first term is the lag between the two writes, and it is not
-    /// zero.</b> §6.3 stamps <c>CommittedAt</c> with <c>MarkAsync</c> <em>
-    /// inside</em> the transaction, before <c>SaveChangesAsync</c>; §8.5
-    /// re-arms the Redis entry in <c>CompleteAsync</c> only after
-    /// <c>next()</c> has returned, which is after the commit. So the claim's
-    /// window starts <em>later</em> than the marker's by the commit's own tail
-    /// — ordinarily milliseconds, and unbounded in principle, since a
-    /// suspension or a stalled connection between those two points stretches
-    /// it. Redis then outlives the marker by exactly that lag even with
-    /// perfectly synchronised clocks.
+    /// <b>The windows did not start at the same event.</b> §6.3 stamps
+    /// <c>CommittedAt</c> <em>inside</em> the transaction, before the commit;
+    /// §8.5 re-armed the Redis entry to a fresh retention in
+    /// <c>CompleteAsync</c>, which runs only after that transaction has
+    /// returned. The claim's window therefore started later than the marker's
+    /// by the commit's own tail — ordinarily milliseconds, and unbounded in
+    /// principle. <c>CompleteAsync</c> now preserves what the claim had left
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168">#168</see>),
+    /// so the claim's window starts at the claim, which is <em>earlier</em>
+    /// than the stamp by construction.
     /// </para>
     /// <para>
-    /// <b>The second term is clock skew, and it is a different pair of
-    /// clocks.</b> <c>CommittedAt</c> is stamped from the writing pod's
-    /// <c>TimeProvider</c> and the purge cutoff from whichever pod runs the
-    /// purge; §15.3 ships three replicas of each service. A purger whose clock
-    /// leads the writer's by δ deletes the marker δ early. Either term alone
-    /// lets the claim expire into a table that has already forgotten the
-    /// commit, and the next retry then runs the command a second time.
+    /// <b>And they were not counted by the same clock.</b> <c>CommittedAt</c>
+    /// was stamped from the writing pod's <c>TimeProvider</c> and the purge
+    /// cutoff computed on whichever pod ran the purge, across §15.3's three
+    /// replicas. The column now defaults to <c>SYSDATETIMEOFFSET()</c> and the
+    /// purge computes its cutoff in SQL
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167">#167</see>),
+    /// so both ends are the database's clock and there is no skew term.
     /// </para>
     /// <para>
-    /// <b>Five minutes is chosen for the asymmetry of being wrong, not from a
-    /// measurement of anybody's fleet.</b> Too generous costs a marker row
-    /// kept slightly longer and a 409 that persists for the same margin; too
-    /// mean is the duplicate write §8.5 exists to prevent, at a boundary set
-    /// by a housekeeping setting. A commit tail and an NTP-disciplined clock
-    /// both sit orders of magnitude inside it; a stalled process and a node
-    /// that has lost NTP are the cases it is for, and it bounds their
-    /// <em>sum</em> rather than either separately.
+    /// <b>What is left is an ordering that holds by construction rather than
+    /// by a margin.</b> The claim is taken at <c>t0</c>, the marker is stamped
+    /// at some <c>t1 &gt;= t0</c>, and the claim expires at
+    /// <c>t0 + Window</c> while the marker survives until
+    /// <c>t1 + IdempotencyWindow</c>. With
+    /// <c>IdempotencyWindow &gt;= Window</c> the marker outlives the claim for
+    /// every value of <c>t1</c>, so equality is admitted rather than refused —
+    /// and a margin that stood for two closed terms would now be
+    /// unexplained slack, which is the shape a later reader deletes for the
+    /// wrong reason.
     /// </para>
     /// <para>
-    /// <b>It is a constant and not a setting deliberately.</b> A knob here is
-    /// one whose wrong value reopens the hole silently and at a boundary
-    /// nobody watches — the failure this whole mechanism is built to refuse —
-    /// and the cost of the generous default is small enough that nobody needs
-    /// to tune it.
-    /// </para>
-    /// <para>
-    /// <b>Neither term is closed here, and they need different fixes.</b>
-    /// Ageing the row from the database's clock on both the write and the
-    /// purge removes the skew term
-    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/167">#167</see>)
-    /// and does nothing about the lag; the lag closes by not re-arming the
-    /// claim at completion, which is a change to what §8.5 promises a caller
-    /// about how long an outcome stays replayable
-    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168">#168</see>).
-    /// Until both land this margin is what stands between them and a duplicate
-    /// write.
+    /// <b>The floor is still read rather than restated</b>, for the reason
+    /// this type exists: a 24 written in two files agrees until one of them is
+    /// edited. It stays a separate member even though it is now
+    /// <c>Window</c> unchanged, because what it names is a
+    /// <em>relationship</em> between two windows and not a duration — the next
+    /// change to either is a change to it.
     /// </para>
     /// </remarks>
-    public static readonly TimeSpan MarkerLeadAllowance = TimeSpan.FromMinutes(5);
-
-    /// <summary>
-    /// The floor a marker retention window has to clear: the claim's own
-    /// window plus <see cref="MarkerLeadAllowance"/>. Read by
-    /// <c>RetentionPolicy.IdempotencyWindow</c> rather than restated there.
-    /// </summary>
-    public static TimeSpan MarkerFloor => Window + MarkerLeadAllowance;
+    public static TimeSpan MarkerFloor => Window;
 }

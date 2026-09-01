@@ -71,9 +71,8 @@ public sealed record RetentionPolicy
     /// </summary>
     /// <remarks>
     /// <b>It has a floor the other two do not, and the floor is
-    /// <see cref="IdempotencyRetention.MarkerFloor"/> — the claim's own window
-    /// plus the margin its expiry has to lead by.</b> The marker is what
-    /// refuses a retry of a
+    /// <see cref="IdempotencyRetention.MarkerFloor"/> — the claim's own
+    /// window.</b> The marker is what refuses a retry of a
     /// command that committed, and the order the two expire in is the whole of
     /// the constraint. While the Redis claim is alive the key is not claimable
     /// at all, so a purged marker costs nothing yet; the gap opens when that
@@ -83,16 +82,19 @@ public sealed record RetentionPolicy
     /// number, which is the least visible place a correctness property could be
     /// lost.
     /// <para>
-    /// <b>Matching the claim exactly does not close that gap, which is why the
-    /// floor is not simply <see cref="IdempotencyRetention.Window"/>.</b> Two
-    /// independent things reorder the expiries. The windows do not start at the
-    /// same event — <c>CommittedAt</c> is stamped inside the transaction and
-    /// the claim is re-armed after it commits, so the claim's starts later by
-    /// the commit's tail — and they are not counted by the same clock, the
-    /// marker's age being the purging pod's against a timestamp the writing
-    /// pod stamped, across three replicas.
-    /// <see cref="IdempotencyRetention.MarkerLeadAllowance"/> bounds their sum,
-    /// and argues its own width.
+    /// <b>Matching the claim exactly is admitted, and it was refused until the
+    /// two things that reordered the expiries were closed.</b> The windows did
+    /// not start at the same event — <c>CommittedAt</c> is stamped inside the
+    /// transaction while the claim was re-armed after it committed — and they
+    /// were not counted by the same clock, the marker's age being the purging
+    /// pod's against a timestamp the writing pod stamped, across three
+    /// replicas. A five-minute <c>MarkerLeadAllowance</c> bounded their sum
+    /// rather than removing either. §8.5's completion now preserves the claim's
+    /// remaining life (#168) and the marker is stamped and aged on the database
+    /// clock (#167), so the claim is taken before the marker is stamped and
+    /// expires before it is purged for every window at least as long — the
+    /// ordering is structural, and equal is the smallest window with no gap in
+    /// it. <see cref="IdempotencyRetention.MarkerFloor"/> argues it in full.
     /// </para>
     /// <para>
     /// Read rather than restated, for the reason
@@ -170,9 +172,13 @@ public sealed record RetentionPolicy
 
     /// <summary>Ten years, which is a configuration error rather than a policy.</summary>
     /// <remarks>
-    /// A bound is needed at all because the cutoff is <c>now - window</c> and
+    /// A bound is needed at all because the outbox's and the inbox's cutoffs
+    /// are <c>now - window</c> and
     /// <c>DateTimeOffset</c> subtraction throws when the result is not
-    /// representable — verified with <c>TimeSpan.MaxValue</c>. That throw
+    /// representable — verified with <c>TimeSpan.MaxValue</c>. The marker's
+    /// cutoff is computed in SQL and so has a different ceiling, and this one
+    /// clears it: ten years is 315,360,000 seconds, and <c>DATEADD</c>'s
+    /// argument is an <c>int</c>. That throw
     /// lands inside <c>PurgeAsync</c>, whose caller logs and swallows, so an
     /// unbounded window buys a purge that never runs and says so once an hour
     /// in a log nobody reads. Ten years rather than the representable maximum
@@ -202,18 +208,15 @@ public sealed record RetentionPolicy
             : throw new ArgumentOutOfRangeException(
                 member,
                 value,
-                $"{member} must be at least {floor} — how long §8.5's Redis claim survives, " +
-                "plus the margin its expiry has to lead by — and the order of the two expiries " +
-                "is the whole of why. A shorter window purges the marker first; the claim then " +
-                "expires with nothing left to remember the commit, so the next retry claims a " +
-                "free key and runs the command a second time. Matching the claim exactly is " +
-                "refused rather than admitted as the exact fit, because two things reorder the " +
-                "expiries: the marker is stamped inside the transaction and the claim re-armed " +
-                "after it commits, so the claim's window starts later by the commit's tail; and " +
-                "the marker's age is the purging pod's clock minus a timestamp the writing pod " +
-                "stamped, so any skew between them moves it again. Either one deletes the marker " +
-                "first, and the write this platform guarantees happens once happens twice at a " +
-                "boundary set by a retention setting.");
+                $"{member} must be at least {floor} — how long §8.5's Redis claim survives — and " +
+                "the order of the two expiries is the whole of why. A shorter window purges the " +
+                "marker first; the claim then expires with nothing left to remember the commit, " +
+                "so the next retry claims a free key and runs the command a second time, and the " +
+                "write this platform guarantees happens once happens twice at a boundary set by " +
+                "a retention setting. Matching the claim exactly is admitted: the claim is taken " +
+                "before the marker is stamped, and both are now measured on one clock each — the " +
+                "claim's own TTL, preserved rather than re-armed at the commit, and the marker's " +
+                "against the database clock that wrote it.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value
