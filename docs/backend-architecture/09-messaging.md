@@ -1865,8 +1865,8 @@ degrades the filtered index scan.
 --
 -- The cutoff arrives as a parameter and is not computed on the server:
 -- RetentionPurgeService works @Before out from the registered TimeProvider,
--- which is the clock a test host substitutes. §8.5's marker statement is the
--- one that departs from this, and says why.
+-- which is the clock a test host substitutes. §8.5's marker pass is the one
+-- that departs from this, and says why.
 DELETE TOP (@BatchSize) FROM ordering.OutboxMessages
 WHERE ProcessedAt IS NOT NULL
     AND ProcessedAt < @Before;
@@ -1877,7 +1877,7 @@ sample printed `TOP (5000)` and `DATEADD(day, -7, SYSDATETIMEOFFSET())` from
 before `RetentionPurgeService` existed, and the shipped statement has taken
 both as parameters since it was built — the batch size from `RetentionPolicy`
 and the cutoff from the registered clock. Nothing depended on the difference
-until §8.5 gained a third statement that computes its cutoff in SQL *on
+until §8.5 gained a third table whose select computes its cutoff in SQL *on
 purpose*; a chapter printing the server clock for all three would make that
 deliberate exception unreadable. §9.5's sample carried the same two literals
 and is corrected with it.
@@ -2000,47 +2000,74 @@ close.
 
 Both run on a
 slow schedule, batched so neither holds a long lock. `RetentionPurgeService` in
-`Common.Infrastructure.Messaging` is that service: it composes a statement per
-registered table — the two above, and the third the next paragraph adds — takes
-its windows and its batch size from a registered `RetentionPolicy`, and exposes
-`PurgeAsync` publicly so tests drive one pass rather than racing a timer — the
-seam `OutboxDispatcher.ProcessBatchAsync` already offers, for the same reason.
+`Common.Infrastructure.Messaging` is that service: it composes the statements
+each registered table needs — one apiece for the two above, and two for the
+third the next paragraph adds — takes its windows and its batch size from a
+registered `RetentionPolicy`, and exposes `PurgeAsync` publicly so tests drive
+one pass rather than racing a timer — the seam
+`OutboxDispatcher.ProcessBatchAsync` already offers, for the same reason.
 
 **It purges a third table, and that one is not housekeeping.**
 [§8.5](08-caching-redis.md)'s `IdempotencyMarkers` is the durable half of the
 command idempotency key, composed against a registered `IdempotencyMarkerTable`
-on the same terms as the pair above, and deleted on age alone with no predicate
-to get wrong — every row there records work that finished. What it costs to
-purge is different in kind: a purged outbox row loses a debugging record and a
-purged inbox row loses a suppression the broker will not exercise again, where
-a purged marker loses the row that refuses a retry of a command that already
-committed. That is why `RetentionPolicy.IdempotencyWindow` is the one window
-with a **floor** — it may not be shorter than the Redis claim it backs up, or
-the duplicate returns at a boundary set by a retention setting
+on the same terms as the pair above, and *selected* on age alone with no
+predicate to get wrong — every row there records work that finished. **Selected
+and not deleted, and the difference is this table's whole subject**; the next
+paragraph is what stands between the two. What it costs to purge is different
+in kind: a purged outbox row loses a debugging record and a purged inbox row
+loses a suppression the broker will not exercise again, where a purged marker
+loses the row that refuses a retry of a command that already committed. That is
+why `RetentionPolicy.IdempotencyWindow` is the one window with a **floor** — it
+may not be shorter than the Redis claim it backs up
 ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
 Matching the claim exactly is admitted, and that is the floor's whole shape
 rather than a rounding of it: the claim is taken before the marker is stamped,
-so the marker outlives it for every window at least as long. **Only the two
-*start* events are ordered by construction, and the conclusion drawn from them
-carries two assumptions** — that Redis's clock and this server's tick at the
-same rate, since the two windows are counted by one each
+so the marker outlives it for every window at least as long. **What the floor
+is for is smaller than that sentence makes it sound, and §8.5 owns the
+correction**: keeping the marker alive while the claim is — the thing that kept
+the duplicate from returning at a boundary set by a retention setting — is the
+purge's job now rather than the window's, so what the floor bounds is how long
+the guarantee lasts rather than whether it holds. **Only the two *start* events
+are ordered by construction, and the conclusion drawn from them carried two
+assumptions until the first was closed at the source** — that Redis's clock and
+this server's tick at the same rate, since the two windows were counted by one
+each
 ([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)),
-and that the marker reaches the database inside the claim's window, which
-[§8.5](08-caching-redis.md) carries as a residual of its own
-([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+and that the marker reaches the database inside the claim's window. The first
+is gone rather than bounded, for the reason the next paragraph gives; the
+second is unchanged, is now the only one, and [§8.5](08-caching-redis.md)
+carries it as a residual of its own
+([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin),
+[ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)).
 
-**Its statement is also the one of the three that computes its own cutoff**,
-and the departure is deliberate. The two above are handed a `@Before` this
-service worked out from the registered `TimeProvider`; the marker's takes the
-window as a duration in seconds and subtracts it from `SYSDATETIMEOFFSET()`,
-because `CommittedAt` is written by a column default and is therefore the
-database's own clock whichever replica ran the command — and ageing a row
-across two clocks is what the floor used to have to bound.
-[§8.5](08-caching-redis.md) prints the statement and argues the
-trade: the outbox's and the inbox's windows are housekeeping, where a clock a
-test host can move is worth more than one nothing can, and the marker's window
-is a correctness property, where one clock on both ends is worth more than a
-substitutable one.
+**Its pass is two statements where the other two are one, and the cutoff it
+computes for itself now *selects* rather than decides.** The two above are
+handed a `@Before` this service worked out from the registered `TimeProvider`
+and delete everything past it. The marker's takes the window as a duration in
+seconds, subtracts it from `SYSDATETIMEOFFSET()` to find *candidates*, asks
+`IIdempotencyStore.UnheldAsync` which of those keys the claim store has already
+let go of, and deletes only those. Deciding on the window alone put Redis's
+clock on one side of a comparison and SQL Server's on the other with nothing
+coupling their rates, so a forward step of the database's deleted a marker
+whose claim was still live; asking replaces the comparison with the fact it was
+standing in for, and there is no rate left to couple (ADR-039). The cutoff
+still comes from the server rather than from a pod, for the reason it always
+did: `CommittedAt` is written by a column default and is therefore the
+database's own clock whichever replica ran the command, and ageing a row across
+two of those is what the floor used to have to bound. What changed is what the
+answer is used for — a row past its window is a row that has *served* its
+window, and the store says which of those may go. [§8.5](08-caching-redis.md)
+prints both statements and argues the trade: the outbox's and the inbox's
+windows are housekeeping, where a clock a test host can move is worth more than
+one nothing can, and the marker's window is a correctness property, where one
+clock on both ends is worth more than a substitutable one.
+
+**That pass therefore has a second way to stop, and the other two do not need
+one.** A batch the store would not let go of entirely would be returned
+unchanged by the next `SELECT` — the candidates come back oldest first and
+nothing about those rows has moved — so it stops there rather than re-reading
+and re-asking for no deletions, and an hour later the claim they are waiting on
+has ordinarily gone.
 
 **What the carve-out costs is smaller than it reads, and saying so is cheaper
 than letting a reader discover it.** No retention test here substitutes the
@@ -2058,6 +2085,17 @@ database blip during housekeeping must not take the service down. And it stops
 after a fixed number of batches per table per pass, so a first run against a
 table nobody has ever purged drains over several passes instead of holding a
 connection until it is empty.
+
+**The claim store reaches the first of those, and the direction it fails in is
+the reason it is a constructor argument.** `RetentionPurgeService` takes
+`IIdempotencyStore`, so a service that has markers and no store fails to
+resolve at startup rather than running a pass that deletes what it should have
+asked about. An unreachable store then throws out of `UnheldAsync` into the
+same `catch`, which logs, deletes nothing and retries next interval — so a
+Redis outage costs a purge rather than a guarantee, and markers accumulate
+while it lasts. That is the outbox's failure mode borrowed for an hour, and it
+is the safe direction to fail in for a table whose window is a correctness
+property.
 
 > **That ceiling is a real throughput bound, and it is below the dispatcher's.**
 > Twenty batches of 5,000 an hour is 100,000 rows per table per pass-hour —
@@ -2161,11 +2199,19 @@ public sealed class InboxFilter<T>(
         //
         // One clock per window is the rule; WHICH clock is a choice, and the
         // marker table makes the other one. Its window is a correctness
-        // property rather than housekeeping, so both ends of its comparison are
-        // the database's own — a column default writes the row and the purge
-        // subtracts from SYSDATETIMEOFFSET() (§8.5, ADR-038). Here a
-        // substitutable clock is worth more, because nothing about the inbox
-        // breaks when a test moves it.
+        // property rather than housekeeping, so both ends of ITS OWN
+        // comparison are the database's — a column default writes the row and
+        // the purge subtracts from SYSDATETIMEOFFSET() (§8.5, ADR-038).
+        //
+        // That window is no longer compared against the Redis claim's at all,
+        // and the sentence that said so was one window short of the rule: two
+        // clocks for one window is the hazard, and the marker's purge used to
+        // put two clocks across TWO windows. It now asks the claim store which
+        // claims it has let go and deletes only those (ADR-039), so the
+        // marker's cutoff orders rows against each other and nothing else.
+        //
+        // Here a substitutable clock is worth more, because nothing about the
+        // inbox breaks when a test moves it.
         db.Set<InboxMessage>().Add(new InboxMessage(messageId, endpoint, clock.GetUtcNow()));
         await db.SaveChangesAsync(context.CancellationToken);
     }
@@ -3913,9 +3959,9 @@ public sealed class FlagOrderForReviewHandler(IUnitOfWork unitOfWork, TimeProvid
             // test host substitutes the clock, and a row written on the
             // server's wall clock is one no substituted clock can reason about.
             //
-            // Its third statement — §8.5's marker — deliberately does the
-            // opposite, and the carve-out is narrower than it reads. That row
-            // is written at one end and deleted at the other, and the interval
+            // Its third — §8.5's marker — deliberately does the opposite, and
+            // the carve-out is narrower than it reads. That row is written at
+            // one end and selected for deletion at the other, and the interval
             // between them is a correctness property, so one clock on both ends
             // beats a movable one (ADR-038). RaisedAt has no such pairing:
             // nothing purges it, and what reads it is §13.6 against wall time.

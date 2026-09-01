@@ -1102,12 +1102,12 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 >
 > Measured rather than assumed, because that propagation is load-bearing: on
 > `Common.Infrastructure.Tests`, `Category=Integration` selects the
-> twenty-seven tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy-two — 99 as the runner
+> thirty-four tests of the three classes in the collection and
+> `Category!=Integration` selects the other seventy-two — 106 as the runner
 > counts them, with no third state and nothing counted twice. Those figures
 > read ten/81, then twenty/91, then twenty-three/94, then twenty-four/95, then
-> twenty-six/97, then twenty-six/98, and every retake up to the last two was
-> the suite growing while the callout did not. **The count of retakes is not
+> twenty-six/97, then twenty-six/98, then twenty-seven/99, and every retake up
+> to the last three was the suite growing while the callout did not. **The count of retakes is not
 > written here either**, for the reason the figures keep demonstrating: it has
 > been wrong
 > at each of them. What a reader can check is whether this pair matches
@@ -1122,7 +1122,11 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > branch that retired that floor's allowance
 > ([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin))
 > then added one integration case and rewrote the floor's own rather than
-> adding to them, so only the integration half moved. The pair above is what a
+> adding to them, so only the integration half moved. The branch after it
+> ([ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it))
+> moved the same half again and by more — seven cases for the port's fifth
+> member, every one of them needing the server it asks — and left the fast half
+> at seventy-two for the third retake running. The pair above is what a
 > run reports now. A figure that has only ever
 > grown teaches the next reader to check whether it is *behind*; one that
 > moves both ways has to be re-measured instead.

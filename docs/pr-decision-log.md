@@ -68,6 +68,141 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-34 — the term no margin could bound, and the question that replaced it
+
+**PR-33 filed the issue this PR closes, in its own "What is owed" section,
+which is now the second time running.** ADR-038 removed two of the three terms
+that made the marker's expiry a guess and was explicit that the third was
+untouched: Redis counts the claim's window, SQL Server counts the marker's, and
+nothing couples the rates. A forward step of the database's clock — an NTP
+correction, a host migration, a resumed snapshot — carries the purge's cutoff
+past a marker whose claim is still live, the claim then expires into a table
+that has already forgotten the commit, and the next retry runs a committed
+command a second time.
+
+**What made it worth a PR rather than a paragraph is where the exposure was
+worst.** The margin absorbing a step was the handler's runtime plus whatever
+the configured window exceeded the floor by — six days on the shipped defaults,
+and nothing at all at the floor. The floor is the value §8.5 and this log both
+describe as the supported way to buy back the late retry ADR-037 costs. **The
+one configuration this platform recommends narrowing towards was the one with
+no margin left**, which is not a residual to document a third time.
+
+### A margin was refused for the third time, and then the comparison was
+
+ADR-037 added `MarkerLeadAllowance` to bound two terms. ADR-038 removed both at
+the source, retired the allowance, and wrote down why a number would not do:
+*a margin that stands in for an unbounded quantity is a guess with a number on
+it*. A clock step is bounded by nothing this repository can assert, so the same
+sentence disposes of any figure this PR could have written.
+
+What was left was to notice what the arithmetic was *for*. **The marker
+outlives the claim** is a statement about two instants that two different
+servers produce. **The claim is gone** is a question, and the store holding the
+claim is the only thing that can answer it. `IIdempotencyStore` gains
+`UnheldAsync`, `RetentionPurgeService` selects candidates by age and then asks,
+and no clock is read on either side of the decision.
+
+**Age still selects and no longer deletes, which is the sentence to carry.**
+The `DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())` cutoff ADR-038
+introduced is unchanged and still the database's own clock — it decides which
+markers have served their window. What it stopped deciding is whether they may
+go.
+
+### Three things the shape cost, each stated rather than absorbed
+
+**The pass is two statements, so it can be blocked at the head.** A batch the
+store still holds keys from would be returned unchanged by the next `SELECT`,
+so the pass stops there rather than re-reading and re-asking for no deletions.
+Candidates come back oldest first, which puts the rows likeliest to hold a live
+claim — the newest — at the tail where the stop costs least.
+
+**The delete is by key, which meets a limit belonging to another layer.**
+Dapper expands `IN @Keys` into one parameter per element and SQL Server refuses
+more than 2,100, where the default `BatchSize` is 5,000. Chunking at a thousand
+keeps `BatchSize` meaning rows considered per batch instead of being quietly
+capped by a number nobody set.
+
+**The purge now depends on Redis, and the failure directions differ.** A
+service with markers and no claim store fails to resolve at startup, which is
+loud. An unreachable store mid-pass throws, reaches the existing catch, and
+leaves every marker in place — markers accumulate, which is the outbox's
+failure mode and not a lost guarantee.
+
+### The floor survives and makes a smaller claim
+
+`RetentionPolicy.IdempotencyWindow` still may not go below
+`IdempotencyRetention.MarkerFloor`, and the refusal message had to be rewritten
+because its stated reason became false. A shorter window no longer re-opens the
+duplicate — the purge waits for the claim regardless — it simply asks for a
+guarantee shorter than the claim already gives, which is a setting that cannot
+do what it says. **What the floor bounds now is how long §8.5's guarantee lasts
+rather than whether it holds**, which is the distinction it could not draw
+while it was the thing making the ordering true.
+
+### The test could not be written from the clock's side
+
+No suite here owns the database container's clock, so a forward step cannot be
+staged. What can be staged is the state a step produces: a marker thirty days
+old with a live claim behind it. **The companion test is what makes the pair
+mean anything** — it releases the claim and watches the same row go, so a purge
+that had simply stopped deleting markers fails rather than passing both. That
+is `CLAUDE.md`'s most-repeated failure in the shape a regression test takes it,
+and the reason the first test alone would have been worse than none.
+
+### The lifetime half of #157, because one pull request is one row
+
+ADR-033's 330-second revocation bound and ADR-034's no-refresh-token rule were
+enforced by one file test over §14.1's Compose realm. Every chart points at an
+externally provisioned authority this repository holds no configuration for, so
+both read as platform guarantees and were true locally.
+
+**A token is where a realm's answer is observable without credentials nobody
+here has.** Every host already validates one on every request, and a token
+carries how long it has left, so `AddJwtAuthentication` now refuses one
+carrying more than `AuthenticationExtensions.RevocationBound`. The three shapes
+#157 named all wanted something the platform lacks — admin credentials in CI, a
+discovery document that does not expose token lifetimes, or somebody's realm
+turned into this repository's artefact.
+
+**The inexact form was chosen deliberately and the choice is argued in
+ADR-040.** `exp - iat` is sharper and needs `iat`, which RFC 7519 makes
+optional — so an issuer omitting the claim would switch the control off by
+omission, and a control any subject can decline is not one. Measuring remaining
+life against this host's clock instead makes the ceiling the *bound* rather
+than the lifetime, which tolerates exactly the drift §11.3 already declares
+tolerable. A realm at 320 or 330 seconds passes; five hours does not.
+
+**`RealmImportTests` said why it held a literal, and the condition it named is
+what changed.** "A constant nothing reads would be a registration standing in
+for a control, which is the shape ADR-033 was written to withdraw" — correct
+while the number was only ever asserted against the shipped realm. Something
+reads it now, so `AccessTokenLifetime` is declared once and that suite reads it.
+**The taste did not change; the condition did**, and an edit that moved the
+constant without saying which would read as the reverse.
+
+### What is owed
+
+- **ADR-034's half of #157 is not closed and cannot be closed this way.** A
+  refresh token passes between the browser and Keycloak and never reaches a
+  service, so `use.refresh.tokens`, `standardFlowEnabled` and
+  `directAccessGrantsEnabled` remain obligations on whoever provisions a
+  deployed realm. #157 stays open for exactly that, and both ADR-033's
+  amendment and ADR-034's note are written to keep a reader from carrying one
+  across to the other.
+- **A misconfigured realm is now an outage rather than a weakened bound.** That
+  is the posture the authority guard already takes for metadata over plain
+  HTTP, and it is a real availability cost taken on purpose. Nothing here
+  measures how a cluster behaves when it is paid.
+- **#127 is unchanged and is now the only residual of the three.** A handler
+  outrunning its claim reaches §6.3's stamp after the claim has gone, for
+  reasons no clock is involved in. No value of the retention floor reaches it.
+- **The race between the `SELECT` and the `DELETE` is stated in ADR-039 and not
+  closed.** A retry can re-claim a key between the two. It is not a
+  regression — one `DELETE` had the same window — and both attempts are already
+  past `Window` from the original commit, where §8.5's guarantee ends by
+  design.
+
 ## PR-33 — the two terms an allowance stood in for, and what closed them
 
 **#167 and #168 were filed by the PR that created them, which is the part

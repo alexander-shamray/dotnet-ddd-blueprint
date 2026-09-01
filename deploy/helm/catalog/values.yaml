@@ -134,8 +134,11 @@ database:
 # account, whose permissions deploy/compose/rabbitmq/definitions.json declares
 # and `check_permissions.py` holds to the code. **Provisioning those accounts
 # on a deployed broker is an obligation this repository states and does not
-# check** — the same division §15.4 draws for every Secret, and the same one
-# ADR-033 draws for the realm.
+# check** — the same division §15.4 draws for every Secret, and the one ADR-034
+# still draws for the realm's refresh-token settings. ADR-033's half of that
+# analogy is gone: since ADR-040 every host refuses a token carrying more than
+# the revocation bound, so the access-token lifetime is enforced rather than
+# stated. Nothing here does the equivalent for a broker account.
 broker:
   enabled: true
   secretRef:

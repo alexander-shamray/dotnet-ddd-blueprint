@@ -898,6 +898,32 @@ own line rather than sending a reader to a file that does not hold it.
   is a constant whose own comment says it bounds rather than removes** —
   written honestly, and honest about being a guess. Ask what makes the quantity
   unbounded before choosing the number that covers it.
+- **When a term will not be bounded, check whether the comparison it sits in is
+  standing in for a fact something already owns.** The entry above closed two
+  terms at the source and left a third: the claim's window is counted by
+  Redis's clock and the marker's by the database's, and a clock step is bounded
+  by nothing a repository can assert — so a fourth margin was as wrong as the
+  first three. The move that worked was not a better number but noticing what
+  the arithmetic was *for*. *The marker outlives the claim* is a statement about
+  two instants two servers produce; *the claim is gone* is a question, and the
+  store holding the claim is the only thing that can answer it. The purge now
+  selects by age and then asks, so no clock is read on either side of the
+  decision. **The tell is a comparison whose two sides are produced by different
+  systems** — one of those systems usually knows the answer directly, and asking
+  it removes the term instead of bounding it. It costs a round trip and a
+  dependency, and both are cheaper than a guess whose failure is silent.
+- **A validation can outlive the reason it was added, and the message is where
+  that goes unnoticed.** The same floor still refuses a marker window below the
+  claim's, and its refusal message argued that a shorter window purges the
+  marker first and lets a committed command run twice. After the change above
+  that sentence is simply false — the purge waits for the claim whatever the
+  window says — while the check it justifies is still right, for a different
+  and smaller reason: a shorter window asks for a guarantee shorter than the
+  claim already gives, so it is a setting that cannot do what it says. **A guard
+  whose stated reason has been closed is a guard nobody can evaluate.** When a
+  fix removes the failure a validation was written against, re-argue the
+  validation or delete it; leaving the old argument in an exception message
+  ships a claim the code disproves, to the one reader who has already hit it.
 - **A test that pins a design correctly is the thing you have to edit when the
   design changes, and the edit is where the change gets hidden.** Two tests
   asserted the behaviour the two fixes above inverted — that completing an

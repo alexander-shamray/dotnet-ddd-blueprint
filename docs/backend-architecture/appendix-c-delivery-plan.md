@@ -267,6 +267,45 @@ changed too.
 |---|---|---|---|
 | **33** | `fix(common): the marker and its claim are ordered by construction` | 32 | `IIdempotencyStore.CompleteAsync` without a retention, over a Lua `SET … KEEPTTL` — so a claim's window runs from `TryClaimAsync` and the completion never re-arms it. `IdempotencyMarker.CommittedAt` written by a `SYSDATETIMEOFFSET()` column default declared `ValueGeneratedOnAdd`, `EfIdempotencyMarkerStore` without its `TimeProvider`, and `RetentionPurgeService`'s marker statement computing `DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())` where the outbox's and the inbox's keep the `@Before` they were given. `IdempotencyRetention.MarkerLeadAllowance` retired and `MarkerFloor` reduced to `Window`, so a marker window equal to the claim's is admitted. Per service a migration, and §4.5's scaffold carrying it. **Both halves are needed and neither is sufficient**: a column default with an application-computed cutoff still compares two clocks, and a SQL cutoff against an application-stamped column does the same — which is why one row delivers both. **Two tests had to be inverted, and both were good tests.** One asserted that completing *re-armed* the TTL, and an earlier review round had already shortened the key first so that the assertion could fail; the other asserted that a window equal to the claim's was *refused*, and carried the argument in place. A test that pins a design correctly is the thing you edit when the design changes, which is the moment the change gets hidden — so each keeps its history in the comment, and the floor's test now also asserts that `MarkerFloor` equals `Window`, making its subject the relationship rather than a number. It also closes [#166](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/166) and [#164](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/164), because one pull request is one row: an inbox assertion that claimed both *the filter suppressed the duplicate* and *no other row exists anywhere in the schema* now reads by message id through the fixture helper every test calls, and §4.5's scaffold refuses a service name whose §7.1 connection key would collide with a §14.1 infrastructure one — by reading the environment keys back off the block it has just rendered rather than by holding a list of names that would go stale the first time the template gained a key |
 
+**The seventh row is PR-33's kind again, and it arrives against the row
+immediately above it for the second time running.** PR-33 removed two of the
+three terms that made the marker's expiry a guess and said, in
+[ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)'s
+own consequences, that the third was still open: the claim's window is counted
+by Redis and the marker's by SQL Server, nothing couples the rates, and what
+absorbs a forward step of the database's clock is **nothing at all at the
+floor** — the value §8.5 recommends narrowing towards. It filed
+[#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)
+rather than fixing it, because the fix changes what §8.5 promises. So again
+nothing was missing from the plan and nothing was mis-delivered; the
+specification asked for an ordering it could not establish.
+
+**The rule that moves is the one ADR-037 introduced and ADR-038 halved.**
+`RetentionPolicy.IdempotencyWindow`'s floor stops being what makes *the marker
+outlives the claim* true and becomes what decides **how long §8.5's guarantee
+lasts** — a smaller claim, and a checkable one, because the purge now refuses
+to delete a marker whose claim is live at any setting. `IIdempotencyStore`
+gains a fifth member and `RetentionPurgeService` gains a constructor
+dependency on it, so a service with markers and no Redis stops resolving at
+startup. A reader of the rows above would have no reason to look for either.
+
+**It carries a gap in coverage as well, because one pull request is one row.**
+ADR-033 and ADR-034 state platform guarantees whose settings live in a realm,
+and the only realm this repository owns is
+[§14.1](14-local-development.md)'s Compose one. Every chart points somewhere
+else, so both guarantees were verified locally and merely stated everywhere
+they mattered
+([#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)).
+No row ever claimed to close that, which is what makes it a gap rather than a
+correction — and **it is closed by half, with the row saying which half**: a
+token carries how long it has left, so the lifetime is enforceable at every
+host; a refresh token never reaches one, so ADR-034's rule stays an obligation
+and #157 stays open for it.
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **34** | `fix(common): the marker's purge asks the claim rather than out-counting it` | 33 | `IIdempotencyStore.UnheldAsync`, a fifth member answering which of a batch of keys the store no longer holds — not token-checked, on `GetAsync`'s reasoning, and required to answer for every key or throw, because a key reported unheld on a failed lookup is the deleted marker it exists to prevent. `RedisIdempotencyStore` implements it as one pipelined `EXISTS` per key rather than one multi-key command, since §8.3's keys vary in the `{commandId}` segment and would be a `CROSSSLOT` error on a clustered instance. `RetentionPurgeService`'s marker pass becomes **select, ask, delete**: the same `DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())` cutoff selects candidates oldest first, `UnheldAsync` says which of them the claim store has let go, and only those are deleted by key — chunked at a thousand, because Dapper expands `IN @Keys` to one parameter each and SQL Server refuses more than 2,100 where the default `BatchSize` is 5,000. The pass stops on a short `SELECT` or on a batch it could not fully delete, since the next `SELECT` would return those same rows unchanged. **No margin was added, and that is the decision** ([ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)): a clock step is bounded by nothing this repository can assert, ADR-037 and ADR-038 had already paid for two attempts to bound one, and the comparison was standing in for a fact the claim store can simply be asked for. **Shape 1 from the issue was refused with a reason** — deriving the claim's expiry from the database too would make it one clock's arithmetic and cost §8.5 the property that a claim expires without anybody running a purge, which is the postponement ADR-037 declined by another route. **The regression test cannot be written from the clock's side**, since no suite owns the container's clock, so it stages the state a forward step produces — a thirty-day-old marker with a live claim behind it — and a companion releases that claim and watches the same row go. Without the companion, a purge that had simply stopped deleting markers would pass. It also closes the lifetime half of [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157), because one pull request is one row: `AuthenticationExtensions` gains `AccessTokenLifetime` and `RevocationBound` and an `OnTokenValidated` event refusing any token carrying more remaining life than that bound, `TokenValidationParameters.ClockSkew` is set from the same private field the bound is composed with so ADR-033's 330 appears as a literal nowhere, and `RealmImportTests` reads the constant instead of its own `const int 300`. **Remaining life against this host's clock, not `exp - iat`** ([ADR-040](appendix-a-adrs.md#adr-040--the-access-token-lifetime-is-enforced-at-every-host)): the exact form needs `iat`, which RFC 7519 makes optional, so an issuer omitting it would switch the control off by omission — a control any subject can decline is not one. The cost is stated rather than hidden: measuring against our own clock makes the ceiling the bound and not the lifetime, so a realm at 330 seconds passes and one at 320 passes, while five hours, thirty minutes and six minutes do not. **Refused rather than logged**, on the posture `AddJwtAuthentication` already takes for metadata over plain HTTP — a misconfigured realm 401s every host instead of quietly widening the window between a revocation and its effect, and that availability cost is taken deliberately. The refresh-token half stays open, because no host can observe a token that never reaches it |
+
 ## C.3 Dependency graph
 
 ```mermaid
