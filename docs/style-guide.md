@@ -19,12 +19,21 @@ about to break without knowing it is the case `CLAUDE.md`'s short list under
 this is the file where that failure has a name. **The rules marked
 review-carried are why it exists**: no analyser reaches them, so this file and
 a reviewer are the only things that do, and a summary of one is how it gets
-"corrected" back into the corpus. Two edits were made on the way out. The
-headings kept their levels under this file's title, so nothing moved. And one
-**self-reference was rebased**: a sentence noting that `CLAUDE.md` makes the
-same argument about its own line count said "the top of this file", which was
-true in its old home and points at the wrong document here. Not one argument
-was shortened and no paragraph was dropped.
+"corrected" back into the corpus. The headings kept their levels under this
+file's title, so nothing moved. And one **self-reference was rebased**: a
+sentence noting that `CLAUDE.md` makes the same argument about its own line
+count said "the top of this file", which was true in its old home and points at
+the wrong document here. Not one argument was shortened and no paragraph was
+dropped.
+
+**Two claims were then corrected in the same pull request, by review rather
+than by the move**, and they are listed here because the sentence above would
+otherwise read as covering them: the fence inventory was missing `promql`,
+which §13 had been using throughout, and the whitespace rule overstated what
+the build enforces — `.editorconfig` permits an aligned `=` in an initialiser
+on purpose. Neither is an argument shortened; both are a claim brought back to
+what is measurable. **A file that says "verbatim" earns the right to say it by
+listing what it is not.**
 
 **A short list of these rules stays in `CLAUDE.md`**, under *Style*, because
 they have to be true of an edit made before anyone opens this file. **This file
@@ -506,8 +515,26 @@ file and a reviewer are the only things that do.
 ### Whitespace, suppressions and secrets
 
 - **One space before `=`, `=>` and `{` — never a column of them.** Padding a
-  token out to line up with the one above fails the build: IDE0055 reports it
-  and ADR-019 makes that an error.
+  token out to line up with the one above is the house form this rule
+  refuses.
+
+  **How much of it the build actually catches is narrower than this rule,
+  and the gap is deliberate on the build's side.** IDE0055 reports the
+  padded member declaration below and ADR-019 makes that an error — but
+  `.editorconfig` sets `csharp_space_around_declaration_statements =
+  ignore`, arguing in its own comment that extra spaces before `=` are
+  *alignment, not accident*, and naming the initialiser members that rely
+  on it. So an aligned `=` column in an object initialiser compiles green,
+  and the corpus holds live examples in `OutboxDispatcher` and Catalog's
+  query handlers.
+
+  **The two statements were contradictory for as long as both existed**,
+  and this is the documentation reconciled to the measurement rather than
+  the rule relaxed: what the build enforces is one thing, what this file
+  asks of a reviewer is another, and only the first was overclaimed.
+  Flipping that setting to `false` would collapse every aligned initialiser
+  in the corpus, which is a `/style-pass` decision about the whole corpus
+  and not one to take inside an extraction.
 
   ```csharp
   // Fails the build. Every line but the longest carries the diagnostic.
@@ -579,8 +606,21 @@ solution is written the same way. Changing one is a decision about the whole
 corpus, not about the file in front of you.
 
 **Fence languages in use:** `csharp`, `sql`, `yaml`, `bash`, `json`, `mermaid`,
-`dockerfile`, `xml`, and bare ``` for trees and console output. Always tag a
-fence that contains a real language.
+`dockerfile`, `xml`, `promql`, and bare ``` for trees and console output.
+Always tag a fence that contains a real language.
+
+  `promql` was missing from that list for as long as the list existed, and
+  §13's alert expressions have been fenced with it throughout — the inventory
+  was written from the languages somebody remembered rather than from the
+  corpus. The predicate is one command, so run it rather than trusting the
+  sentence: grep the blueprint for lines opening a fence with a language tag,
+  then `sort | uniq -c`. It returns exactly these nine.
+
+  **That command is described rather than quoted, and the reason is a rule
+  this file states elsewhere.** A fence marker cannot sit inside a
+  single-backtick span, and a fenced block quoting one has to be opened with
+  four backticks — so the literal form is a rendering trap in a paragraph
+  whose whole subject is fence markers.
 
 ## SQL style
 

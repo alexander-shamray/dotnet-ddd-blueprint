@@ -209,10 +209,14 @@ triggers that fire before anyone thinks to open it.
   `PackageReference` naming its own `Version` restores a package no register
   row was asked about.
 - **A `.TestSupport` project is not a test project (§4.1)**, and it exists for
-  two suites sharing a fixture and unable to reference each other. A host gets
-  none — `Gateway.Api.Tests` carries a second copy of Catalog's
-  `TestAuthHandler` deliberately, because §4.3 permits exactly one assembly to
-  cross a service boundary and a test helper is not it.
+  two suites sharing a fixture and unable to reference each other. A host
+  usually gets none — `Gateway.Api.Tests` carries a second copy of Catalog's
+  `TestAuthHandler` deliberately, because §4.3 permits exactly one assembly
+  to cross a service boundary and a test helper is not it. **`Web.Bff` is
+  the exception and the tree above lists it**: `StubCatalog` compiles the
+  server half of a `.proto` whose client half `Web.Bff` already compiles,
+  and both in one assembly makes every message type a CS0436. Saying a host
+  gets none full stop contradicts this file's own tests line.
 
 **Precedence where two documents disagree**, each already settled: Appendix C
 beats `docs/roadmap.md`, §12 beats `docs/testing.md`, §15.4 beats
