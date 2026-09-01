@@ -2378,9 +2378,10 @@ deletes it is a retention window this repository chooses.
 ## ADR-038 — The marker and its claim are ordered by construction, not a margin
 
 **Decision.** [§8.5](08-caching-redis.md)'s Redis claim and [§6.3](06-cqrs.md)'s
-durable marker are ordered so that the marker outlives the claim for every
-configuration `RetentionPolicy` admits, with no margin standing in for
-anything. Two changes are needed and neither is sufficient alone.
+durable marker are ordered by the shape of the code rather than by a margin:
+the claim's window **starts** before the marker is stamped, on the same thread
+in the same dispatch, for every configuration `RetentionPolicy` admits. Two
+changes are needed and neither is sufficient alone.
 `IIdempotencyStore.CompleteAsync` **preserves what the claim had left** instead
 of re-arming a fresh retention, so the claim's window runs from the claim.
 `IdempotencyMarker.CommittedAt` is written by a `SYSDATETIMEOFFSET()` column
@@ -2388,6 +2389,16 @@ default and the marker's purge cutoff is computed in SQL, so the row's age is
 one clock's arithmetic. `IdempotencyRetention.MarkerLeadAllowance` is retired,
 `MarkerFloor` is `Window` unchanged, and a marker window equal to the claim's
 is admitted.
+
+**That the marker's expiry then falls after the claim's is a conclusion drawn
+from that ordering, and this record does not decide it.** It needs the two
+windows counted at the same rate, and they are counted by two servers — Redis
+for the claim, SQL Server for the marker — which is
+[#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171);
+and it needs the handler to finish inside the claim's window, which nothing
+here bounds. Both are stated under *Consequences* rather than folded into the
+decision, because a decision that claims what its own consequences take back is
+the contradiction this appendix exists to keep out.
 
 **Why.** ADR-037 put a correctness property at a boundary set by a retention
 number, and then could not make the two numbers alone decide it. The rule it
@@ -2491,12 +2502,15 @@ clock is a service that needs a different seam, not a different column.
   would repeat in a third term the mistake this record removes from two. What
   closes it is giving both deadlines one time source, which is a change to how
   the claim is stored and belongs to its own record.
-- **The backwards direction is an assumption too, and a smaller one.** An
-  operator who winds the server's clock back by more than the marker's window
-  makes every existing marker look young and every new one look old. That is a
-  smaller and more visible surface than three pods drifting apart — one clock,
-  on the machine that owns the data — but it is an assumption where there used
-  to be a margin, and it is stated rather than implied.
+- **A backward step of the server's clock is harmless on its own, and there is
+  no second hazard here to state.** Both ends of the purge predicate —
+  `CommittedAt` and `DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())` —
+  read the clock the step moves, so a marker stamped after it is aged against a
+  cutoff on the same shifted timeline and expires on schedule; the rows stamped
+  before it survive the step's own size longer, which is the direction that
+  costs nothing — a marker outliving its claim by more is what the floor is
+  for. What is not harmless is the forward correction that follows, and that is
+  #171's forward step rather than a hazard of its own.
 
 ---
 

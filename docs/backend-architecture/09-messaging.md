@@ -2020,7 +2020,13 @@ the duplicate returns at a boundary set by a retention setting
 ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
 Matching the claim exactly is admitted, and that is the floor's whole shape
 rather than a rounding of it: the claim is taken before the marker is stamped,
-so the marker outlives it for every window at least as long
+so the marker outlives it for every window at least as long. **Only the two
+*start* events are ordered by construction, and the conclusion drawn from them
+carries two assumptions** — that Redis's clock and this server's tick at the
+same rate, since the two windows are counted by one each
+([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)),
+and that the handler finishes inside the claim's window, which
+[§8.5](08-caching-redis.md) carries as a residual of its own
 ([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
 
 **Its statement is also the one of the three that computes its own cutoff**,

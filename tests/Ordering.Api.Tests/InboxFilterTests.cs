@@ -491,14 +491,32 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
     {
         // The subject is the fixture's reader rather than the filter, and it is
         // owed for the reason every gate here is owed: a scoped read that
-        // matched nothing would make every assertion above pass vacuously, on
-        // a green run, for as long as nobody looked. #166 measured what an
+        // matched everything would make every assertion above pass vacuously,
+        // on a green run, for as long as nobody looked. #166 measured what an
         // unscoped read costs; this is what shows the scoped one is looking at
-        // anything at all.
+        // the id it was handed.
         //
-        // Homed in this suite alone, on the same argument as the suppression
-        // counter above — the reader is one helper copied into both fixtures,
-        // and this is a property of the read rather than of either service.
+        // Everything rather than nothing, and the direction is what these two
+        // rows are for. A reader matching nothing is already loud: the waits
+        // above are `Eventually(..., expected: 1)` and `expected: 2`, and one
+        // that never reaches its count spins out its hundred attempts and then
+        // fails on an empty list. The mutation that passes in silence is the
+        // opposite one — a dropped `Where`, or a predicate like
+        // `m => m.MessageId != Guid.Empty` that never reads its argument —
+        // because every test above runs after a ResetAsync that leaves its own
+        // rows the only ones in the table, so a reader ignoring its argument
+        // returns exactly what a correct one does. A second message staged
+        // here is what stops that being true.
+        //
+        // Carried in both services' suites rather than homed in this one,
+        // which is the opposite of the argument for the suppression counter
+        // above. That property belongs to `InboxFilter<T>` — one assembly both
+        // services reference, so one suite can hold it. `InboxAsync(Guid)` is
+        // not common code: it is a fixture helper written once per service, so
+        // this test cannot go red on Catalog's predicate and Catalog's cannot
+        // go red on this one. Two implementations are two subjects, and
+        // Catalog's copy is additionally the one §4.5's scaffold renders from;
+        // this one covers the fixture nothing renders.
         //
         // Staged rather than consumed, because no endpoint has to run: what
         // must differ between the two rows is the MessageId, and the filter

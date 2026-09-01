@@ -91,15 +91,26 @@ public sealed record RetentionPolicy
     /// replicas. A five-minute <c>MarkerLeadAllowance</c> bounded their sum
     /// rather than removing either. §8.5's completion now preserves the claim's
     /// remaining life (#168) and the marker is stamped and aged on the database
-    /// clock (#167), so the claim is taken before the marker is stamped and
-    /// expires before it is purged for every window at least as long, so equal
-    /// is the smallest window with no gap in it.
-    /// <see cref="IdempotencyRetention.MarkerFloor"/> argues it in full — and
-    /// states what it does <em>not</em> cover, which is that the two windows
-    /// are still counted by two servers' clocks, so a forward step of the
-    /// database's relative to Redis's has only the handler's runtime to be
-    /// absorbed by at this floor
-    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>).
+    /// clock (#167), so <b>the claim is taken before the marker is stamped —
+    /// unconditionally, the same thread inside the same dispatch</b> — and
+    /// equal is then the smallest window with no gap in it.
+    /// </para>
+    /// <para>
+    /// <b>"Then" is doing work there, and it is two assumptions rather than a
+    /// connective.</b> The claim expiring before the marker is purged does not
+    /// follow from the order the two were written in: the windows have to be
+    /// counted at the same rate, and the handler has to finish inside the
+    /// claim's window. <see cref="IdempotencyRetention.MarkerFloor"/> argues
+    /// both in full. The two windows are still counted by two servers' clocks,
+    /// so a forward step of the database's relative to Redis's has only the
+    /// handler's runtime to be absorbed by at this floor
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>);
+    /// and a handler outrunning that same claim is stamped after it has already
+    /// expired, which is §8.5's long-handler residual
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/127">#127</see>)
+    /// reaching this floor from the other end. Neither is a reason to raise the
+    /// floor: a number here bounds a clock step no better than the five minutes
+    /// it replaced, and bounds a runtime not at all.
     /// </para>
     /// <para>
     /// Read rather than restated, for the reason
@@ -222,10 +233,13 @@ public sealed record RetentionPolicy
                 "marker first; the claim then expires with nothing left to remember the commit, " +
                 "so the next retry claims a free key and runs the command a second time, and the " +
                 "write this platform guarantees happens once happens twice at a boundary set by " +
-                "a retention setting. Matching the claim exactly is admitted: the claim is taken " +
-                "before the marker is stamped, and both are now measured on one clock each — the " +
-                "claim's own TTL, preserved rather than re-armed at the commit, and the marker's " +
-                "against the database clock that wrote it.");
+                "a retention setting. Matching the claim exactly is admitted, on what is " +
+                "unconditional: the claim is taken before the marker is stamped, on one thread " +
+                "inside one dispatch. That the marker then outlives the claim additionally " +
+                "assumes the two windows are counted at one rate and that the handler finishes " +
+                "inside the claim's own — see IdempotencyRetention.MarkerFloor, which argues " +
+                "both. Neither is a reason to set this higher: a number here bounds a clock step " +
+                "no better than the allowance it replaced, and bounds a runtime not at all.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

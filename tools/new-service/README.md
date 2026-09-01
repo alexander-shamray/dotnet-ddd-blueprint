@@ -81,7 +81,8 @@ everything the delivery plan has built into the template so far:
 `DbContext` and conventions, `EfUnitOfWork`, the connection factory, the
 readiness checks, the §7.4 migrator host, the `InitialCreate` migration that
 creates the schema and the `AddOutbox`, `AddInbox`,
-`AddOutboxRetentionIndex` and `AddIdempotencyMarkers` ones beside it, §9.4's
+`AddOutboxRetentionIndex`, `AddIdempotencyMarkers` and
+`IdempotencyMarkerCommittedAtDefault` ones beside it, §9.4's
 outbox with its dispatcher and allow-list mapper, §9.5's inbox filter, §8.5's
 durable idempotency marker and the retention purge over all three of their
 tables, the §9 bus
@@ -89,6 +90,13 @@ registration — a scaffolded host refuses to start without
 `ConnectionStrings:RabbitMq` — §11.3's JWT validation and the test auth
 scheme, both Dockerfiles, the Compose pair, and the architecture gates of
 [§4.2](../../docs/backend-architecture/04-solution-structure.md).
+
+**The last of those migrations travels for a stronger reason than the table
+it alters.** The column default and the SQL cutoff that reads it are two
+halves of one guarantee, so a service scaffolded with the marker table and
+without the default ages its rows on the writing pod's clock while the purge
+ages them on the server's — the skew that migration exists to remove, shipped
+to every new service by omission.
 
 The service builds and its seventy-nine tests pass before you have written a
 line, and thirty-six of them run against real SQL Server and RabbitMQ

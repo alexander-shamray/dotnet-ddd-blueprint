@@ -367,7 +367,13 @@ fresh retention
 So a command that ran for an hour has spent an hour of its own replay window,
 and a retry arriving after it is *refused* rather than answered. That is the
 price of the ordering, paid deliberately: the claim is taken before the marker
-is stamped, so the marker outlives the claim for every window at least as long.
+is stamped, so the claim's window *starts* before the stamp — same thread and
+same dispatch, and that much is unconditional. **The conclusion is a step past
+it and carries two assumptions.** That the marker then outlives the claim for
+every window at least as long holds while the two clocks tick at the same rate,
+which the callout below states, and while the handler finishes inside the
+claim's window, which is the overrun this section carries as a residual at *A
+claim carries a token* further down.
 
 > **What holds by construction is the ordering of the two *start* events, and
 > not that the two windows are counted by one clock.** Redis expires the claim
@@ -516,9 +522,12 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     //
     // Passed once, on the claim, and the completion below does not extend it.
     // The window therefore runs from TryClaimAsync whatever the handler does,
-    // which is what puts the claim's expiry after the marker's stamp by
-    // construction rather than by a margin (ADR-038). A command that runs for
-    // an hour spends an hour of its own replay window.
+    // which is what puts the claim's window BEFORE the marker's stamp by
+    // construction rather than by a margin (ADR-038). Its START, and not its
+    // expiry: a handler outrunning the retention is stamped after the claim
+    // has already gone, and the two windows are still counted by two servers'
+    // clocks (#171). A command that runs for an hour spends an hour of its own
+    // replay window.
     private static readonly TimeSpan Retention = IdempotencyRetention.Window;
 
     // "null" and not the empty string. IdempotencyEntry carries a Payload the
@@ -1165,12 +1174,20 @@ WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
 > real clock instead — comfortably either side of the window, so what they
 > assert is the predicate rather than arithmetic near a boundary.
 >
-> **What is left is an ordering that holds by construction rather than by a
-> margin.** The claim is taken at `t0`, the marker is stamped at some `t1` no
-> earlier than it, the claim expires at `t0 + Window`, and the marker survives
-> until `t1 + IdempotencyWindow`. For any `IdempotencyWindow` at least as long
-> as `Window` the marker outlives the claim whatever `t1` is, so equality is
-> admitted rather than refused. `IdempotencyRetention.MarkerLeadAllowance` is
+> **What is left is a *start* ordering that holds by construction rather than
+> by a margin.** The claim is taken at `t0` and the marker is stamped at some
+> `t1` no earlier than it, on the same thread in the same dispatch — that much
+> nothing can falsify. The rest is arithmetic laid over it: the claim expires
+> at `t0 + Window`, the marker survives until `t1 + IdempotencyWindow`, and for
+> any `IdempotencyWindow` at least as long as `Window` the marker outlives the
+> claim, so equality is admitted rather than refused. **Two assumptions carry
+> that arithmetic and neither is construction.** The two sums are counted by
+> two servers' clocks, so it needs their rates to agree
+> ([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171));
+> and a handler outrunning `Window` reaches the stamp after `t0 + Window` has
+> already passed, leaving a stretch covered by neither — the overrun above,
+> whose damage the claim token bounds rather than closes.
+> `IdempotencyRetention.MarkerLeadAllowance` is
 > gone and `MarkerFloor` is `Window` unchanged — still a separate member,
 > because what it names is a *relationship* between two windows and not a
 > duration, and the next change to either is a change to it. A margin left

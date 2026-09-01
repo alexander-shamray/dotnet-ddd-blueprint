@@ -57,12 +57,21 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     /// required to be at least this long.
     /// <para>
     /// <b>It is passed once, on the claim, and the completion no longer
-    /// extends it.</b> The window therefore runs from
-    /// <c>TryClaimAsync</c> whatever the handler does, which is what puts the
-    /// claim's window before the marker's stamp by construction rather than by
-    /// a margin (#168) — the two windows are still counted by two servers'
-    /// clocks, which is #171. A command that runs for an hour spends an hour of
-    /// its own replay window.
+    /// extends it.</b> The window therefore runs from <c>TryClaimAsync</c>
+    /// whatever the handler does, which is what puts the claim's window
+    /// <em>start</em> before the marker's stamp by construction rather than by
+    /// a margin (#168).
+    /// </para>
+    /// <para>
+    /// <b>That start ordering is the only part of this that is by
+    /// construction.</b> Neither expiry ordering follows from it. The marker
+    /// outliving the claim needs the two windows counted at one rate, and they
+    /// are counted by two servers' clocks (#171); the claim outliving the stamp
+    /// needs the handler to finish inside this value, which nothing bounds —
+    /// §8.5's long-handler residual (#127), whose damage the claim token bounds
+    /// rather than removes. A command that runs for an hour spends an hour of
+    /// its own replay window, and one that runs for longer than this reaches
+    /// §6.3's stamp with nothing left to spend.
     /// </para>
     /// </summary>
     private static readonly TimeSpan Retention = IdempotencyRetention.Window;

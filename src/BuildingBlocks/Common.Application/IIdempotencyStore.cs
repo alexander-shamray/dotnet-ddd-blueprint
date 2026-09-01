@@ -111,8 +111,26 @@ public interface IIdempotencyStore
     /// <b>What that costs is stated in §8.5 rather than hidden here.</b> An
     /// outcome stays replayable for the remainder of the window the claim
     /// opened, so a slow command shortens its own replay window by however
-    /// long it ran. The guarantee it buys — the marker outlives the claim,
-    /// always — is the one the mechanism exists for.
+    /// long it ran. What it buys unconditionally is the ordering of the two
+    /// <em>start</em> events, and that is the whole of what this contract
+    /// promises: the claim's window opens at <see cref="TryClaimAsync"/> and
+    /// §6.3 stamps its marker at some later instant, on the same thread inside
+    /// the same dispatch.
+    /// </para>
+    /// <para>
+    /// <b>That the marker then outlives the claim is not promised here, on two
+    /// counts independent of each other.</b> The two windows are counted by two
+    /// servers' clocks — this one's by Redis, the marker's by SQL Server — so a
+    /// forward step of the database's relative to Redis's can purge the marker
+    /// while the claim is still live
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>).
+    /// And a handler that outruns the retention it was claimed with reaches
+    /// this method with the claim already expired, so the stamp lands after the
+    /// claim has gone for reasons no clock is involved in — §8.5's long-handler
+    /// residual, whose damage the claim token bounds rather than removes
+    /// (#127). Both are argued in full on
+    /// <see cref="IdempotencyRetention.MarkerFloor"/>; a consumer reading this
+    /// contract alone should assume neither.
     /// </para>
     /// </remarks>
     Task CompleteAsync(string key, string claim, string payload, CancellationToken ct);
