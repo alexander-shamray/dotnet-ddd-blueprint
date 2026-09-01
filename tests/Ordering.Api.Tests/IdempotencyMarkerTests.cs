@@ -95,6 +95,107 @@ public class IdempotencyMarkerTests(ServiceFixture fixture)
     }
 
     [Fact]
+    public async Task A_committed_marker_is_stamped_by_the_database_and_not_left_at_its_sentinel()
+    {
+        // #167's property, and the one nothing else in this suite can see.
+        // CommittedAt is a store default (ADR-038): MarkAsync constructs the
+        // row without a timestamp, EF omits a property still holding its
+        // sentinel from the INSERT, and SYSDATETIMEOFFSET() supplies the
+        // column. Every other test that reads this column stages its markers
+        // with an explicit timestamp — the escape hatch the entity keeps for a
+        // fixture — so all of them stay green if EF ever sends the sentinel
+        // instead, and the tests above this one count rows without looking at
+        // what is in them.
+        //
+        // **The assertion is the sentinel rather than a value, and it has to
+        // be.** Nothing here can prove WHICH clock wrote a plausible
+        // timestamp; what it can prove is that the column was not left at
+        // 0001-01-01, which is the state a regression produces and the one
+        // that makes every marker older than any window the purge can be
+        // given — purgeable the moment it is written, with §8.5's guarantee
+        // retired and the whole suite still green.
+        string key = Key();
+        Guid id = Guid.CreateVersion7();
+
+        await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
+        Result result = await RunAsync(scope, key, id, Result.Success());
+
+        result.IsSuccess.ShouldBeTrue();
+
+        // Keyed rather than read whole, for the reason ServiceFixture's
+        // InboxAsync(Guid) gives one table over: classes in this collection
+        // share the fixture and run in sequence, so an unkeyed read asserts
+        // test isolation alongside the claim and fails on the half that is
+        // nobody's.
+        IdempotencyMarker marker = (await fixture.IdempotencyMarkersAsync())
+            .Where(candidate => candidate.Key == key)
+            .ShouldHaveSingleItem();
+
+        marker.CommittedAt.ShouldNotBe(
+            default,
+            "the marker was written at the CLR sentinel of 0001-01-01, so the store default never " +
+            "fired and this row is already older than any retention window it could be given");
+
+        // An hour either side, and generous on purpose. SYSDATETIMEOFFSET()
+        // reads the SQL Server container's clock, which is this host's, so the
+        // two agree far closer than that — the width is here so the test
+        // cannot fail for a reason that is not its subject, and it still
+        // refuses the sentinel by two thousand years.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        marker.CommittedAt.ShouldBeInRange(
+            now.AddHours(-1),
+            now.AddHours(1),
+            "a stamp this far from now is not a clock at all");
+    }
+
+    [Fact]
+    public async Task The_stamp_above_comes_from_a_default_constraint_on_the_column()
+    {
+        // The mechanism the test above is looking at, asserted separately
+        // because the two fail apart: a marker could carry a plausible
+        // timestamp because some insert path wrote one, and from the value
+        // alone that is indistinguishable from the default firing. This is
+        // what makes the stamp a property of the schema rather than of one
+        // caller — and it is the half that fails if the migration is ever
+        // regenerated without the default.
+        //
+        // The form is OrderFulfilmentSagaEndpointTests' pair over the saga's
+        // retained column, which is the same claim about a different default.
+        (await fixture.ScalarAsync<int>(
+            """
+            SELECT Value = COUNT(*)
+            FROM sys.default_constraints d
+            INNER JOIN sys.columns c
+                ON c.object_id = d.parent_object_id
+                AND c.column_id = d.parent_column_id
+            WHERE d.parent_object_id = OBJECT_ID('ordering.IdempotencyMarkers')
+                AND c.name = 'CommittedAt'
+            """))
+            .ShouldBe(
+                1,
+                "ADR-038 puts the marker's age on the database's clock, and the constraint is the " +
+                "only thing that stamps a row whose INSERT omits the column");
+
+        // Lowered, because SQL Server keeps a constraint's definition as the
+        // text it was written with — a hand-written migration may spell the
+        // function in any case, and the case is no part of what this asserts.
+        (await fixture.ScalarAsync<string>(
+            """
+            SELECT Value = LOWER(d.definition)
+            FROM sys.default_constraints d
+            INNER JOIN sys.columns c
+                ON c.object_id = d.parent_object_id
+                AND c.column_id = d.parent_column_id
+            WHERE d.parent_object_id = OBJECT_ID('ordering.IdempotencyMarkers')
+                AND c.name = 'CommittedAt'
+            """))
+            .ShouldContain(
+                "sysdatetimeoffset",
+                customMessage: "a default of GETUTCDATE() or a literal satisfies the count above and " +
+                "puts the column back on a clock the purge's cutoff does not read");
+    }
+
+    [Fact]
     public async Task Every_operation_name_leaves_room_for_the_key_it_forms()
     {
         // §8.5's key is {subject}:{operation}:{commandId}, and the marker column

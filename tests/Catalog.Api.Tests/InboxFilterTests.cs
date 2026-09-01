@@ -394,6 +394,54 @@ public sealed class InboxFilterTests(ServiceFixture fixture) : IAsyncLifetime
         resolved.ShouldBeSameAs(own);
     }
 
+    [Fact]
+    public async Task The_scoped_inbox_read_returns_only_the_message_it_was_asked_for()
+    {
+        // The subject is the fixture's reader rather than the filter, and it is
+        // owed for the reason every gate here is owed: a scoped read that
+        // matched everything would make every assertion above pass vacuously,
+        // on a green run, for as long as nobody looked. #166 measured what an
+        // unscoped read costs; this is what shows the scoped one is looking at
+        // anything at all.
+        //
+        // Duplicated into both suites on purpose, which is the opposite of the
+        // argument that homes the suppression counter in Ordering's copy alone.
+        // That property belongs to `InboxFilter<T>` — one assembly both
+        // services reference, so one suite can hold it. The scoped read is not
+        // common code: it is a fixture helper written once per service, and a
+        // test over Ordering's copy cannot go red on Catalog's predicate. Two
+        // implementations are two subjects.
+        //
+        // This is also the copy that travels. §4.5's scaffold renders a new
+        // service from tests/Catalog.Api.Tests and tests/Catalog.TestSupport,
+        // so a Catalog suite without this test hands every service scaffolded
+        // from it the same helper with nothing that would fail if its `Where`
+        // were dropped.
+        //
+        // Staged rather than consumed, because no endpoint has to run: what
+        // must differ between the two rows is the MessageId, and the filter
+        // only ever writes the one it was handed.
+        var mine = Guid.CreateVersion7();
+        var anotherMessage = Guid.CreateVersion7();
+
+        await fixture.StageInboxAsync(
+            new InboxMessage(mine, FirstEndpoint, DateTimeOffset.UtcNow),
+            new InboxMessage(anotherMessage, FirstEndpoint, DateTimeOffset.UtcNow));
+
+        (await fixture.InboxAsync(mine)).ShouldHaveSingleItem().MessageId.ShouldBe(mine);
+
+        // Both ids, not a count. Asserting the table holds exactly two rows
+        // would be the very claim about the whole schema #166 removed — and it
+        // would leave this test flaking on the leak that change was made to
+        // survive. What has to be true is that the unscoped read saw the row
+        // the scoped one filtered out, which is what distinguishes "the filter
+        // works" from "there was only ever one row".
+        IReadOnlyList<Guid> all = [.. (await fixture.InboxAsync()).Select(r => r.MessageId)];
+
+        all.ShouldContain(mine);
+        all.ShouldContain(anotherMessage, "the scoped read filtered this row rather than never seeing it");
+    }
+
     /// <summary>
     /// Polls until the expected row count appears. The harness confirms the
     /// message was consumed on <em>an</em> endpoint; with two endpoints running
