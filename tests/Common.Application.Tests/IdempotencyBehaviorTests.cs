@@ -510,13 +510,8 @@ public class IdempotencyBehaviorTests
         public Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct) =>
             Task.FromResult<IdempotencyEntry?>(null);
 
-        public Task CompleteAsync(
-            string key,
-            string claim,
-            string payload,
-            TimeSpan retention,
-            CancellationToken ct) =>
-            inner.CompleteAsync(key, claim, payload, retention, ct);
+        public Task CompleteAsync(string key, string claim, string payload, CancellationToken ct) =>
+            inner.CompleteAsync(key, claim, payload, ct);
 
         public Task ReleaseAsync(string key, string claim, CancellationToken ct) =>
             inner.ReleaseAsync(key, claim, ct);

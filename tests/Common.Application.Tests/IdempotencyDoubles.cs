@@ -77,12 +77,7 @@ internal sealed class RecordingIdempotencyStore : IIdempotencyStore
         return Task.FromResult(_entries.TryGetValue(key, out Held? held) ? held.Entry : null);
     }
 
-    public Task CompleteAsync(
-        string key,
-        string claim,
-        string payload,
-        TimeSpan retention,
-        CancellationToken ct)
+    public Task CompleteAsync(string key, string claim, string payload, CancellationToken ct)
     {
         Calls.Add($"complete {key}");
         Tokens["complete"] = ct;

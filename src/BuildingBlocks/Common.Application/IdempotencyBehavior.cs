@@ -55,6 +55,14 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     /// arriving after this claims a free key — and what stops it committing a
     /// second time is the durable marker §6.3 writes, whose own window is
     /// required to be at least this long.
+    /// <para>
+    /// <b>It is passed once, on the claim, and the completion no longer
+    /// extends it.</b> The window therefore runs from
+    /// <c>TryClaimAsync</c> whatever the handler does, which is what puts the
+    /// claim's expiry after the marker's stamp by construction rather than by
+    /// a margin (#168). A command that runs for an hour spends an hour of its
+    /// own replay window.
+    /// </para>
     /// </summary>
     private static readonly TimeSpan Retention = IdempotencyRetention.Window;
 
@@ -171,7 +179,14 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
             return result;
         }
 
-        await store.CompleteAsync(key, claim, Capture(result), Retention, CancellationToken.None);
+        // No retention here, and the omission is the fix rather than a shorter
+        // call. Passing one re-armed the entry at the commit, which is after
+        // §6.3 stamped its marker inside the transaction — so the claim
+        // outlived the marker by the commit's tail and the marker's own window
+        // had to carry a margin for it (#168). The store now keeps what the
+        // claim had left, and the outcome stays replayable for the remainder
+        // of that window rather than for a fresh one.
+        await store.CompleteAsync(key, claim, Capture(result), CancellationToken.None);
         return result;
     }
 

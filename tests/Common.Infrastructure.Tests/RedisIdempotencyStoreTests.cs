@@ -77,7 +77,7 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
 
         string claim = await ClaimedAsync(store, "done", Retention);
         await store.CompleteAsync(
-            "done", claim, "\"0195e4b2\"", Retention, TestContext.Current.CancellationToken);
+            "done", claim, "\"0195e4b2\"", TestContext.Current.CancellationToken);
 
         IdempotencyEntry? entry = await store.GetAsync("done", TestContext.Current.CancellationToken);
 
@@ -98,7 +98,7 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
 
         string claim = await ClaimedAsync(store, "void", Retention);
-        await store.CompleteAsync("void", claim, "null", Retention, TestContext.Current.CancellationToken);
+        await store.CompleteAsync("void", claim, "null", TestContext.Current.CancellationToken);
 
         IdempotencyEntry? entry = await store.GetAsync("void", TestContext.Current.CancellationToken);
 
@@ -147,7 +147,7 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         string claim = await ClaimedAsync(store, "claimed", Retention);
         (await database.KeyExistsAsync("prefixed:idem:claimed")).ShouldBeTrue();
 
-        await store.CompleteAsync("claimed", claim, "null", Retention, TestContext.Current.CancellationToken);
+        await store.CompleteAsync("claimed", claim, "null", TestContext.Current.CancellationToken);
 
         // The stored value carries the claim token AND the payload, which is
         // the encoding the two scripts compare on. Asserted here rather than
@@ -196,33 +196,58 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         claimTtl.ShouldNotBeNull();
         claimTtl.Value.ShouldBeLessThanOrEqualTo(Retention);
 
-        // And CompleteAsync RE-ARMS it rather than inheriting what the claim
-        // had left: the claim's window measures how long an attempt may run,
-        // this one how long the answer stays replayable.
+    }
+
+    [Fact]
+    public async Task An_outcome_inherits_what_the_claim_had_left_rather_than_a_fresh_retention()
+    {
+        // #168, and the inversion of what this file asserted until it landed.
+        // `CompleteAsync` re-armed the entry to a full retention, on the
+        // reasoning that the claim's window measures how long an attempt may
+        // run and this one how long the answer stays replayable. That started
+        // the claim's window at the COMMIT — later than the marker §6.3 stamps
+        // inside the transaction before it — so Redis outlived the marker by
+        // the commit's tail, and the marker's own window had to be padded by
+        // an allowance covering a lag nothing bounds. `KEEPTTL` removes the
+        // term rather than bounding it.
         //
         // **The key is expired down first, and without that this test proves
-        // nothing.** It used to assert only that the completed TTL was above
-        // zero — which a freshly claimed key satisfies with almost the whole
-        // retention still on it, so the assertion passed just as well if
-        // CompleteAsync had preserved the claim's expiry. An assertion that
-        // cannot fail is worse than none, because it is the line a reader
-        // trusts instead of checking.
-        await database.KeyExpireAsync("ttl:idem:expiring", TimeSpan.FromSeconds(5));
+        // nothing** — in either direction. A freshly claimed key still carries
+        // almost the whole retention, so an assertion taken against it passes
+        // whether the write inherited the expiry or replaced it with an
+        // identical one. Shortening first is what makes the two outcomes
+        // distinguishable, and it is why the assertion below is an upper bound
+        // where the one it replaced was a lower one.
+        await using ServiceProvider provider = fixture.BuildProvider("keepttl");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+        IDatabase database = provider
+            .GetRequiredKeyedService<IConnectionMultiplexer>(RedisConnections.Coordination)
+            .GetDatabase();
 
-        TimeSpan? shortened = await database.KeyTimeToLiveAsync("ttl:idem:expiring");
-        shortened!.Value.ShouldBeLessThan(TimeSpan.FromSeconds(10));
+        string claim = await ClaimedAsync(store, "inherited", Retention);
 
-        await store.CompleteAsync(
-            "expiring", claim, "null", Retention, TestContext.Current.CancellationToken);
+        // Thirty seconds rather than five: the margin is against this test's
+        // own runtime on a two-core runner, not against Redis. It has to stay
+        // far below Retention for the assertion to mean anything, and far
+        // above what a completion takes for the key to still be there.
+        await database.KeyExpireAsync("keepttl:idem:inherited", TimeSpan.FromSeconds(30));
 
-        TimeSpan? completedTtl = await database.KeyTimeToLiveAsync("ttl:idem:expiring");
-        completedTtl.ShouldNotBeNull();
+        await store.CompleteAsync("inherited", claim, "null", TestContext.Current.CancellationToken);
 
-        // Back near the full retention rather than merely non-zero. The
-        // bound is loose on the low side only — anything above the five
-        // seconds just set proves the write re-armed rather than inherited.
-        completedTtl.Value.ShouldBeGreaterThan(TimeSpan.FromMinutes(1));
-        completedTtl.Value.ShouldBeLessThanOrEqualTo(Retention);
+        TimeSpan? completedTtl = await database.KeyTimeToLiveAsync("keepttl:idem:inherited");
+
+        completedTtl.ShouldNotBeNull("the outcome must still expire — KEEPTTL keeps a TTL, not none");
+        completedTtl.Value.ShouldBeGreaterThan(TimeSpan.Zero);
+        completedTtl.Value.ShouldBeLessThanOrEqualTo(
+            TimeSpan.FromSeconds(30),
+            "a re-armed entry would carry minutes; an inherited one carries what was left");
+
+        // And the outcome is readable, so the assertion above is about the TTL
+        // of a write that happened rather than of a claim nothing overwrote.
+        IdempotencyEntry? entry = await store.GetAsync("inherited", TestContext.Current.CancellationToken);
+        entry.ShouldNotBeNull();
+        entry.InProgress.ShouldBeFalse();
+        entry.Payload.ShouldBe("null");
     }
 
     [Fact]
@@ -255,7 +280,7 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         successor.ShouldNotBe(stale);
 
         await store.CompleteAsync(
-            "outlived", stale, "\"clobbered\"", Retention, TestContext.Current.CancellationToken);
+            "outlived", stale, "\"clobbered\"", TestContext.Current.CancellationToken);
 
         IdempotencyEntry? entry = await store.GetAsync("outlived", TestContext.Current.CancellationToken);
 
@@ -395,7 +420,7 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
         // nothing threw.
         string completed = await ClaimedAsync(store, "acl-done", Retention);
         await store.CompleteAsync(
-            "acl-done", completed, "\"ok\"", Retention, TestContext.Current.CancellationToken);
+            "acl-done", completed, "\"ok\"", TestContext.Current.CancellationToken);
 
         IdempotencyEntry? entry = await store.GetAsync("acl-done", TestContext.Current.CancellationToken);
         entry.ShouldNotBeNull();

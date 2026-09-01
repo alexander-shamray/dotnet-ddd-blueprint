@@ -85,8 +85,9 @@ public interface IIdempotencyStore
     Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct);
 
     /// <summary>
-    /// Records the outcome against a key this claim still owns and re-arms the
-    /// retention. Does nothing if the claim has expired or been superseded.
+    /// Records the outcome against a key this claim still owns, <b>preserving
+    /// the claim's remaining life rather than starting a new one</b>. Does
+    /// nothing if the claim has expired or been superseded.
     /// </summary>
     /// <remarks>
     /// <b>Silent on a lost claim, and that is the safe direction.</b> The
@@ -94,8 +95,27 @@ public interface IIdempotencyStore
     /// which would turn a lost replay into a fault the caller can act on
     /// wrongly. An implementation is where there is a logger, so the loss is
     /// reported rather than absorbed.
+    /// <para>
+    /// <b>There is no retention parameter, and its absence is the contract
+    /// rather than a simplification.</b> This took one and re-armed the entry
+    /// to a full window, which started the claim's life at the <em>commit</em>
+    /// — later than the durable marker §6.3 stamps inside the transaction that
+    /// precedes it, by the commit's own tail. The marker then had to be kept
+    /// for a margin covering a lag nothing bounds. Preserving what the claim
+    /// had left starts its window at <see cref="TryClaimAsync"/>, which is
+    /// earlier than the stamp by construction, so the ordering is structural
+    /// and needs no margin
+    /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/168">#168</see>).
+    /// </para>
+    /// <para>
+    /// <b>What that costs is stated in §8.5 rather than hidden here.</b> An
+    /// outcome stays replayable for the remainder of the window the claim
+    /// opened, so a slow command shortens its own replay window by however
+    /// long it ran. The guarantee it buys — the marker outlives the claim,
+    /// always — is the one the mechanism exists for.
+    /// </para>
     /// </remarks>
-    Task CompleteAsync(string key, string claim, string payload, TimeSpan retention, CancellationToken ct);
+    Task CompleteAsync(string key, string claim, string payload, CancellationToken ct);
 
     /// <summary>
     /// Frees a key this claim still owns so the caller may legitimately retry.
