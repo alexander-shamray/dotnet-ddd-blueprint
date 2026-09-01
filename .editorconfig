@@ -15,8 +15,8 @@ root = true
 #
 # Three are at warning: IDE0055 (formatting), IDE0065 (using placement) and
 # IDE0161 (file-scoped namespaces). Each is stated without exception in
-# docs/style-guide.md, so a violation is always a defect. Everything else stays a
-# suggestion on purpose — the `var` rules below carry a documented exception
+# docs/style-guide.md, so a violation is always a defect. Everything else
+# stays a suggestion on purpose — the `var` rules below carry a documented exception
 # Roslyn cannot express, and a rule whose carve-out lives in prose must not
 # fail a build it cannot evaluate.
 
@@ -150,15 +150,20 @@ csharp_new_line_before_members_in_anonymous_types = true
 # mechanism" — so the solution has no .sql files for a section to match.
 #
 # That puts every statement inside a C# raw string literal, which no formatter
-# reads or rewrites. The SQL conventions in docs/style-guide.md are therefore both
-# unenforceable and unbreakable by tooling: `dotnet format` will not fix a
+# reads or rewrites. The SQL conventions in docs/style-guide.md are therefore
+# both unenforceable and unbreakable by tooling: `dotnet format` will not fix a
 # keyword river and will not introduce one. They are a review rule, and the
 # only one in this file's remit that is.
 
 # --- .NET / C# style ---
-# At warning, so EnforceCodeStyleInBuild fails on it. docs/style-guide.md states this one
-# without exception and notes it binds source only — the samples carry no using
-# directives at all, so there is nothing here for the rule to argue with.
+# At warning, so EnforceCodeStyleInBuild fails on it. docs/style-guide.md
+# states this one without exception and notes it binds source only. The
+# samples carry exactly two `using` lines, both `using static` (§9.6's saga
+# imports Endpoints, §12.4's subject suite imports Principals), and both sit
+# outside the namespace as this setting requires — so the rule and the corpus
+# agree rather than there being nothing to argue with. This comment said the
+# samples carry none at all, which the guide it now points at disproves on
+# its own page.
 csharp_using_directive_placement = outside_namespace:warning
 csharp_space_around_binary_operators = before_and_after
 csharp_indent_labels = one_less_than_current
@@ -178,8 +183,8 @@ csharp_preferred_modifier_order = public, private, protected, internal, file, ne
 # `var order = new Order(...)` is fine; `var rows = await conn.QueryAsync(...)`
 # is not — a reader of a fenced code block has no hover to fall back on.
 #
-# docs/style-guide.md lists four cases that keep `var`. Three need nothing here: an
-# apparent type is `when_type_is_apparent` below, deconstruction is
+# docs/style-guide.md lists four cases that keep `var`. Three need nothing
+# here: an apparent type is `when_type_is_apparent` below, deconstruction is
 # `deconstructed_variable_declaration`, and anonymous types make `var`
 # mandatory in the language. The fourth is the Aspire AppHost of §14.2, where
 # eleven of thirteen locals are an IResourceBuilder<T> — a wrapper whose name
@@ -194,8 +199,9 @@ csharp_style_deconstructed_variable_declaration = true:suggestion
 # --- Settled choices ---
 # House style a reviewer might read as an oversight and "correct". They bind the
 # solution as much as the samples; changing one is a decision about the whole
-# corpus. docs/style-guide.md tabulates four — the three expressible ones below, plus the
-# .NET 10 / C# 14 target, which is a csproj concern rather than a style setting.
+# corpus. docs/style-guide.md tabulates four — the three expressible ones
+# below, plus the .NET 10 / C# 14 target, which is a csproj concern rather
+# than a style setting.
 
 # A single statement may omit braces, and the blueprint does so throughout.
 # Roslyn cannot express "one statement, wrapped or not", so this value is
@@ -206,8 +212,8 @@ csharp_prefer_braces = false:silent
 # At warning for the same reason: "file-scoped, never block-scoped" is one of
 # the four settled choices, with no case in the corpus going the other way.
 #
-# The blank line docs/style-guide.md requires after `namespace X;` has no setting of its
-# own and needs none: IDE0055 already reports a type written straight under the
+# The blank line docs/style-guide.md requires after `namespace X;` has no
+# setting of its own and needs none: IDE0055 already reports a type written straight under the
 # semicolon as a formatting violation, and ADR-019 makes that an error. Noted
 # here because this is the line a reader comes to looking for it.
 csharp_style_namespace_declarations = file_scoped:warning
@@ -252,10 +258,14 @@ dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggesti
 dotnet_style_prefer_auto_properties = true:silent
 dotnet_style_object_initializer = true:suggestion
 dotnet_style_collection_initializer = true:suggestion
-# IDE0305 — the analyser behind docs/style-guide.md's "materialise with a spread, not a
-# terminal .ToArray()". Left at suggestion with the other style preferences
-# rather than raised to warning, even though the rule now has no exception and
-# the corpus holds no `.ToArray()` at all. Raising it would make a fourth
+# IDE0305 — the analyser behind docs/style-guide.md's "materialise with a
+# spread, not a terminal .ToArray()". Left at suggestion with the other style
+# preferences rather than raised to warning. **The rule does have an
+# exception and the corpus does hold a `.ToArray()`**: the guide exempts a
+# stream accessor, because `MemoryStream` implements no `IEnumerable` and
+# `[.. buffer]` does not compile (CS9212), and `StubDestination.cs` calls it.
+# The rule is about the terminal LINQ operator. Raising this would make a
+# fourth
 # enforced rule, and the enforced set is a deliberate three that ADR-019 names;
 # growing it is a decision about the policy, not about this line.
 dotnet_style_prefer_collection_expression = when_types_loosely_match:suggestion
