@@ -67,7 +67,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     /// construction.</b> Neither expiry ordering follows from it. The marker
     /// outliving the claim needs the two windows counted at one rate, and they
     /// are counted by two servers' clocks (#171); the claim outliving the stamp
-    /// needs the handler to finish inside this value, which nothing bounds —
+    /// needs the marker's INSERT to commit inside this value, which nothing bounds —
     /// §8.5's long-handler residual (#127), whose damage the claim token bounds
     /// rather than removes. A command that runs for an hour spends an hour of
     /// its own replay window, and one that runs for longer than this reaches

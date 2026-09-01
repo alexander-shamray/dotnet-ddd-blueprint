@@ -30,9 +30,10 @@ public static class IdempotencyRetention
 
     /// <summary>
     /// The floor a marker retention window has to clear, and it is
-    /// <see cref="Window"/> itself: equal is the smallest window with no gap in
-    /// it. Read by <c>RetentionPolicy.IdempotencyWindow</c> rather than
-    /// restated there.
+    /// <see cref="Window"/> itself: equal is admitted, and is the smallest
+    /// window that is. Whether it leaves a gap is a separate question the
+    /// remarks answer, and the answer is conditional. Read by
+    /// <c>RetentionPolicy.IdempotencyWindow</c> rather than restated there.
     /// </summary>
     /// <remarks>
     /// <b>It was <c>Window</c> plus a five-minute <c>MarkerLeadAllowance</c>,
@@ -95,14 +96,18 @@ public static class IdempotencyRetention
     /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>).
     /// </para>
     /// <para>
-    /// <b>The second assumption is that the handler finishes inside the claim's
-    /// window, and it fails with every clock in the platform correct.</b>
-    /// Nothing bounds a handler's runtime against <see cref="Window"/>. §6.3
-    /// stamps the marker after the handler has returned and before the commit,
-    /// so a command that runs for longer than this window reaches that stamp
-    /// with its claim already expired: <c>t1</c> lands beyond
-    /// <c>t0 + Window</c>, and "the claim expires after the marker is stamped"
-    /// is false for it. Between the expiry and the stamp the key is free with
+    /// <b>The second assumption is that the marker reaches the database inside
+    /// the claim's window, and it fails with every clock in the platform
+    /// correct.</b> Nothing bounds a command's runtime against
+    /// <see cref="Window"/>, and the deadline is later than it first reads:
+    /// §6.3 stamps the marker only after the handler has returned, after §7.5's
+    /// domain-event dispatch and after §2.3's aggregate count, and the row
+    /// itself does not exist until <c>SaveChangesAsync</c> sends it. **So the
+    /// condition is not that the handler finished but that the INSERT
+    /// committed**, and the tail between those two is the part a reader is
+    /// likeliest to spend without noticing. A command whose claim expires
+    /// anywhere before that commit puts <c>t1</c> beyond <c>t0 + Window</c>,
+    /// and "the claim expires after the marker is stamped" is false for it. Between the expiry and the stamp the key is free with
     /// no marker behind it, which is this floor's own gap re-opened from the
     /// other end. That is §8.5's long-standing long-handler residual, where
     /// what the claim token buys is that the loser can no longer corrupt the

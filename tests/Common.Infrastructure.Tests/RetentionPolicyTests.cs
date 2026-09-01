@@ -81,9 +81,10 @@ public class RetentionPolicyTests
         // dispatch. That the marker's purge then falls after the claim's expiry
         // is a conclusion drawn from it, and it wants two more things — the two
         // windows counted at one rate, where Redis counts the claim's and the
-        // database the marker's (#171), and the handler finishing inside the
-        // claim's own window, since one that outruns it reaches the stamp after
-        // its claim has already gone (#127). IdempotencyRetention.MarkerFloor
+        // database the marker's (#171), and the marker's INSERT committing
+        // inside the claim's own window — later than "the handler returned",
+        // since §6.3 stamps after dispatch and the row lands only at
+        // SaveChangesAsync (#127). IdempotencyRetention.MarkerFloor
         // argues both. A regression test asserting a guarantee the
         // implementation declines to make is worse than no test, because it is
         // the line the next reader trusts instead of the contract.

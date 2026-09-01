@@ -82,7 +82,7 @@ internal sealed class RedisIdempotencyStore(
     //
     // That is the start ordering and not the expiry ordering, which #168 alone
     // does not buy: the marker outliving the claim additionally wants the two
-    // windows counted at one rate (#171) and the handler to finish inside this
+    // windows counted at one rate (#171) and the marker to reach the database inside this
     // one (#127). IdempotencyRetention.MarkerFloor argues both.
     private const string CompleteScript =
         """
@@ -200,7 +200,7 @@ internal sealed class RedisIdempotencyStore(
         // ordering itself, and it assumes two things this line cannot supply:
         // that the two windows are counted at one rate, where Redis counts
         // this one and SQL Server the marker's (#171), and that the handler
-        // finishes inside this window at all (#127). IdempotencyRetention's
+        // reaches the database inside this window at all (#127). IdempotencyRetention's
         // MarkerFloor argues both.
         RedisResult written = await redis
             .GetDatabase()

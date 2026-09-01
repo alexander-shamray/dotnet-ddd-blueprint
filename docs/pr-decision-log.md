@@ -221,10 +221,12 @@ same indent, and a flat set matched all of them.
   one time source for both deadlines, filed as
   [#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171).
 - **A second assumption came out of the review, and it has nothing to do with
-  clocks.** The expiry ordering also wants the handler to finish inside the
-  claim's own window: one that outruns it reaches §6.3's stamp after its claim
-  has already expired, so the marker is written with no claim left in front of
-  it. That is §8.5's long-standing overrun residual (#127) reaching a
+  clocks.** The expiry ordering also wants the marker to reach the database
+  inside the claim's own window — and the deadline is later than "the handler
+  finished", which is how this entry first put it: §6.3 stamps after the
+  handler returns, after §7.5's dispatch and §2.3's count, and the row does not
+  exist until `SaveChangesAsync` sends it. A claim expiring anywhere before
+  that commit leaves the marker written with no claim in front of it. That is §8.5's long-standing overrun residual (#127) reaching a
   conclusion nobody had connected it to, and it holds with every clock in the
   platform correct.
 - **A backward step of the server's clock is *not* a third one**, and this

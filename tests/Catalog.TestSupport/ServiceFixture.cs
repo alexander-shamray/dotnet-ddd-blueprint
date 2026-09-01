@@ -516,6 +516,125 @@ public sealed class ServiceFixture : IAsyncLifetime
         return purge.PurgeAsync(TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// One pass under a policy of the test's own <em>and</em> a registered
+    /// clock moved forward by <paramref name="skew"/>. It exists because
+    /// nothing else in this suite can tell the marker's cutoff from the other
+    /// two.
+    /// </summary>
+    /// <remarks>
+    /// <b>The outbox's and the inbox's cutoffs are computed by the application
+    /// and the marker's is computed by the server</b> — <c>DATEADD(second,
+    /// -@WindowSeconds, SYSDATETIMEOFFSET())</c>, which is #167's fix and
+    /// ADR-038's decision, against a <c>@Before</c> the service subtracts from
+    /// the registered <c>TimeProvider</c> for the other two. Every other
+    /// retention test stages rows against <c>DateTimeOffset.UtcNow</c> and the
+    /// test host's clock agrees with the container's, so all three statements
+    /// read what is effectively one clock and a marker statement that had
+    /// regressed to <c>@Before</c> passes every one of them. Moving the
+    /// registered clock and leaving the server's alone is the only thing that
+    /// separates them, and a pass that then purges the first two tables while
+    /// keeping the marker has <em>read</em> which clock each statement used
+    /// rather than assumed it.
+    /// <para>
+    /// A wrapped <see cref="IServiceScopeFactory"/> rather than a second host,
+    /// because the service resolves <c>TimeProvider</c> from the scope it
+    /// creates and from nowhere else — so one delegating provider reaches it,
+    /// and every other service the pass resolves is the registered one. The
+    /// alternative is a whole second <c>WebApplicationFactory</c> with its own
+    /// containers, for one substituted singleton.
+    /// </para>
+    /// </remarks>
+    public Task<(int Outbox, int Inbox, int Idempotency)> PurgeWithSkewedClockAsync(
+        RetentionPolicy policy,
+        TimeSpan skew)
+    {
+        RetentionPurgeService purge = new(
+            new SkewedScopeFactory(
+                Factory.Services.GetRequiredService<IServiceScopeFactory>(),
+                new SkewedClock(skew)),
+            Factory.Services.GetRequiredService<OutboxTable>(),
+            Factory.Services.GetRequiredService<InboxTable>(),
+            Factory.Services.GetRequiredService<IdempotencyMarkerTable>(),
+            policy,
+            Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
+
+        return purge.PurgeAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// The system clock plus a fixed offset, which is what a test skewing one
+    /// end of a two-clock comparison needs.
+    /// </summary>
+    /// <remarks>
+    /// Hand-written rather than <c>FakeTimeProvider</c>: that package is pinned
+    /// centrally, but this project does not reference it and adding a
+    /// dependency to move a clock forward by two days would buy a licence
+    /// register entry for four lines of code. A frozen clock is not wanted here
+    /// either — the pass is compared against rows staged in real time, so the
+    /// substitute has to keep running and simply run ahead.
+    /// </remarks>
+    private sealed class SkewedClock(TimeSpan skew) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => TimeProvider.System.GetUtcNow() + skew;
+    }
+
+    /// <summary>
+    /// Hands out scopes whose <see cref="TimeProvider"/> is
+    /// <see cref="SkewedClock"/> and whose every other service is the host's.
+    /// </summary>
+    private sealed class SkewedScopeFactory(IServiceScopeFactory inner, TimeProvider clock)
+        : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => new SkewedScope(inner.CreateScope(), clock);
+    }
+
+    /// <summary>
+    /// A real scope wearing a substituted provider. <see cref="IAsyncDisposable"/>
+    /// as well as <see cref="IDisposable"/>, because <c>AsyncServiceScope</c>
+    /// asks for the first and silently falls back to the second — and the
+    /// purge's own scope holds a <c>DbContext</c>, which is exactly the kind of
+    /// service that owes its disposal an <c>await</c>.
+    /// </summary>
+    private sealed class SkewedScope : IServiceScope, IAsyncDisposable
+    {
+        private readonly IServiceScope _inner;
+
+        public SkewedScope(IServiceScope inner, TimeProvider clock)
+        {
+            _inner = inner;
+            ServiceProvider = new SkewedProvider(inner.ServiceProvider, clock);
+        }
+
+        public IServiceProvider ServiceProvider { get; }
+
+        public void Dispose() => _inner.Dispose();
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_inner is IAsyncDisposable disposable)
+            {
+                await disposable.DisposeAsync();
+                return;
+            }
+
+            _inner.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// One service substituted and everything else delegated. Deliberately not
+    /// <c>ISupportRequiredService</c>: <c>GetRequiredService</c> falls back to
+    /// <see cref="GetService"/> when a provider does not implement it, so the
+    /// one override is enough and there is no second lookup path to keep in
+    /// step with this one.
+    /// </summary>
+    private sealed class SkewedProvider(IServiceProvider inner, TimeProvider clock) : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(TimeProvider) ? clock : inner.GetService(serviceType);
+    }
+
     /// <summary>Markers §8.5 holds for one key — nought or one, and which is the point.</summary>
     public Task<int> IdempotencyMarkerCountAsync(string key) =>
         ScalarAsync<int>(

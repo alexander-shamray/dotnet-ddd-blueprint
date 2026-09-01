@@ -2025,7 +2025,7 @@ so the marker outlives it for every window at least as long. **Only the two
 carries two assumptions** — that Redis's clock and this server's tick at the
 same rate, since the two windows are counted by one each
 ([#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)),
-and that the handler finishes inside the claim's window, which
+and that the marker reaches the database inside the claim's window, which
 [§8.5](08-caching-redis.md) carries as a residual of its own
 ([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
 

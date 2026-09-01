@@ -371,7 +371,7 @@ is stamped, so the claim's window *starts* before the stamp — same thread and
 same dispatch, and that much is unconditional. **The conclusion is a step past
 it and carries two assumptions.** That the marker then outlives the claim for
 every window at least as long holds while the two clocks tick at the same rate,
-which the callout below states, and while the handler finishes inside the
+which the callout below states, and while the marker reaches the database inside the
 claim's window, which is the overrun this section carries as a residual at *A
 claim carries a token* further down.
 
