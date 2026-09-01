@@ -191,8 +191,11 @@ public class IdempotencyMarkerTests(ServiceFixture fixture)
             """))
             .ShouldContain(
                 "sysdatetimeoffset",
-                customMessage: "a default of GETUTCDATE() or a literal satisfies the count above and " +
-                "puts the column back on a clock the purge's cutoff does not read");
+                customMessage: "the count above is satisfied by any default at all — GETUTCDATE(), " +
+                "or a literal, which is not a clock in any sense. The cutoff is DATEADD over " +
+                "SYSDATETIMEOFFSET(), so the two sides are only guaranteed comparable when the " +
+                "column is written by the same expression; this asserts the contract rather than " +
+                "merely that some default exists");
     }
 
     [Fact]

@@ -2395,8 +2395,9 @@ from that ordering, and this record does not decide it.** It needs the two
 windows counted at the same rate, and they are counted by two servers — Redis
 for the claim, SQL Server for the marker — which is
 [#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171);
-and it needs the marker to reach the database inside the claim's window, which nothing
-here bounds. Both are stated under *Consequences* rather than folded into the
+and it needs the marker to reach the database inside the claim's window,
+which nothing here bounds. Both are stated under *Consequences* rather than
+folded into the
 decision, because a decision that claims what its own consequences take back is
 the contradiction this appendix exists to keep out.
 
@@ -2467,8 +2468,9 @@ clock is a service that needs a different seam, not a different column.
   the claim's own length a supported way to buy back the late retry ADR-037
   costs. **Admitted is not gap-free**, and the two paragraphs above say why:
   a lower bound is what a floor is for, and this one refuses the windows that
-  are certainly wrong rather than certifying the ones that are left. The floor is
-  still read from `IdempotencyRetention.MarkerFloor` rather than restated, and
+  are certainly wrong rather than certifying the ones that are left. The
+  floor is still read from `IdempotencyRetention.MarkerFloor` rather than
+  restated, and
   that member survives its own arithmetic becoming trivial because what it
   names is a relationship between two windows and not a duration.
 - **Every service gains a migration, and §4.5's scaffold ships it.**

@@ -107,8 +107,9 @@ public static class IdempotencyRetention
     /// committed**, and the tail between those two is the part a reader is
     /// likeliest to spend without noticing. A command whose claim expires
     /// anywhere before that commit puts <c>t1</c> beyond <c>t0 + Window</c>,
-    /// and "the claim expires after the marker is stamped" is false for it. Between the expiry and the stamp the key is free with
-    /// no marker behind it, which is this floor's own gap re-opened from the
+    /// and "the claim expires after the marker is stamped" is false for it.
+    /// Between the expiry and the stamp the key is free with no marker behind
+    /// it, which is this floor's own gap re-opened from the
     /// other end. That is §8.5's long-standing long-handler residual, where
     /// what the claim token buys is that the loser can no longer corrupt the
     /// winner's entry

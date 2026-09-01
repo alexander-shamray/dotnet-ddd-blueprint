@@ -226,8 +226,9 @@ same indent, and a flat set matched all of them.
   finished", which is how this entry first put it: §6.3 stamps after the
   handler returns, after §7.5's dispatch and §2.3's count, and the row does not
   exist until `SaveChangesAsync` sends it. A claim expiring anywhere before
-  that commit leaves the marker written with no claim in front of it. That is §8.5's long-standing overrun residual (#127) reaching a
-  conclusion nobody had connected it to, and it holds with every clock in the
+  that commit leaves the marker written with no claim in front of it. That is
+  §8.5's long-standing overrun residual (#127) reaching a conclusion nobody had
+  connected it to, and it holds with every clock in the
   platform correct.
 - **A backward step of the server's clock is *not* a third one**, and this
   bullet said it was. Both ends of the purge predicate read the clock that
