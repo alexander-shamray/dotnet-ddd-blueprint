@@ -32,9 +32,15 @@ otherwise read as covering them:
 
 - the fence inventory was missing `promql`, which §13 had been using
   throughout;
-- the whitespace rule overstated what the build enforces — `.editorconfig`
-  permits an aligned `=` in an initialiser on purpose, and the SQL section
-  was citing the overclaim;
+- the whitespace rule's *enforcement* claim was narrowed to review-carried,
+  because `.editorconfig` sets `csharp_space_around_declaration_statements =
+  ignore` and nothing in the corpus tests it. **The rule itself was widened
+  and then put back**: it was given a carve-out for aligned `=` in an
+  initialiser on evidence that turned out to be SQL inside raw string
+  literals, and the carve-out was removed when the search was redone with
+  those literals excluded. The round trip is listed rather than tidied away,
+  because a rule relaxed on bad evidence and quietly restored is
+  indistinguishable from one that was never touched;
 - the *Settled choices* table said braces are optional for a single
   statement, where the rule requires them for one that wraps.
 
@@ -548,23 +554,35 @@ file and a reviewer are the only things that do.
   leaves the comment column untouched — so a format run neither introduces this
   nor undoes it.
 
-  **An aligned `=` column inside an object or collection initialiser is the
-  carve-out, and it is deliberate rather than tolerated.** `.editorconfig`
-  sets `csharp_space_around_declaration_statements = ignore` and argues in
-  its own comment that those spaces are *alignment, not accident*, naming
-  §8.2's HybridCache options and §6.6's anonymous parameter objects. The
-  corpus holds live examples in `OutboxDispatcher` and Catalog's query
-  handlers, on a green `main`. So the rule above is about the declaration,
-  and an initialiser keeps its column for the reason SQL does: it reads as
-  the row shape it produces.
+  **The corpus obeys this rule everywhere, and the apparent exceptions are
+  SQL.** Searched with raw string literals excluded, there is not one
+  aligned `=` column in C# — not in `src/`, not in `tests/`, not in the
+  blueprint's samples. Every site that looks like one is inside a `"""` or
+  `$"""` literal: `OutboxDispatcher`'s `UPDATE … SET`, Catalog's `SELECT`
+  with the column aliases §6.5 uses, §6.6's `MERGE`. Those are the SQL
+  section's, and it argues their column on its own terms below.
 
-  **That carve-out was written here as a prohibition until a review
-  measured it**, and the correction is the documentation moving to the code
-  rather than the other way round. Sweeping those sites so the prohibition
-  became true is a `/style-pass` decision about the whole corpus, which is
-  the user's; nothing is entitled to take it by rewording a rule, and a
-  rule left overclaiming is how a reviewer ends up correcting the corpus
-  toward a build failure that cannot occur.
+  **This paragraph said the opposite for three review rounds, and the
+  mistake is worth more than the rule.** A grep for a padded `=` across
+  `src/` returned real hits on a green `main`, and they were read as C#
+  initialisers proving a deliberate carve-out — so the rule was narrowed to
+  admit them, `CLAUDE.md`'s short list was narrowed to match, and the SQL
+  section was rewritten to stop leaning on a claim that had just been
+  "corrected". Every one of those hits was SQL. **A grep does not know what
+  language it is reading**, and a raw string literal is exactly where this
+  repository keeps the other one — so a measurement over `.cs` files is a
+  measurement over two languages unless it is told otherwise.
+
+  **How much of the rule the build enforces is genuinely unsettled, and
+  that is stated rather than guessed.** `.editorconfig` sets
+  `csharp_space_around_declaration_statements = ignore`, so IDE0055 does
+  not police that spacing in a declaration — and with no aligned site in
+  the corpus, nothing has ever tested whether the padded member above
+  fails a build. Treat the rule as **review-carried** and do not claim a
+  build failure for it. The setting's own comment names "78 declarations
+  and initialiser members" relying on it; those are the SQL sites too, so
+  that comment is owed the same correction and is not this change's to
+  make.
 
   **Two places the analyser does not reach, and they are opposites.** Padding
   between a type and its identifier —
@@ -703,18 +721,20 @@ UPDATE SET
 ```
 
 The `=` signs line up in a column here, and that alignment is deliberate. It
-does **not** rest on parity with the C# initialisers, even though those keep a
-column too: theirs survives because `.editorconfig` declines to police that
-spacing, which is a decision someone could reverse. SQL keeps the column on
-its own merits: a statement inside a raw string literal is invisible to every
-analyser and formatter in the toolchain, so nothing will fight it, and one
-assignment per line with the names in a column is what makes `SET` read as the
-row shape it produces rather than as a wrapped list.
+does **not** rest on parity with the C# initialisers, which keep no such
+column — the rule above forbids it and the corpus has none. SQL keeps the
+column on its own merits: a statement inside a raw string literal is invisible
+to every analyser and formatter in the toolchain, so nothing will fight it, and
+one assignment per line with the names in a column is what makes `SET` read as
+the row shape it produces rather than as a wrapped list.
 
-**This sentence said IDE0055 forbids the C# form, and it did not.** The claim
-was inherited from the whitespace rule above, which overclaimed the same
-thing — so correcting one and leaving the other would have left the file
-citing itself for something neither half says any more.
+**This sentence has been wrong in both directions inside one pull request.**
+It said IDE0055 forbids the C# form, which overclaims what the analyser does;
+it was then rewritten to say the C# initialisers keep a column of their own,
+which was worse, because they do not and the evidence for it was SQL. What
+the section needs from its neighbour is nothing at all: the raw string
+literal is invisible to the toolchain whatever the C# rule says, which is
+why that is the argument it makes.
 
 **A SQL list obeys the same rule as a C# one: one line, or one element per
 line, never a ragged middle.** That covers the column list after `INSERT`, the

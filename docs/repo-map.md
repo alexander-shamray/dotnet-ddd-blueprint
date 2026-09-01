@@ -5,10 +5,17 @@ is.** This was that file's *The tree*, *Edges between building blocks*, *Files
 outside the blueprint tree, and why* and *The scaffold* — gate mechanisms,
 workflow triggers, a broker's user-seeding behaviour and a dogfooding
 procedure, sitting under a heading whose own first sentence promises one line
-per entry. It is load-bearing when you change something under `.github/`,
-`deploy/`, `tools/` or the building blocks' reference graph, and inert for
-every other kind of change, which is what earns it a file rather than a
-permanent seat in every session's context.
+per entry. **It is load-bearing whenever a fact it records changes** — an
+entry added or removed anywhere in the tree, a gate's shape, a service's
+project set, what a `.TestSupport` library is for — and inert for a change
+that touches none of them, which is what earns it a file rather than a
+permanent seat in every session's context. **The trigger is deliberately
+not a directory list**: this sentence named `.github/`, `deploy/` and
+`tools/` while the tree below also records `src/`, `tests/` and the root
+files, so an agent adding a service or changing the BFF's shape was told
+this file was inert and could leave it stale. A scope that lists the
+directories somebody remembered is the same defect as a gate whose
+selector stops matching the newest surface.
 
 **The content is verbatim in its arguments**, on
 [`pr-decision-log.md`](pr-decision-log.md)'s terms and for its reason: a summary

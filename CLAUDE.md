@@ -624,11 +624,12 @@ to reach both, and the guide is the master copy.
 - **A single statement may omit braces; two or more always take them — and so
   does one that wraps.** The one exception is a multi-line condition, whose
   body takes braces precisely so the four-space continuation is safe.
-- **One space before `=`, `=>` and `{` in a declaration, never a column of
-  them.** IDE0055 makes a padded *declaration* a failed build. Two things
-  keep a column deliberately: SQL inside a raw string literal, which no
-  analyser reads, and an aligned `=` in an object initialiser, which
-  `.editorconfig` declines to police on purpose. The guide argues both.
+- **One space before `=`, `=>` and `{`, never a column of them.** The corpus
+  obeys this everywhere and the only aligned columns in it are SQL inside a
+  raw string literal, which no analyser reads and which the guide argues on
+  its own terms. Treat it as **review-carried**: `.editorconfig` sets
+  `csharp_space_around_declaration_statements = ignore`, so do not claim a
+  build failure for it.
 - **No `#pragma` suppressions and no real credentials**, in a sample or in
   source. A warranted suppression goes in `Directory.Build.props` with a
   comment; §14.1's local-development defaults are the one stated exception to
