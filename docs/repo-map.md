@@ -52,7 +52,7 @@ docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
                              half of `CLAUDE.md`'s phase section
 docs/lessons.md              the lessons that generalise past the PR that
                              found them, and the measurement behind each —
-                             `CLAUDE.md`'s other half again, one level up
+                             `CLAUDE.md`'s other half again, one level up from
                              the log: the log says what a PR decided, this
                              says what the next PR should do about it
 docs/harness-boundaries.md   what the harness grants these commands and what
@@ -61,6 +61,15 @@ docs/harness-boundaries.md   what the harness grants these commands and what
                              operation it buys. Read it before touching
                              anything under .claude/, and state a new residual
                              there rather than in `CLAUDE.md`
+docs/repo-map.md             this file — what every entry here is and why
+                             it is shaped that way. It lists itself because
+                             the locator in `CLAUDE.md` does, and a map
+                             missing an entry its own shorter twin carries
+                             has falsified the header above rather than
+                             merely gone short
+docs/style-guide.md          the prose, C# and SQL dialect both artefacts
+                             are written in, and which rules the build
+                             enforces rather than a reviewer
 docs/testing.md              how to run the suites — the commands, the
                              Category=Integration filter, which five projects
                              need Docker, what the coverage figure measures.
@@ -147,6 +156,18 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              base one, at a price this repo refuses. Closing
                              that needs a required status check, and `main` is
                              not protected today
+.github/workflows/broker-permissions.yml  ADR-036's broker ACL, and the
+                             FOURTH workflow to reach outside its own
+                             tree: src/Services/**, Common.Contracts and
+                             Catalog.TestSupport, declared as
+                             SOURCE_INPUTS in check_permissions.py. Split
+                             from compose.yml rather than added to it,
+                             because that smoke pulls ~2 GB and builds
+                             seven images while this gate reads text — and
+                             path filtering is per-workflow, not per-job,
+                             so sharing one would either drag the smoke
+                             onto every messaging change or leave the gate
+                             blind to the code it checks
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/secret-scan/         §15.1's other half since #61 — twelve rules, an
                              allow-list of fingerprints, and its tests. Since
@@ -393,8 +414,8 @@ reason.
 - **`docs/lessons.md` and `docs/harness-boundaries.md`** are the log's
   position exactly, and they arrived there the same way — sections of
   `CLAUDE.md` that grew past the point where every session should be paying
-  for them. In
-  the scope of neither command, so the one rule carries them too. **Their
+  for them. In the scope of neither command, so the one rule carries them
+  too. **Their
   subjects differ in what falsifies them**, which is the thing to know before
   editing either: a lesson is falsified by a *measurement*, so it is amended
   when the code it describes changes and never because it reads oddly; a
