@@ -12,13 +12,24 @@ permanent seat in every session's context.
 
 **The content is verbatim in its arguments**, on
 [`pr-decision-log.md`](pr-decision-log.md)'s terms and for its reason: a summary
-of an argument is how a rule gets "corrected" back. Three kinds of edit were
-made on the way out, and naming them is cheaper than a claim that does not
-survive a grep. The four `###` headings became `##`, so this file has one title
-above them. **Self-references were rebased**: sentences saying "the one rule
-below" and "this file" meant `CLAUDE.md`'s one rule and `CLAUDE.md` itself, and
-each would otherwise point at nothing or — worse — at this file, which states
+of an argument is how a rule gets "corrected" back. The edits made on the way
+out are named rather than counted, because naming them is cheaper than a
+claim that does not survive a grep — and because a count of them is the one
+thing in this paragraph that can go stale. It said *three* while listing two,
+for exactly as long as nobody read the number against the list.
+
+The four `###` headings became `##`, so this file has one title above them.
+**Self-references were rebased**: sentences saying "the one rule below" and
+"this file" meant `CLAUDE.md`'s one rule and `CLAUDE.md` itself, and each
+would otherwise point at nothing or — worse — at this file, which states
 neither. Not one argument was shortened and no paragraph was dropped.
+
+**Entries were then added by review, which is a departure from the verbatim
+move and belongs in the same list.** The tree arrived here missing
+`docs/repo-map.md` and `docs/style-guide.md` — the two files this change
+creates — and missing `broker-permissions.yml`, which `CLAUDE.md` had never
+listed either and which this file inherited rather than dropped. All three
+are in now.
 
 **The annotated tree came across whole, and `CLAUDE.md` now carries a
 re-derived locator in its place.** That is the one thing here with a *shorter

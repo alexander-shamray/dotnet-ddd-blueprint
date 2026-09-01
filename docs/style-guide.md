@@ -26,14 +26,22 @@ count said "the top of this file", which was true in its old home and points at
 the wrong document here. Not one argument was shortened and no paragraph was
 dropped.
 
-**Two claims were then corrected in the same pull request, by review rather
-than by the move**, and they are listed here because the sentence above would
-otherwise read as covering them: the fence inventory was missing `promql`,
-which §13 had been using throughout, and the whitespace rule overstated what
-the build enforces — `.editorconfig` permits an aligned `=` in an initialiser
-on purpose. Neither is an argument shortened; both are a claim brought back to
-what is measurable. **A file that says "verbatim" earns the right to say it by
-listing what it is not.**
+**Claims were then corrected in the same pull request, by review rather than
+by the move**, and they are listed here because the sentence above would
+otherwise read as covering them:
+
+- the fence inventory was missing `promql`, which §13 had been using
+  throughout;
+- the whitespace rule overstated what the build enforces — `.editorconfig`
+  permits an aligned `=` in an initialiser on purpose, and the SQL section
+  was citing the overclaim;
+- the *Settled choices* table said braces are optional for a single
+  statement, where the rule requires them for one that wraps.
+
+None is an argument shortened; each is a claim brought back to what is
+measurable. **A file that says "verbatim" earns the right to say it by
+listing what it is not** — and the list is a list rather than a number,
+because this paragraph opened with *two* on the day a third was added.
 
 **A short list of these rules stays in `CLAUDE.md`**, under *Style*, because
 they have to be true of an edit made before anyone opens this file. **This file
