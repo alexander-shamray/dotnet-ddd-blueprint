@@ -623,7 +623,7 @@ same argument as never calling a branch clean because asking failed.
    > which is stronger than checking one a caller supplied. Two more
    > are owed here; until someone with the `Edit(.claude/scripts/**)` deny
    > lifted writes them, both rules are carried by this file, like the `[`
-   > placement rule in `CLAUDE.md`.
+   > placement rule in `docs/style-guide.md`.
    >
    > **The deny is why they cannot simply be written now, and it is the same
    > control that makes a helper worth having.** A session that could add

@@ -46,10 +46,11 @@ taste. Prefer:
 5. **Incomplete reconciliation** — a rule this change states (or a fix it claims)
    that the corpus still violates in the same change set.
 
-Reject as non-findings the house styles `CLAUDE.md` tabulates on purpose
-(braceless single statements, file-scoped namespaces, explicit types, British
-prose beside real identifier spellings, unpinned Aspire with §4.4 carve-outs,
-spread-over-`.ToArray()` when the corpus is already clean).
+Reject as non-findings the house styles `docs/style-guide.md` tabulates on
+purpose (braceless single statements, file-scoped namespaces, explicit
+types, British prose beside real identifier spellings, unpinned Aspire with
+§4.4 carve-outs, spread-over-`.ToArray()` when the corpus is already
+clean).
 
 ---
 
@@ -103,7 +104,8 @@ spread-over-`.ToArray()` when the corpus is already clean).
      that matter; skip bulk tooling noise).
 2. **Read the change.** Prefer full source of load-bearing files over the
    diff alone. Grep the rest of `docs/backend-architecture/`, `CLAUDE.md`,
-   and `src/` / `tests/` / `deploy/` for every claim the change touches.
+   `docs/style-guide.md`, `docs/repo-map.md`, and `src/` / `tests/` /
+   `deploy/` for every claim the change touches.
 3. **Run cheap gates when the range touches them.**
    - Packages / Appendix B: `python .github/licence-gate/licence_gate.py`
    - Tests / counts CLAUDE asserts:

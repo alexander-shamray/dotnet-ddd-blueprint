@@ -196,9 +196,10 @@ So for each finding, before changing anything:
 - **Read the site.** Not the diff hunk — the file, with enough context to see
   what the surrounding passage is doing.
 - **Check it against the repo's own rules.** A comment that asks for something
-  `CLAUDE.md` settles — file-scoped namespaces, braceless single statements,
-  explicit types over `var`, British prose beside real identifier spellings —
-  is wrong by construction. Cite the rule and reject it.
+  `docs/style-guide.md` settles — file-scoped namespaces, braceless single
+  statements, explicit types over `var`, British prose beside real
+  identifier spellings — is wrong by construction. Cite the rule and reject
+  it.
 - **Check the claim, not the confidence.** If it asserts how a tool or library
   behaves, verify that behaviour before agreeing. A bot's certainty is not
   evidence.

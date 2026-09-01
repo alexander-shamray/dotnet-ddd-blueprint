@@ -19,6 +19,13 @@ reader greps for. And one **self-reference** was rebased: the string-match entry
 cited "the C# style section below", which did not travel and would otherwise now
 point at nothing. Not one argument was shortened, and no entry was dropped.
 
+**That citation has since been re-pointed a second time**, and the reason is
+worth keeping beside the first: the C# style section itself later left
+`CLAUDE.md` for [`style-guide.md`](style-guide.md), so an entry rebased onto
+`CLAUDE.md` was aimed at a section that had moved on. A rebased reference is not
+a settled one — it names wherever the prose lives *today*, and the next
+extraction has to grep for it again.
+
 **Three lines were also rewrapped**, on `pr-decision-log.md`'s precedent — it
 reflowed one 136-column line on the way out and said so. Three entries here ran
 to 116, 91 and 81 columns against the 80 this repository wraps prose at; they
@@ -134,8 +141,8 @@ own line rather than sending a reader to a file that does not hold it.
   be plausible for the branch to be wrong.
 - **A rule whose stated test is a string match will be enforced as one**, by a
   reviewer or by whoever greps next. State the rule, not the grep. This one's
-  argument is the `.ToArray()` narrowing in `CLAUDE.md`'s C# style section, not
-  the log.
+  argument is the `.ToArray()` narrowing in [`style-guide.md`](style-guide.md)'s
+  *Statements and types*, not the log.
 - **`ASPNETCORE_ENVIRONMENT=Development` leads every host-run block naming an
   authority.** No project ships a `launchSettings.json`, so `dotnet run`
   selects Production, where `RequireHttpsMetadata` is on and a plain-HTTP local
