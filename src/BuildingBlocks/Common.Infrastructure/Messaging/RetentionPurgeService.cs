@@ -109,10 +109,25 @@ public sealed class RetentionPurgeService : BackgroundService
         // state a predicate could protect. What protects it is the window,
         // which RetentionPolicy refuses to set below the life of the Redis
         // claim it backs up (§8.5).
+        //
+        // The cutoff is computed HERE and not by the caller, which is the one
+        // place this service departs from the two statements above and is
+        // #167's fix. CommittedAt is written by a SYSDATETIMEOFFSET() column
+        // default on the pod that ran the command; a cutoff computed from this
+        // pod's TimeProvider would age the row across two clocks, and §15.3
+        // ships three replicas of each service. A purger leading the writer by
+        // δ deletes the marker δ early, the claim then expires into a table
+        // that has forgotten the commit, and the next retry runs the command a
+        // second time. Both ends on the server's clock removes the term rather
+        // than bounding it (ADR-038).
+        //
+        // The outbox and the inbox deliberately keep the parameterised form:
+        // their windows are housekeeping, and a substitutable TimeProvider is
+        // worth more there than a clock nothing can move (§9.5).
         _idempotencySql =
             $"""
             DELETE TOP (@BatchSize) FROM {markers.QualifiedName}
-            WHERE CommittedAt < @Before;
+            WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
             """;
     }
 
@@ -159,18 +174,34 @@ public sealed class RetentionPurgeService : BackgroundService
         using IDbConnection connection =
             scope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
 
+        // Two of the three, and the third is named below. The registered clock
+        // rather than DateTimeOffset.UtcNow, for §9.5's reason: a test host
+        // substitutes it, and a row written on one clock and aged on another is
+        // one no substituted clock can reason about.
         DateTimeOffset now = scope.ServiceProvider.GetRequiredService<TimeProvider>().GetUtcNow();
 
-        int outbox = await DeleteAsync(connection, _outboxSql, now - _policy.OutboxWindow, ct);
+        int outbox = await DeleteAsync(
+            connection,
+            _outboxSql,
+            new { _policy.BatchSize, Before = now - _policy.OutboxWindow },
+            ct);
         Purged(_log, outbox, "outbox", null);
 
-        int inbox = await DeleteAsync(connection, _inboxSql, now - _policy.InboxWindow, ct);
+        int inbox = await DeleteAsync(
+            connection,
+            _inboxSql,
+            new { _policy.BatchSize, Before = now - _policy.InboxWindow },
+            ct);
         Purged(_log, inbox, "inbox", null);
 
+        // The window as a duration and not a cutoff, because the statement
+        // computes the cutoff from the server's own clock (#167, ADR-038). An
+        // int rather than a long: RetentionPolicy caps a window at ten years,
+        // which is 315,360,000 seconds, and DATEADD's argument is an int.
         int idempotency = await DeleteAsync(
             connection,
             _idempotencySql,
-            now - _policy.IdempotencyWindow,
+            new { _policy.BatchSize, WindowSeconds = (int)_policy.IdempotencyWindow.TotalSeconds },
             ct);
         Purged(_log, idempotency, "idempotency", null);
 
@@ -186,7 +217,7 @@ public sealed class RetentionPurgeService : BackgroundService
     private async Task<int> DeleteAsync(
         IDbConnection connection,
         string sql,
-        DateTimeOffset before,
+        object parameters,
         CancellationToken ct)
     {
         int total = 0;
@@ -197,10 +228,7 @@ public sealed class RetentionPurgeService : BackgroundService
             // plain overload a shutdown cannot interrupt a blocked delete and
             // the host waits out the SQL timeout (§9.4).
             int deleted = await connection.ExecuteAsync(
-                new CommandDefinition(
-                    sql,
-                    new { _policy.BatchSize, Before = before },
-                    cancellationToken: ct));
+                new CommandDefinition(sql, parameters, cancellationToken: ct));
 
             total += deleted;
 

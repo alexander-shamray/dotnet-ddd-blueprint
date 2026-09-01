@@ -100,7 +100,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
             "_DefaultSagaCustomerIdForRemoval",
             "_AddSagaCancellationObserved",
             "_AddTransactionalOutbox",
-            "_AddIdempotencyMarkers"
+            "_AddIdempotencyMarkers",
+            "_IdempotencyMarkerCommittedAtDefault"
         ];
 
         string[] applied = await fixture.AppliedMigrationsAsync();

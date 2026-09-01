@@ -1209,13 +1209,14 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // apply every migration in sequence, and a count alone would pass on\n"
             "        // a shorter prefix of them applied twice.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(6);\n"
+            "        applied.Length.ShouldBe(7);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddProducts\");\n"
             "        applied[2].ShouldEndWith(\"_AddOutbox\");\n"
             "        applied[3].ShouldEndWith(\"_AddInbox\");\n"
             "        applied[4].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n"
-            "        applied[5].ShouldEndWith(\"_AddIdempotencyMarkers\");\n",
+            "        applied[5].ShouldEndWith(\"_AddIdempotencyMarkers\");\n"
+            "        applied[6].ShouldEndWith(\"_IdempotencyMarkerCommittedAtDefault\");\n",
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
             "\n"
             "        // Named and ordered, not merely counted: the migrator's job is to\n"
@@ -1223,15 +1224,16 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // a shorter prefix of them applied twice. What a scaffolded service\n"
             "        // starts with is the schema, then §9.4's outbox table, §9.5's inbox,\n"
             "        // the index the retention purge deletes through and §8.5's marker\n"
-            "        // table — all of them wiring every service has rather than anything\n"
-            "        // this one chose.\n"
+            "        // table with the database clock it is aged by — all of them wiring\n"
+            "        // every service has rather than anything this one chose.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(5);\n"
+            "        applied.Length.ShouldBe(6);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddOutbox\");\n"
             "        applied[2].ShouldEndWith(\"_AddInbox\");\n"
             "        applied[3].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n"
-            "        applied[4].ShouldEndWith(\"_AddIdempotencyMarkers\");\n",
+            "        applied[4].ShouldEndWith(\"_AddIdempotencyMarkers\");\n"
+            "        applied[5].ShouldEndWith(\"_IdempotencyMarkerCommittedAtDefault\");\n",
         ),
     ),
 }
@@ -1487,6 +1489,16 @@ RETENTION_INDEX_MIGRATION = re.compile(r"^\d{14}_AddOutboxRetentionIndex(\.Desig
 # first idempotent command it is ever given, both against a table that is
 # simply not there.
 IDEMPOTENCY_MIGRATION = re.compile(r"^\d{14}_AddIdempotencyMarkers(\.Designer)?\.cs$")
+
+# The marker's `CommittedAt` default (#167). It travels for the reason the
+# table itself does: the column default and the SQL cutoff that reads it are
+# two halves of one guarantee, so a service scaffolded with the table and
+# without the default ages its markers on the writing pod's clock while the
+# purge ages them on the server's — which is the skew this migration exists to
+# remove, shipped to every new service by omission.
+COMMITTED_AT_DEFAULT_MIGRATION = re.compile(
+    r"^\d{14}_IdempotencyMarkerCommittedAtDefault(\.Designer)?\.cs$"
+)
 LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 
 # The migrations a scaffolded service starts with, in the order they are
@@ -1504,6 +1516,7 @@ TEMPLATE_MIGRATIONS = (
     INBOX_MIGRATION,
     RETENTION_INDEX_MIGRATION,
     IDEMPOTENCY_MIGRATION,
+    COMMITTED_AT_DEFAULT_MIGRATION,
 )
 
 # The name each shape above is known by in a diagnostic, in the same order and
@@ -1519,6 +1532,7 @@ MIGRATION_LABELS = (
     "AddInbox",
     "AddOutboxRetentionIndex",
     "AddIdempotencyMarkers",
+    "IdempotencyMarkerCommittedAtDefault",
 )
 
 # The two files that accumulate a block per service, and the markers that bound
@@ -2307,6 +2321,34 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
             f"(§14.1 binds every mapping to loopback)"
         )
     block = block.replace(published.group(0), f'ports: [ "{LOOPBACK}:{port}:8080" ]')
+
+    # §7.1's runtime key is `ConnectionStrings__<Service>` and the rename is
+    # what writes it, so a service named after one of §14.1's infrastructure
+    # connections renders a key the api block already declares. Nothing above
+    # can see it: the rename worked exactly as specified, the straggler check
+    # finds no template token left, and duplicate keys leave the YAML well
+    # formed — so the run reports success and the file quietly means one of the
+    # two values.
+    #
+    # A predicate over the rendered block, never the three names it happens to
+    # catch today. A list of names goes stale the moment §14.1 gives this block
+    # a sixth `ConnectionStrings__*` key, and a gate that silently stops
+    # covering the newest surface is this repository's most-repeated failure.
+    for mapping in environment_keys(block):
+        seen: set[str] = set()
+        for key in mapping:
+            if key in seen:
+                raise ScaffoldError(
+                    f"'{names.pascal}' renders {key} twice in one environment: mapping. "
+                    f"This service's own §7.1 connection key takes the service's name, "
+                    f"and §14.1 already declares an infrastructure connection under "
+                    f"exactly that name in the same block — so whatever parses the file "
+                    f"keeps one of the two values and discards the other, and which one "
+                    f"survives is its choice rather than this script's. Nothing else "
+                    f"refuses it: the rename is correct, no template token is left, and "
+                    f"the YAML is still valid. Give the service a different name."
+                )
+            seen.add(key)
 
     # After the last application block, so services accumulate in the order
     # they were created. `build:` is what marks one — a structural test rather

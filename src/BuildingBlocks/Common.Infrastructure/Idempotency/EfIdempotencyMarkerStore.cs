@@ -34,7 +34,7 @@ namespace Common.Infrastructure.Idempotency;
 /// the outbox as technical tables mapped that way for exactly this reason.
 /// </para>
 /// </remarks>
-public sealed class EfIdempotencyMarkerStore(DbContext db, TimeProvider clock) : IIdempotencyMarkerStore
+public sealed class EfIdempotencyMarkerStore(DbContext db) : IIdempotencyMarkerStore
 {
     public Task<bool> ExistsAsync(string key, CancellationToken ct) =>
         // A query and never the change tracker, and the reason is what a
@@ -57,6 +57,17 @@ public sealed class EfIdempotencyMarkerStore(DbContext db, TimeProvider clock) :
         // Staged, not saved. §6.3 calls SaveChangesAsync one line later inside
         // the same transaction, so the row lands with the aggregate or not at
         // all — which is the whole property this type exists for.
-        await db.Set<IdempotencyMarker>().AddAsync(new IdempotencyMarker(key, clock.GetUtcNow()), ct);
+        //
+        // No timestamp, and this type took a TimeProvider to supply one until
+        // #167. The row's age was then the purging pod's clock minus a
+        // timestamp the writing pod stamped, across three replicas (§15.3), so
+        // the marker's retention floor had to bound the skew between them
+        // rather than remove it. The column now defaults to
+        // SYSDATETIMEOFFSET() and the purge computes its cutoff in SQL, so
+        // both ends of the comparison are the database's clock and there is no
+        // skew term left to bound (ADR-038). Constructing the marker without a
+        // timestamp is what leaves the column to that default: EF omits a
+        // property still holding its sentinel from the insert.
+        await db.Set<IdempotencyMarker>().AddAsync(new IdempotencyMarker(key), ct);
     }
 }
