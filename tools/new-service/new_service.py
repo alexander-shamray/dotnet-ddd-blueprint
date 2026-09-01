@@ -2334,21 +2334,49 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
     # catch today. A list of names goes stale the moment §14.1 gives this block
     # a sixth `ConnectionStrings__*` key, and a gate that silently stops
     # covering the newest surface is this repository's most-repeated failure.
+    #
+    # **Compared casefolded, because the loader on the other side of this file
+    # is.** §14.2 states it in the one line where it costs an Aspire resource
+    # name: configuration is case-insensitive but not punctuation-insensitive.
+    # So `ConnectionStrings__Rabbitmq` and `ConnectionStrings__RabbitMq` are
+    # two YAML keys and one configuration key, and the first version of this
+    # check — a case-sensitive `in seen` — saw two distinct strings and passed.
+    # That handed the exact defect it was written for back to every spelling of
+    # an infrastructure connection with different capitals, `RabbitMQ` (the
+    # product's own) among them. The same predicate again, one level less
+    # literal: a list of names would have gone stale, and so does an equality
+    # that is stricter than the thing it is standing in for.
+    #
+    # `casefold` rather than `lower`, which is the spelling Python defines for
+    # case-insensitive comparison — it folds what `lower` leaves alone, and the
+    # cost of choosing the weaker one is a refusal that does not fire.
     for mapping in environment_keys(block):
-        seen: set[str] = set()
+        seen: dict[str, str] = {}
         for key in mapping:
-            if key in seen:
-                raise ScaffoldError(
-                    f"'{names.pascal}' renders {key} twice in one environment: mapping. "
-                    f"This service's own §7.1 connection key takes the service's name, "
-                    f"and §14.1 already declares an infrastructure connection under "
-                    f"exactly that name in the same block — so whatever parses the file "
-                    f"keeps one of the two values and discards the other, and which one "
-                    f"survives is its choice rather than this script's. Nothing else "
-                    f"refuses it: the rename is correct, no template token is left, and "
-                    f"the YAML is still valid. Give the service a different name."
+            if (first := seen.get(key.casefold())) is not None:
+                # Both spellings, and never one of them twice: the collision is
+                # a fact about the configuration loader rather than about the
+                # YAML, so a message quoting `ConnectionStrings__RabbitMq` and
+                # blaming "the same key twice" reads as simply false to whoever
+                # hit it having typed `Rabbitmq`.
+                collision = (
+                    f"renders {key} twice in one environment: mapping"
+                    if first == key
+                    else f"renders both {first} and {key} into one environment: mapping"
                 )
-            seen.add(key)
+                raise ScaffoldError(
+                    f"'{names.pascal}' {collision}. .NET configuration keys are "
+                    f"case-insensitive (§14.2), so those two collapse onto one another the "
+                    f"moment configuration loads: the loader keeps one of the values and "
+                    f"discards the other, and which one survives is its choice rather than "
+                    f"this script's. This service's own §7.1 connection key takes the "
+                    f"service's name, and §14.1 already declares an infrastructure "
+                    f"connection under that name in the same block. Nothing else refuses "
+                    f"it: the rename is correct, no template token is left, and two "
+                    f"spellings are two valid YAML keys — so the file stays well formed and "
+                    f"the run reports success. Give the service a different name."
+                )
+            seen[key.casefold()] = key
 
     # After the last application block, so services accumulate in the order
     # they were created. `build:` is what marks one — a structural test rather

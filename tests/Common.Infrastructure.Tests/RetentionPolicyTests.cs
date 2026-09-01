@@ -73,8 +73,20 @@ public class RetentionPolicyTests
         // it at the commit (#168), so the claim's window starts at the claim
         // and therefore before the stamp; and the marker is written and aged on
         // the database's clock (#167), so no pod's clock is party to its age.
-        // The ordering holds by construction, the allowance is gone, and equal
-        // is once again the smallest window with no gap in it.
+        // The allowance is gone, and equal is admissible again.
+        //
+        // WHAT IS ADMITTED IS NOT A GUARANTEE OF NO GAP, and this test must not
+        // read as one. What holds by construction is the START ordering: the
+        // claim is taken before the marker is stamped, one thread inside one
+        // dispatch. That the marker's purge then falls after the claim's expiry
+        // is a conclusion drawn from it, and it wants two more things — the two
+        // windows counted at one rate, where Redis counts the claim's and the
+        // database the marker's (#171), and the handler finishing inside the
+        // claim's own window, since one that outruns it reaches the stamp after
+        // its claim has already gone (#127). IdempotencyRetention.MarkerFloor
+        // argues both. A regression test asserting a guarantee the
+        // implementation declines to make is worse than no test, because it is
+        // the line the next reader trusts instead of the contract.
         //
         // The floor is READ rather than restated, so this assertion is about
         // the relationship and not about a duration — it stays correct if

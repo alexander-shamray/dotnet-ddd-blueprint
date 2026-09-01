@@ -1346,6 +1346,47 @@ class RefusesToRun(unittest.TestCase):
                 render(name=name)
             self.assertIn(f"ConnectionStrings__{name}", str(raised.exception), name)
 
+    def test_a_name_that_collides_with_an_infrastructure_connection_key_in_another_casing(self):
+        # The same defect through a spelling the first fix did not cover, and a
+        # test of its own rather than more names in the loop above, because the
+        # two halves of the collision differ: those three render one key twice,
+        # while these render two YAML keys that .NET's configuration reads as
+        # one. §14.2 states the rule in the one line where it costs an Aspire
+        # resource name — configuration is case-insensitive but not
+        # punctuation-insensitive — so the refusal has to compare casefolded or
+        # it is watching the spelling rather than the key.
+        #
+        # `NAME` admits all of these: `^[A-Z][A-Za-z0-9]*$` says nothing about
+        # the capitals after the first. `RabbitMQ` is the product's own
+        # spelling and the likeliest of the seven to be typed by somebody who
+        # is not thinking about this file at all.
+        #
+        # Every pair below was verified by rendering before it was asserted
+        # about — the render was read back and BOTH keys were found in the api
+        # block's mapping — because "`RABBITMQ` presumably behaves like
+        # `Rabbitmq`" is an assumption, and the rename is exactly the step that
+        # could have made it false.
+        for name, declared in (
+            ("Rabbitmq", "ConnectionStrings__RabbitMq"),
+            ("RABBITMQ", "ConnectionStrings__RabbitMq"),
+            ("RabbitMQ", "ConnectionStrings__RabbitMq"),
+            ("Rediscache", "ConnectionStrings__RedisCache"),
+            ("REDISCACHE", "ConnectionStrings__RedisCache"),
+            ("Rediscoordination", "ConnectionStrings__RedisCoordination"),
+            ("REDISCOORDINATION", "ConnectionStrings__RedisCoordination"),
+        ):
+            with self.assertRaises(ScaffoldError) as raised:
+                render(name=name)
+            message = str(raised.exception)
+            # BOTH spellings, because a message naming only one of them reads
+            # as wrong to the person who typed the other and cannot find it in
+            # the file — and the case-insensitivity is the whole reason this is
+            # a collision at all, so a message that omits it is a refusal the
+            # reader has no way to check.
+            self.assertIn(f"ConnectionStrings__{name}", message, name)
+            self.assertIn(declared, message, name)
+            self.assertIn("case-insensitive", message, name)
+
     def test_the_duplicate_key_check_is_looking_at_the_environment_mappings(self):
         # The subject test for the refusal above, and the reason it is a
         # predicate rather than those three names: the check is only as good as
