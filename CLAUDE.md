@@ -260,6 +260,7 @@ correction, but a residual PR-28's own row *names as owed*, so the debt was
 declared in the section and the only thing missing was a row saying who would
 pay it. It passes the same test — ADR-037 retires the exception in §8.5's
 opening guarantee — which is what a row records and a commit body cannot.
+
 **PR-33 is PR-30's kind, arriving against a row two rows old**: PR-32
 delivered what ADR-037 specified and filed two issues against its own margin
 on the way past, and closing them moved the rule ADR-037 had just set —
@@ -268,6 +269,7 @@ the claim's window plus an allowance (ADR-038). A row records that, and the
 size of the diff is not what earned it — which is why no inventory of that diff
 appears here: the sentence's whole point is that the count is irrelevant, and a
 count written beside it is one more figure nothing recomputes.
+
 **PR-34 is PR-33's kind against PR-33's own row, and it also carries a gap**:
 ADR-038 stated the clock term it could not close, filed #171 rather than
 folding the fix into a PR about something else, and closing it moved that rule
@@ -281,6 +283,7 @@ for most of its life and admitted in its last window, and #157 stays open in
 full for the deploy-time check it actually asks for. **Two kinds in one row is
 not a fourth kind** — one pull request is one row, which is the rule PR-32's
 and PR-33's rows already state.
+
 **PR-35 is PR-32's kind and the third consecutive row to close the residual the
 row above it named**: ADR-039 bought back the atomicity its own split cost by
 making the delete name the rows the select returned, and said in the same
