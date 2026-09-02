@@ -143,11 +143,14 @@ editable; **#30** and **#23**, the argv guard — the `--output` write primitive
 in every spelling including the quoted one, `ext::`, command substitution, and
 a push allow-list that refuses anything but one remote, one refspec naming a
 destination, and options from a fixed set; **#150**, that what suppresses a
-sweep finding is decided by a helper rather than by a reader; and **#75**
+sweep finding is decided by a helper rather than by a reader; **#75**
 again, that the issue helper leaves `gh issue create` no free parameter and
 that the conversion exclusion reaches its own child rather than only its
 source — the second helper of the kind that never shipped wrong, whose title
-did.
+did; and **#17**, that every credential-bearing `docker run` in the reviewer
+joins the internal network and only the proxy reaches the bridge, which is
+the whole of the egress confinement and the one part of it a text gate can
+hold.
 
 **Two of those took their counterfactual somewhere other than the previous
 commit, and that is worth knowing before trusting them.** #140's read-side

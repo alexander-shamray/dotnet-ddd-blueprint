@@ -18,10 +18,14 @@
 # the container must not be able to rewrite this host's credential file. All
 # three are grok's and only grok's.
 #
-# Egress is deliberately NOT restricted, and that is the remaining residual.
-# Confining it to api.x.ai needs an allow-list proxy on an internal network,
-# which is its own change; Docker alone offers "all" or "none", and "none" stops
-# the review too. The credential half is what the finding named.
+# Egress is CONFINED to api.x.ai and auth.x.ai since #17, and it takes two
+# containers of this image: the reviewer on a network created with --internal,
+# which Docker gives no gateway, and egress-proxy.py below as the one member
+# with a second leg on the bridge — a CONNECT-only tunnel with a host
+# allow-list, which grok reaches through HTTPS_PROXY. Docker alone offers
+# "all" or "none"; the proxy is the third option. What remains is the crossing
+# credential's own blast radius against x.ai, which no boundary here can
+# shrink, and grok-review.sh's header carries that argument.
 
 FROM debian:trixie-slim
 
@@ -46,6 +50,17 @@ RUN apt-get update \
         python-is-python3 \
     && rm --recursive --force /var/lib/apt/lists/*
 
+# The reviewer's only way out, baked into the image rather than bind-mounted:
+# a mount would need `:Z` on an SELinux host, and `:Z` relabels the file it
+# names — which would be a file inside this repository's checkout. On PATH
+# under a bare name, because grok-review.sh runs under MSYS on one host and
+# MSYS rewrites a leading-slash argument into a Windows path; `--workdir
+# /review` already costs that script an exclusion, and this would be a second.
+# Root-owned and readable by everyone, which is all a script needs. It is run
+# by grok-review.sh in a SECOND container of this image — no clone, no
+# credential, and a leg on the bridge the reviewer's container does not have.
+COPY --chmod=755 egress-proxy.py /usr/local/bin/egress-proxy
+
 # Not root. The container is the boundary, but a reviewer that is root inside it
 # is one escape away from being root outside, and it needs no privilege a plain
 # user lacks.
@@ -57,10 +72,48 @@ RUN apt-get update \
 # reviewer unable to read the credentials or write suggestions.md. Docker
 # Desktop maps ownership and hides this, which is why it has to be argued rather
 # than discovered.
+#
+# **An id the base image already uses is reused, not created.** `groupadd` and
+# `useradd` refuse an id that exists — `GID '100' already exists`, `UID 65534
+# is not unique` — and debian:trixie-slim already holds gid 20 (dialout, a
+# typical macOS primary group), gid 100 (users, a common Linux one) and
+# uid/gid 65534 (nobody/nogroup). A host with any of those could not build the
+# reviewer at all (#17). So the group is created only when its gid is free, and
+# a uid that is taken has its account RENAMED into `reviewer` rather than
+# joined by a second entry: `useradd --non-unique` would leave the base's name
+# first in /etc/passwd, so `id` and getpwuid would answer `nobody` with a home
+# of /nonexistent, and anything that resolves HOME through the account rather
+# than the environment would look in the wrong place. The name and the path
+# are both load-bearing — grok-review.sh mounts the credentials at the literal
+# /home/reviewer/.grok/, and `USER` below is by name — so both are fixed here
+# whichever branch ran, and the last line checks that they are.
+#
+# **0:0 is refused on purpose, where it used to be refused by accident.** The
+# old form failed on root because root exists; reuse would instead rename root
+# into `reviewer` and hand the review a root shell. grok-review.sh refuses to
+# pass 0 before the build starts and keeps doing so; this is the same refusal
+# one layer down, for a build invoked by hand.
 ARG REVIEWER_UID=1000
 ARG REVIEWER_GID=1000
-RUN groupadd --gid "${REVIEWER_GID}" reviewer \
-    && useradd --create-home --uid "${REVIEWER_UID}" --gid "${REVIEWER_GID}" reviewer
+RUN set -eu; \
+    [ "${REVIEWER_UID}" -ne 0 ] && [ "${REVIEWER_GID}" -ne 0 ] || \
+        { echo "refusing REVIEWER_UID=${REVIEWER_UID} REVIEWER_GID=${REVIEWER_GID}: the reviewer is non-root by design, and reusing root's account would make it root" >&2; exit 1; }; \
+    getent group "${REVIEWER_GID}" >/dev/null \
+        || groupadd --gid "${REVIEWER_GID}" reviewer; \
+    existing="$(getent passwd "${REVIEWER_UID}" | cut -d: -f1)"; \
+    if [ -n "${existing}" ]; then \
+        usermod --login reviewer --comment "" --gid "${REVIEWER_GID}" \
+            --home /home/reviewer --shell /bin/sh "${existing}"; \
+        mkdir -p /home/reviewer; \
+        chown "${REVIEWER_UID}:${REVIEWER_GID}" /home/reviewer; \
+        chmod 700 /home/reviewer; \
+    else \
+        useradd --create-home --uid "${REVIEWER_UID}" --gid "${REVIEWER_GID}" reviewer; \
+    fi; \
+    [ "$(id -u reviewer)" = "${REVIEWER_UID}" ] \
+        && [ "$(id -g reviewer)" = "${REVIEWER_GID}" ] \
+        && [ "$(getent passwd reviewer | cut -d: -f6)" = /home/reviewer ] \
+        && [ -d /home/reviewer ]
 USER reviewer
 ENV HOME=/home/reviewer
 

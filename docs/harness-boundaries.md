@@ -184,26 +184,39 @@ hook arrives behind a control rather than behind a sentence that used to be
 true.
 
 **The external review runs in a container over a disposable clone — not a
-worktree — and it has TWO residuals, which are not independent.** The boundary
+worktree — and it had TWO residuals, which were not independent; the egress
+one is closed and the credential one is what stands.** The boundary
 is `.claude/sandbox/Dockerfile`; a worktree could not be the thing mounted,
 because a worktree's `.git` is a file pointing back into this checkout, which
 is the one path the container must not reach. No `gh` token, no SSH keys, no
 host filesystem beyond the clone, non-root inside, and `bypassPermissions` is
 no longer the risk it was because the blast radius is the box.
 
-**Egress is not restricted** — the container reaches the network, and confining
-it to `api.x.ai` needs an allow-list proxy Docker cannot supply alone. **And
-the credential half is narrowed rather than closed**, which this paragraph
+**Egress is confined to `api.x.ai` and `auth.x.ai` since #17**, and it takes
+two containers of the reviewer image: the reviewer on a network created with
+`--internal`, which Docker gives no gateway and whose embedded resolver
+answers `SERVFAIL` for any name outside it, and `egress-proxy.py` as the one
+member with a second leg on the bridge — a CONNECT-only tunnel with a host
+allow-list that the reviewer reaches through `HTTPS_PROXY`, which grok
+honours (measured: without it the same call hangs, with it `api.x.ai`
+answers). It is not a grant wider than its operation: the session runs
+nothing new to bring it up, and the proxy carries no clone and no credential.
+**The credential half is narrowed rather than closed**, which this paragraph
 asserted as settled until #58: where `XAI_API_KEY` is unset or unusable,
 `grok-review.sh` copies `~/.grok/auth.json` in, and that file carries a
 refresh-token-bearing OAuth session for the x.ai account. The three things
-enumerated as absent genuinely are; a fourth was never enumerated. **The open
-residual is what makes the crossing one exploitable** — anything inside can
-read the session and post it anywhere — so listing them as two independent
-bullets is precisely what let the second read as finished. Prefer
-`XAI_API_KEY`, which is scoped, revocable and crosses no file; on this host it
-authenticates against a team with no credits, so the fallback is the path that
-actually runs.
+enumerated as absent genuinely are; a fourth was never enumerated. What the
+proxy changes is what the crossing credential can reach — the two hosts the
+session is for and nothing else — which is why the egress half was the one to
+close: it was what made the crossing one exploitable. What remains is the
+session's own blast radius against x.ai, which no boundary here can shrink.
+Prefer `XAI_API_KEY`, which is scoped, revocable and crosses no file; on this
+host it authenticates against a team with no credits, so the fallback is the
+path that actually runs. **An authenticated call through the proxy is the
+one thing the measurement did not reach** — the classifier refused the probe
+that would have copied the host's session into a container — so the first
+real review behind it is that measurement, and the proxy logs a `deny` line
+naming any host it refuses.
 
 Stated here as well as in the script because `/ship` and both
 sweeps cite `CLAUDE.md` as where the boundary and its residuals are recorded,

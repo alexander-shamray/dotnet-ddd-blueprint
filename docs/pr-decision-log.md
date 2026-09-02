@@ -252,6 +252,54 @@ the concurrency key, and that only the `judge` step's failure files.
   is looking at anything, and the subject-tests above are what stand in until
   an environment exists.
 
+### The harness half, in the same pull request
+
+**One pull request is one row, and this one carried three harness issues
+beside the realm's.** They share nothing with ADR-043 except the branch, and
+they are recorded here rather than in Appendix C because the harness is not
+the blueprint's subject. Each is a grant question, and each was settled by a
+measurement rather than by reading.
+
+**#149 and #75's last item closed by one shape — adjudicate in a step that
+cannot write, apply from a record — and the boundary the shape promised
+turned out to be discipline, for a measured reason.** A `review-adjudicator`
+profile with `Read`, `Grep` and `Glob` reads the review and returns
+structured rows; the sweeps verify by a second read-only dispatch under a
+verdict contract; and `gh-issue-create.sh` leaves `gh issue create` with no
+free parameter. The first form of `/review-grok` also put
+`Read(suggestions.md)` in its `disallowed-tools`, so the writing step would
+be refused the review by the harness. A nested-session probe showed what
+that reaches: a command's deny list propagates to the subagents it spawns,
+so the adjudicator's own reads were refused and it returned
+`unreadable-review`; and a path deny reaches a `Bash` command naming the
+path, so the size preflight was refused beside it. The harness offers no
+deny that reaches the parent and not the child. The entry is gone, the
+command says the review is readable to the writing step and that the split
+holds because it does not read it, and the three machinery trees refused to
+`Edit` are the half the harness holds.
+
+**The same probing measured the `Bash(...)` form of `disallowed-tools`,
+which the boundaries inventory had named as owed since #23.** A throwaway
+command carrying `Bash(git diff:*)` in both keys had the diff refused with
+the harness's own text while a `wc` in the same session ran, which
+separates a rejected pattern from a command that failed to load exactly.
+Both sweeps now deny `git push origin`, its `-u` form and the raw
+`gh issue create` by name — the fix their own residual paragraphs had
+refused to write unmeasured.
+
+**#17's two Docker-testable items were built on evidence, and the third is
+a procedure.** The uid collision was reproduced against the base image's own
+accounts, the tempting `useradd --non-unique` was built and rejected because
+`id` then answers `nobody`, and the reuse-or-rename fix was built at four id
+pairs. Egress is an internal network and a CONNECT-only proxy baked into the
+reviewer image; the grok CLI's honouring of `HTTPS_PROXY` was measured, and
+the network is brought up before the credential probes because those are
+model calls too. What was not measured is stated in the boundaries
+inventory: an authenticated call through the proxy, which the classifier
+refused to stage, and SELinux, which needs an enforcing host. The plan under
+`docs/superpowers/plans/2026-09-02-sandbox-hardening.md` is the measurement
+record, verbatim.
+
 ## PR-36 — where a check sits decided what it could hold
 
 **#157 had been open since PR #156 and had been narrowed twice without being

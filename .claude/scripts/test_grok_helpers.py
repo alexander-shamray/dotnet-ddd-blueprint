@@ -52,6 +52,11 @@ What is under test, and which issue each half closes:
         because the grant could not carry an env prefix. Closed the same way,
         and the confinement never shipped wrong either; the title did, and
         the case that reads the child's environment is the one for it.
+  #17   egress from the reviewer was unrestricted, so the OAuth session that
+        crosses on the fallback path could be posted anywhere. Closed by an
+        internal network and a CONNECT-only proxy; these cases keep every
+        credential-bearing `docker run` on that network, which is the whole
+        of the confinement.
   #56   /review-copilot read three comment feeds and filtered none of them,
         holding `Edit`, in a loop /ship runs unattended. The cases cover what a
         feed helper admits, that a dropped item's BODY reaches neither stream,
@@ -1893,6 +1898,69 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         text = self.HELPER.read_text(encoding="utf-8")
         self.assertIn('"$here/gh-label-ensure.sh" "$kind"', text)
         self.assertIn('"$here/gh-label-ensure.sh" "$severity"', text)
+
+
+class EveryReviewerRunIsBehindTheProxy(unittest.TestCase):
+    """#17 — egress is confined by an internal network, and the confinement is
+    only as wide as the `docker run`s that join it.
+
+    Three invocations in `grok-review.sh` carry the credential — the key
+    probe, the limit probe and the review — and a fourth is the proxy itself.
+    A probe that reaches the network unconfined is the residual back for one
+    second per round, so the property is not "the review is on the network"
+    but "every reviewer-side run is": each `docker run` naming `"$image"`
+    carries `"${net_args[@]}"`, except the one that starts the proxy, which
+    is the member with the leg on the bridge and is identified by what it
+    runs. The gate shape this repository trusts — a subject test over the
+    script's own text — because nothing here can run a review.
+    """
+
+    def commands(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        joined = text.replace("\\\n", " ")
+        return [line for line in joined.splitlines()
+                if "docker run" in line and '"$image"' in line
+                and not line.lstrip().startswith("#")]
+
+    def test_every_credential_bearing_run_joins_the_internal_network(self):
+        runs = self.commands()
+        self.assertGreaterEqual(len(runs), 4, runs)
+        proxy = [r for r in runs if "egress-proxy" in r]
+        reviewer = [r for r in runs if "egress-proxy" not in r]
+        self.assertEqual(1, len(proxy), proxy)
+        self.assertEqual(3, len(reviewer), reviewer)
+        for run in reviewer:
+            self.assertIn('"${net_args[@]}"', run, run)
+        self.assertNotIn("net_args", proxy[0])
+
+    def test_the_network_is_internal_and_the_proxy_alone_reaches_the_bridge(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        self.assertIn('docker network create --internal "$net"', text)
+        self.assertEqual(1, text.count("docker network connect bridge"))
+        self.assertIn('docker network connect bridge "$proxy"', text)
+        self.assertIn("--env HTTPS_PROXY=http://proxy:8888", text)
+
+    def test_the_network_exists_before_the_first_credential_probe(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        created = text.find('docker network create --internal')
+        first_probe = text.find("key_probe=$(docker run")
+        self.assertNotEqual(created, -1)
+        self.assertNotEqual(first_probe, -1)
+        self.assertLess(created, first_probe)
+
+    def test_cleanup_removes_the_proxy_before_the_network(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        body = text[text.find("cleanup() {"):text.find("trap cleanup EXIT")]
+        proxy = body.find('docker rm --force "$proxy"')
+        net = body.find('docker network rm "$net"')
+        self.assertNotEqual(proxy, -1, body)
+        self.assertNotEqual(net, -1, body)
+        self.assertLess(proxy, net)
+
+    def test_the_proxy_is_baked_into_the_image(self):
+        dockerfile = (SCRIPTS.parent / "sandbox" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("COPY --chmod=755 egress-proxy.py /usr/local/bin/egress-proxy", dockerfile)
+        self.assertTrue((SCRIPTS.parent / "sandbox" / "egress-proxy.py").is_file())
 
 
 class CopilotFeedFilter(unittest.TestCase):
