@@ -37,9 +37,38 @@ namespace Common.Infrastructure.Idempotency;
 /// fixture stage a marker at a controlled age; that is the only caller that
 /// should.
 /// </para>
+/// <para>
+/// <b>The row also carries a <c>rowversion</c>, and it is a shadow property on
+/// purpose.</b> <c>RetentionPurgeService</c>'s delete names the rows its select
+/// returned rather than describing them, and <see cref="RowVersionColumn"/> is
+/// what identifies one: unique and monotonic per database, immutable for the
+/// life of a row nothing updates, and reading no clock at all
+/// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173">#173</see>,
+/// ADR-041). <c>CommittedAt</c> went on doing the job until that issue, and it
+/// held the row's identity <em>by construction</em> — nothing enforces
+/// uniqueness on a <c>datetimeoffset(7)</c>, so a replacement stamped at the
+/// selected row's exact tick was matched and deleted with its claim live.
+/// </para>
+/// <para>
+/// <b>No CLR property backs it, because nothing in C# reads it through EF:</b>
+/// the one reader is the purge's own SQL, over Dapper, which does not consult
+/// this model. A property here would be a mutable array on a public type that
+/// exists to be ignored — and <see cref="RowVersionColumn"/> is what keeps the
+/// mapping and that SQL from drifting apart, since each service declares the
+/// shadow property itself the way it declares its schema.
+/// </para>
 /// </remarks>
 public sealed class IdempotencyMarker(string key, DateTimeOffset committedAt = default)
 {
+    /// <summary>
+    /// The <c>rowversion</c> column's name, and the shadow property's — they
+    /// are the same string because EF names the column after the property, and
+    /// naming it once is what lets a service's
+    /// <c>IEntityTypeConfiguration</c> and <c>RetentionPurgeService</c>'s
+    /// statements agree without either restating the other.
+    /// </summary>
+    public const string RowVersionColumn = "RowVersion";
+
     public string Key { get; private set; } = key;
 
     public DateTimeOffset CommittedAt { get; private set; } = committedAt;

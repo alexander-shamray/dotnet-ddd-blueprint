@@ -101,7 +101,8 @@ public class DatabaseSmokeTests(ServiceFixture fixture)
             "_AddSagaCancellationObserved",
             "_AddTransactionalOutbox",
             "_AddIdempotencyMarkers",
-            "_IdempotencyMarkerCommittedAtDefault"
+            "_IdempotencyMarkerCommittedAtDefault",
+            "_AddIdempotencyMarkerRowVersion"
         ];
 
         string[] applied = await fixture.AppliedMigrationsAsync();

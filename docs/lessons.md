@@ -936,3 +936,28 @@ own line rather than sending a reader to a file that does not hold it.
   relationship** — the floor's test now also asserts that the floor *equals* the
   claim's window, so a later reader who reinstates an allowance fails a test
   about the rule rather than one about a duration.
+- **"By construction" is a note that the constraint is missing, and it is worth
+  writing the note down.** Three successive rules here were true because
+  something ordinarily moves — a clock advances, so two writes under one key
+  carry different timestamps — rather than because anything enforced it. That
+  reads as a proof right up to the fault that violates it, and the violating
+  fault is usually a *different kind* from the ones already handled: a clock
+  step is bounded by a magnitude and can be argued about, where a clock set to
+  an exact historical instant is a coincidence with no quantity to bound. **The
+  useful move is to say which of the two you have** — the delete that named a
+  row by `(Key, CommittedAt)` recorded, in the decision that shipped it, that
+  the pair was an identity by construction and not by constraint, and that
+  sentence is what turned a silent duplicate write into a filed issue and then
+  into a `rowversion`. Where a constraint exists that says the same thing, take
+  it: it costs a column and removes the argument.
+- **A column no code reads is still a claim, and a shadow property is how you
+  say so.** The version the purge joins on is read by one raw SQL statement and
+  by nothing in the object model, so a CLR property for it would be a member
+  that exists to be ignored — and, being an array, a mutable one on a public
+  type. **What the shadow property costs is discoverability, and it is payable:
+  name the column once as a constant and let both the mapping and the statement
+  read it**, so the two cannot drift, and add a test whose subject is the
+  mapping rather than the behaviour. The behavioural test would go on passing
+  if the column silently became an ordinary `binary(8)` — two rows in one test
+  still differ in a value nobody updates — so what has to be asserted is that
+  the *database* generates it.

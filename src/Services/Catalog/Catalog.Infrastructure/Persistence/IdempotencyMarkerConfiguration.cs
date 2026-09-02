@@ -74,6 +74,32 @@ internal sealed class IdempotencyMarkerConfiguration : IEntityTypeConfiguration<
             .HasDefaultValueSql("SYSDATETIMEOFFSET()")
             .ValueGeneratedOnAdd();
 
+        // What RetentionPurgeService's DELETE identifies a row by (#173,
+        // ADR-041). It is unique and monotonic per database, immutable for the
+        // life of a row nothing updates, and reads no clock — which is what the
+        // (Key, CommittedAt) pair before it was standing in for. That pair
+        // distinguished two writes under one key BY CONSTRUCTION and nothing
+        // enforced it: a datetimeoffset(7) carries no uniqueness, so a
+        // replacement stamped at the selected row's exact tick was matched by a
+        // stale delete and removed with its claim still live.
+        //
+        // A SHADOW property, because nothing in C# reads this column through
+        // the model — the one reader is the purge's own SQL, over Dapper, which
+        // never consults it. The name comes from the entity rather than a
+        // literal here, so the two statements that have to agree about it —
+        // this mapping and that SQL — agree by construction, and a service that
+        // omits this line fails its own purge rather than drifting quietly.
+        // Required, because a shadow byte[] is optional by convention and the
+        // column never is: SQL Server stamps a rowversion on every insert and
+        // on every update, including the rows an ALTER TABLE adds it to. Left
+        // optional it would render `nullable: true` and hand the purge a
+        // MarkerCandidate whose version could be null — a state the database
+        // cannot produce, modelled anyway.
+        builder
+            .Property<byte[]>(IdempotencyMarker.RowVersionColumn)
+            .IsRowVersion()
+            .IsRequired();
+
         // The purge's predicate (§8.5). Non-covering and non-filtered, like the
         // inbox's and for the same reason: every row here records work that
         // committed, so there is no unfinished subset to narrow to, and the

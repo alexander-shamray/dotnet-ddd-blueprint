@@ -2062,7 +2062,33 @@ windows are housekeeping, where a clock a test host can move is worth more than
 one nothing can, and the marker's window is a correctness property, where one
 clock on both ends is worth more than a substitutable one.
 
-**That pass therefore has a second way to stop, and the other two do not need
+**The second statement names its rows by a `rowversion`, which is the job
+`CommittedAt` used to do and no longer does.** A key identifies a *command*, so
+a retry can commit a fresh marker under a key this pass has already selected —
+and with [§15.3](15-cicd-deployment.md)'s three replicas a second purger's
+delete can arrive after that replacement exists. The `SELECT` therefore carries
+a version out beside each key and the `DELETE` joins on both, which makes the
+pair the row's identity **by constraint**: SQL Server's counter is unique,
+monotonic per database, and carried unchanged for the life of a row nothing
+updates. It was `(Key, CommittedAt)` until
+[#173](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173),
+and that pair held only **by construction** — nothing enforces uniqueness on a
+`datetimeoffset(7)`, so a database clock set to a selected row's exact
+100-nanosecond tick matched the replacement and deleted it with a live claim
+behind it
+([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)).
+The column is an EF **shadow property**, declared by each service's own
+`IEntityTypeConfiguration` beside the schema and named from the entity, so the
+mapping and the two statements cannot drift apart; the delete still costs two
+parameters a row, so its 900-row chunk is unchanged.
+
+**Everything else `CommittedAt` does here is unchanged.** It keeps its column
+default, keeps `IX_Idempotency_CommittedAt` and goes on ageing the candidate
+`SELECT` — the sentence above about the server's own clock is about that
+statement and only that one. What it stopped doing is saying *which row is
+which*; what it goes on doing is saying *which rows have served their window*.
+
+**That pass also has a second way to stop, and the other two do not need
 one.** A batch the claim store **releases nothing from** would be returned
 unchanged by the next `SELECT` — the candidates come back oldest first and
 nothing about those rows has moved — so it stops there rather than re-reading
@@ -4143,7 +4169,11 @@ public sealed class OrderFulfilmentState : SagaStateMachineInstance
 
 No `RowVersion`. The repository below runs `ConcurrencyMode.Pessimistic`, which
 takes row locks rather than comparing a version column — carrying one anyway
-would imply an optimistic strategy the saga does not use.
+would imply an optimistic strategy the saga does not use. **This is not the
+column §8.5's marker gained**, and the two answer different questions: that one
+is a row *identity* a purge's `DELETE` joins on, on a table nothing ever
+updates, where this one would be a concurrency token on a row every transition
+rewrites.
 
 ```sql
 CREATE TABLE ordering.OrderFulfilmentStates

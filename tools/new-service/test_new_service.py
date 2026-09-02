@@ -1822,7 +1822,7 @@ class TheCommandLine(unittest.TestCase):
             # `6 updated` and not 7: this root has no `.github/`, so §15.1's
             # allow-list step degrades — which is `TheAllowListStep`'s subject
             # and is asserted there from both sides.
-            self.assertIn("61 files created, 6 updated", out)
+            self.assertIn("63 files created, 6 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 

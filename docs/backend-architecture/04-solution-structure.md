@@ -1558,21 +1558,27 @@ failed claim twice a second from its first boot — the outbox itself with its
 empty allow-list mapper, §9.5's inbox filter and retention purge, §11.3's JWT
 validation, both images ([§15.2](15-cicd-deployment.md)) and
 §4.2's architecture gates. The migrations it copies are `InitialCreate`,
-`AddOutbox`, `AddInbox`, `AddOutboxRetentionIndex`, `AddIdempotencyMarkers` and
-`IdempotencyMarkerCommittedAtDefault` — the messaging tables ship with the
+`AddOutbox`, `AddInbox`, `AddOutboxRetentionIndex`, `AddIdempotencyMarkers`,
+`IdempotencyMarkerCommittedAtDefault` and `AddIdempotencyMarkerRowVersion` —
+the messaging tables ship with the
 dispatcher that reads them, because a service carrying the dispatcher without
 its table logs a failed claim twice a second from its first boot, and §8.5's
 marker table ships on a sharper version of the same argument: without it the
 service fails a retention purge every hour and then fails the first idempotent
 command it is ever given
 ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
-**The last of the six is the marker's `CommittedAt` default and travels for
-the reason the table itself does**: the `SYSDATETIMEOFFSET()` default and the
+**The marker's `CommittedAt` default travels for the reason the table itself
+does**: the `SYSDATETIMEOFFSET()` default and the
 cutoff `RetentionPurgeService` computes in SQL are two halves of one guarantee
 ([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)),
 so a service scaffolded with the table and without the default ages its markers
 on the writing pod's clock while the purge ages them on the server's — the skew
 that migration exists to remove, reintroduced in every new service by omission.
+**The last one adds that table's `rowversion` and travels on the sharpest
+version of the argument yet**: `RetentionPurgeService` names the column in both
+of its marker statements, so a service scaffolded without the migration fails
+its own purge with `Invalid column name 'RowVersion'` on the first pass
+([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)).
 It then edits seven shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)), the broker
@@ -1591,12 +1597,24 @@ be a second implementation of which substring each rule matches — and a
 fingerprint matching nothing is a stale entry that fails the build. Where
 `.github/secret-scan/` is absent it writes nothing and says nothing, which is
 the case in the scaffold suite's own synthetic root. The new service
-builds and its **eighty-three** tests pass before a line of it is written,
-**forty** of them against real SQL Server and RabbitMQ containers —
+builds and its **eighty-nine** tests pass before a line of it is written,
+**forty-six** of them against real SQL Server and RabbitMQ containers —
 counts measured against a rendered service, by PR-18 when they read forty-one
 and sixteen three PRs after they stopped being true, again by PR-22 when they
-read fifty-six, twice by PR-32, and twice by PR-33. The forty is the
-`Category=Integration` count of §12.4, which is a filter rather than a tally.
+read fifty-six, twice by PR-32, twice by PR-33, and again by PR-35. The
+forty-six is the `Category=Integration` count of §12.4, which is a filter
+rather than a tally.
+
+**PR-35 found them stale by four before it had added anything**, which is the
+first time the drift was somebody else's rather than the recounting PR's own.
+PR-34 put four cases into `RetentionPurgeTests` for
+[ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)
+— a file the scaffold copies — and left this pair alone, so the tree read
+eighty-seven while this sentence said eighty-three. PR-35 then added two and
+measured eighty-nine, which is the arithmetic *failing* in the direction the
+rule below predicts: two added, six apparent. **A figure nobody recounts goes
+stale on the next PR's clock, not on its own**, and the only way to find that
+out is the render.
 
 **Arithmetic is not a remeasurement, and the two rules that follow from that
 have both been tested by now.** PR-22 added three tests to the template and the

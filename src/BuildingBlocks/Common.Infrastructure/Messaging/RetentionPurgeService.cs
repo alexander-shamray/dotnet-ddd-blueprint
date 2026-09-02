@@ -38,11 +38,15 @@ namespace Common.Infrastructure.Messaging;
 /// column against a cutoff to find <em>candidates</em>, asks
 /// <see cref="Common.Application.IIdempotencyStore"/> which of them it has
 /// already let go of, and then deletes each row by <em>identity</em> — its key
-/// and the <c>CommittedAt</c> the select returned. A key names a command
+/// and the <c>rowversion</c> the select returned. A key names a command
 /// rather than a row, so a retry can commit a fresh marker under one this pass
 /// already chose; three successive predicates were tried against that and each
 /// fell to a different clock movement, which is why the delete names the write
-/// instead of describing it. Deleting on age alone put the claim's window and
+/// instead of describing it. The version is what makes that name an identity
+/// the schema enforces rather than one a clock happens to supply
+/// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173">#173</see>,
+/// ADR-041).
+/// Deleting on age alone put the claim's window and
 /// the marker's on two servers' clocks with nothing coupling their rates, so a
 /// forward step of the database's deleted the row while the claim it backs up
 /// was still live
@@ -182,7 +186,8 @@ public sealed class RetentionPurgeService : BackgroundService
         // where the pass stops rather than at the head where it would block.
         _idempotencyCandidateSql =
             $"""
-            SELECT TOP (@BatchSize) [Key], CommittedAt FROM {markers.QualifiedName}
+            SELECT TOP (@BatchSize) [Key], {IdempotencyMarker.RowVersionColumn}
+            FROM {markers.QualifiedName}
             WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())
             ORDER BY CommittedAt;
             """;
@@ -217,18 +222,29 @@ public sealed class RetentionPurgeService : BackgroundService
         // because the replacement is then both below the bound and past a
         // re-read cutoff. An arbitrary clock cannot be out-predicated.
         //
-        // (Key, CommittedAt) is the row's identity here BY CONSTRUCTION: the
-        // key names the command and the timestamp names the write, and a
-        // replacement is a different write stamped at a different instant. That
-        // is the property the single statement had for free and the split had
-        // to buy back.
+        // (Key, RowVersion) is the row's identity here BY CONSTRAINT, and the
+        // difference from what stood here before is the whole of #173. The pair
+        // used to be (Key, CommittedAt), which identified a write only by
+        // construction: the key names the command and the timestamp names the
+        // write, and a replacement is a different write stamped at a different
+        // instant — except that nothing ENFORCED that. A datetimeoffset(7)
+        // carries no uniqueness, so a database clock set to the exact
+        // 100-nanosecond tick of a row at least IdempotencyWindow old matched
+        // the replacement and deleted it with its claim live, re-entering the
+        // very ABA this join closes through the identity itself.
         //
-        // By construction and not by constraint, which is the limit worth
-        // knowing. CommittedAt is a datetimeoffset(7) with no uniqueness on it,
-        // so a replacement stamped at the very tick the selected row carries
-        // would be matched. That needs the clock set to an exact historical
-        // instant rather than drifted by a magnitude, which is why it is
-        // #173 and a rowversion rather than a fourth predicate here.
+        // That was a fifth clock fault and not a smaller instance of the four
+        // above, which is why it was filed rather than out-predicated: the
+        // others need a drift of sufficient MAGNITUDE in a direction, and this
+        // one needs an exact COINCIDENCE. A rowversion answers all five at once
+        // by reading no clock: SQL Server's database-wide counter is unique and
+        // monotonic, and a row nothing ever updates carries the value it was
+        // inserted with for life (ADR-041).
+        //
+        // The column is a shadow property on IdempotencyMarker, declared by
+        // each service's own IEntityTypeConfiguration the way the schema is,
+        // and named from the entity so this statement and that mapping cannot
+        // drift. Selected above, bound below, and read by nothing else.
         //
         // Composed per chunk because the VALUES list is as long as the chunk.
         // The only interpolation is the table name, whose shape
@@ -425,11 +441,12 @@ public sealed class RetentionPurgeService : BackgroundService
     /// and which clock movement defeated each. A count lower than the number of
     /// rows handed in means another replica got there first, which is ordinary.
     /// <para>
-    /// <b>The pair identifies a write by construction rather than by
-    /// constraint</b>, so a replacement stamped at the selected row's exact
-    /// tick would still match — the residual
+    /// <b>The pair identifies a write by constraint rather than by
+    /// construction</b>, which is what
     /// <see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173">#173</see>
-    /// carries, and what a <c>rowversion</c> would close.
+    /// bought. The version is SQL Server's own database-wide counter, so a
+    /// replacement never carries the value its predecessor did and no clock is
+    /// party to the comparison (ADR-041).
     /// </para>
     /// </remarks>
     private async Task<int> DeleteRowsAsync(
@@ -446,7 +463,12 @@ public sealed class RetentionPurgeService : BackgroundService
             for (int index = 0; index < chunk.Length; index++)
             {
                 parameters.Add($"k{index}", chunk[index].Key, DbType.String);
-                parameters.Add($"v{index}", chunk[index].CommittedAt, DbType.DateTimeOffset);
+
+                // Sized, because an unsized binary parameter goes over as
+                // varbinary(max) and the VALUES list below would then be a
+                // derived table of max-length columns compared against a
+                // binary(8). A rowversion is eight bytes, always.
+                parameters.Add($"v{index}", chunk[index].RowVersion, DbType.Binary, size: 8);
             }
 
             deleted += await connection.ExecuteAsync(
@@ -474,9 +496,9 @@ public sealed class RetentionPurgeService : BackgroundService
         return $"""
             DELETE marker
             FROM {_markerTable} marker
-            INNER JOIN (VALUES {pairs}) AS selected([Key], CommittedAt)
+            INNER JOIN (VALUES {pairs}) AS selected([Key], {IdempotencyMarker.RowVersionColumn})
                 ON marker.[Key] = selected.[Key]
-                AND marker.CommittedAt = selected.CommittedAt;
+                AND marker.{IdempotencyMarker.RowVersionColumn} = selected.{IdempotencyMarker.RowVersionColumn};
             """;
     }
 
@@ -513,12 +535,13 @@ public sealed class RetentionPurgeService : BackgroundService
 
     /// <summary>
     /// One row of the marker pass's selection: the key to delete by, and the
-    /// <c>CommittedAt</c> that identifies the row rather than the command.
+    /// <c>rowversion</c> that identifies the row rather than the command.
     /// </summary>
     /// <remarks>
     /// A record rather than the bare key, because the key alone cannot tell a
     /// marker from its own replacement — which is the whole of the delete's
-    /// version bound.
+    /// version bound. <c>CommittedAt</c> is not carried: it selects the
+    /// candidates and, since #173, decides nothing about which row is which.
     /// </remarks>
-    private sealed record MarkerCandidate(string Key, DateTimeOffset CommittedAt);
+    private sealed record MarkerCandidate(string Key, byte[] RowVersion);
 }

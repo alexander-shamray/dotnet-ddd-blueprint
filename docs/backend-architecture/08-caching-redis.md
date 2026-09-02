@@ -1064,6 +1064,12 @@ is in the inbox one table over.
 // controlled age; that is the only caller that should.
 public sealed class IdempotencyMarker(string key, DateTimeOffset committedAt = default)
 {
+    // The rowversion column's name, and the shadow property's — one string,
+    // because EF names the column after the property. Naming it once is what
+    // lets a service's IEntityTypeConfiguration and RetentionPurgeService's
+    // statements agree without either restating the other (ADR-041).
+    public const string RowVersionColumn = "RowVersion";
+
     public string Key { get; private set; } = key;
 
     public DateTimeOffset CommittedAt { get; private set; } = committedAt;
@@ -1084,6 +1090,40 @@ nothing else and records `.ValueGeneratedOnAdd()` all the same. Writing it puts
 the property on the record instead of resting on a convention the reader has to
 already know. Both services carry a migration for the default, and §4.5's
 scaffold ships it with the template.
+
+**The table carries a third column and the class carries two properties,
+because the `rowversion` is a shadow property.** `RetentionPurgeService`'s
+`DELETE` names the rows its `SELECT` returned rather than describing them, and
+that column is what identifies one: unique and monotonic per database,
+immutable for the life of a row nothing updates, and reading no clock at all
+([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)).
+**No CLR property backs it, and that is a decision rather than an omission** —
+nothing in C# reads the column through EF, because the one reader is that
+purge's own SQL, over Dapper, which never consults this model. A property here
+would be a mutable array on a public type that exists to be ignored. What sits
+on the entity instead is the const above: the mapping and the two statements
+that read the column all have to agree about its name, and that is the one
+place that says it.
+
+**Each service declares the shadow property the way it declares the schema.**
+The same `IEntityTypeConfiguration` that names the table and its schema also
+writes `.Property<byte[]>(IdempotencyMarker.RowVersionColumn)`, with
+`.IsRowVersion()` and `.IsRequired()` after it, taking the name from the entity
+rather than from a literal of its own — so the mapping and the SQL cannot
+drift, and a service that omits the line fails its own purge on the first pass
+with `Invalid column name 'RowVersion'` rather than deleting the wrong row
+quietly. `IsRequired()` is not decoration there: a shadow `byte[]` is optional
+by convention and this column never is, because SQL Server stamps a
+`rowversion` on every insert and on every update — the rows an `ALTER TABLE`
+adds it to included. Left optional, the model would hand the purge a candidate
+whose version could be null, which is a state the database cannot produce,
+modelled anyway.
+
+**Both services carry `AddIdempotencyMarkerRowVersion`, and it needs no
+backfill.** The DDL is one `ALTER TABLE … ADD [RowVersion] rowversion NOT NULL`
+with no `DEFAULT` constraint behind it, because the engine stamps every
+existing row as part of the `ALTER` — which is how a `NOT NULL` column arrives
+on a populated table with no data migration.
 
 **The key is the whole primary key, and it is already scoped by
 construction** — `{subject}:{operation}:{commandId}` puts the caller, the
@@ -1197,7 +1237,12 @@ of those keys it has already let go of, and deletes only those:
 -- Oldest first, so a batch the store will not let go of entirely leaves the
 -- rows likeliest to still hold a claim — the newest — at the tail where the
 -- pass stops rather than at the head where they would block it.
-SELECT TOP (@BatchSize) [Key], CommittedAt FROM ordering.IdempotencyMarkers
+--
+-- RowVersion travels out with the key because the DELETE below joins on it:
+-- the key names the command and the version names the row, and this is where
+-- the row's identity is read. Nothing else selects this column.
+SELECT TOP (@BatchSize) [Key], RowVersion
+FROM ordering.IdempotencyMarkers
 WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())
 ORDER BY CommittedAt;
 
@@ -1223,26 +1268,41 @@ ORDER BY CommittedAt;
 -- correction, which puts the replacement below the bound and past a re-read
 -- cutoff at once. An arbitrary clock cannot be out-predicated.
 --
--- (Key, CommittedAt) is the row's identity BY CONSTRUCTION: the key names the
--- command, the timestamp names the write, and a replacement is a different
--- write stamped at a different instant. That is the property the single
--- statement had for free and the split had to buy back.
+-- (Key, RowVersion) is the row's identity BY CONSTRAINT: the key names the
+-- command, and the version is SQL Server's own database-wide counter — unique,
+-- monotonic, and carried unchanged for the life of a row nothing updates. That
+-- is the property the single statement had for free and the split had to buy
+-- back.
 --
--- By construction and not by constraint. Nothing enforces uniqueness on a
--- datetimeoffset(7), so a replacement stamped at the selected row's exact tick
--- would match — #173, which a rowversion closes, and which needs a clock set
--- to an exact historical instant rather than drifted by a magnitude.
+-- The pair used to be (Key, CommittedAt), which identified the write only by
+-- construction: nothing enforces uniqueness on a datetimeoffset(7), so a
+-- database clock set to the exact 100-nanosecond tick of a selected row
+-- matched the replacement and deleted it with its claim live. That is #173,
+-- and it needed a clock set to an exact historical instant rather than drifted
+-- by a magnitude — a coincidence rather than a drift, which is why it took an
+-- identity the schema enforces rather than a fifth predicate. A rowversion
+-- reads no clock at all (ADR-041).
+--
+-- The column is a shadow property on IdempotencyMarker, declared by each
+-- service's own IEntityTypeConfiguration the way the schema is and named from
+-- the entity, so this statement and that mapping cannot drift.
 --
 -- Chunked at 900 rows by the caller, because each costs TWO parameters — its
 -- key and its version — and SQL Server refuses more than 2,100 of them, where
 -- the default BatchSize is 5,000. Chunking is what keeps BatchSize meaning
 -- rows considered per batch instead of quietly capping it at a limit belonging
--- to a different layer.
+-- to a different layer. Two parameters a row before #173 and two after it, so
+-- neither number moved.
+--
+-- Each @v is bound as a SIZED binary of eight bytes, which is what a
+-- rowversion always is. An unsized one travels as varbinary(max) and makes the
+-- VALUES list below a derived table of max-length columns compared against a
+-- binary(8).
 DELETE marker
 FROM ordering.IdempotencyMarkers marker
-INNER JOIN (VALUES (@k0, @v0), (@k1, @v1), ...) AS selected([Key], CommittedAt)
+INNER JOIN (VALUES (@k0, @v0), (@k1, @v1), ...) AS selected([Key], RowVersion)
     ON marker.[Key] = selected.[Key]
-    AND marker.CommittedAt = selected.CommittedAt;
+    AND marker.RowVersion = selected.RowVersion;
 ```
 
 > **Two statements are a window one statement did not have, and one half of it
@@ -1270,19 +1330,33 @@ INNER JOIN (VALUES (@k0, @v0), (@k1, @v1), ...) AS selected([Key], CommittedAt)
 > guess.
 >
 > **So the `DELETE` above names the row instead of describing it.** `(Key,
-> CommittedAt)` is its identity — the key names the command, the timestamp
-> names the write — and a replacement is a different write. That is the
-> property the single statement had for free, bought back rather than
-> approximated, and it is why the statement joins the pairs the `SELECT`
+> RowVersion)` is its identity — the key names the command, the version names
+> the row — and a replacement never carries the version its predecessor did.
+> That is the property the single statement had for free, bought back rather
+> than approximated, and it is why the statement joins the pairs the `SELECT`
 > returned rather than carrying a predicate at all.
 >
-> **It is an identity by construction and not by constraint, and that is the
-> one thing left.** Nothing enforces uniqueness on a `datetimeoffset(7)`, so a
-> replacement stamped at the selected row's exact tick would match. What that
-> needs is a clock set to an exact historical instant rather than drifted by a
-> magnitude — a different fault from the four above, which is why it is
+> **The identity is by constraint, and it was by construction for one
+> release.** `(Key, CommittedAt)` separated a replacement from the row that was
+> selected because a clock ordinarily moves between two writes — not because
+> the schema said it must. Nothing enforces uniqueness on a
+> `datetimeoffset(7)`, so a database clock set to the exact 100-nanosecond tick
+> of a selected row matched the replacement and deleted it with a live claim
+> behind it. That is a *fifth* clock fault and not a smaller instance of the
+> four above: each of those needs a drift of sufficient magnitude in a
+> direction, and this one needs an exact coincidence, which no margin can be
+> set against because there is no quantity to bound. It was filed as
 > [#173](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173)
-> and a `rowversion` rather than a fifth attempt here.
+> rather than out-predicated, and closed by the schema saying what the clock
+> had been standing in for
+> ([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)).
+> A `rowversion` answers all five at once by reading no clock at all.
+>
+> **`CommittedAt` lost the identity and kept everything else.** It still ages
+> the candidate `SELECT`, still carries its `SYSDATETIMEOFFSET()` default and
+> still keeps its index; ADR-038's argument for that default is untouched. The
+> column stopped deciding *which row is which* and goes on deciding *which
+> rows have served their window*.
 
 > **The floor is the claim's window exactly, and it was the claim's window
 > *plus* an allowance until both of the things that reordered the two expiries

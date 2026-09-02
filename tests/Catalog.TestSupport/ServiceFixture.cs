@@ -517,14 +517,37 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// registered tables either way — so what varies is the batching and
     /// nothing else.
     /// </remarks>
-    public Task<(int Outbox, int Inbox, int Idempotency)> PurgeWithAsync(RetentionPolicy policy)
+    public Task<(int Outbox, int Inbox, int Idempotency)> PurgeWithAsync(RetentionPolicy policy) =>
+        PurgeWithAsync(policy, Factory.Services.GetRequiredService<IIdempotencyStore>());
+
+    /// <summary>
+    /// The same pass with the claim store substituted, which is the only seam
+    /// in the marker's leg wide enough to reach the window the split opened.
+    /// </summary>
+    /// <remarks>
+    /// <b><c>UnheldAsync</c> is called between the <c>SELECT</c> and the
+    /// <c>DELETE</c>, which is exactly where a replacement lands in
+    /// production.</b> A decorator that mutates the table while answering puts
+    /// a test on the far side of that window without a fake clock, a paused
+    /// thread or a second connection racing the first — the interleaving is
+    /// deterministic because the pass itself calls the seam.
+    /// <para>
+    /// The registered store stays the default above, for the reason
+    /// <see cref="IdempotencyClaims"/> gives: a substitute that answers from
+    /// the test's own idea of the claim would be asserting against itself. This
+    /// overload substitutes <em>when</em> the answer arrives, not what it says.
+    /// </para>
+    /// </remarks>
+    public Task<(int Outbox, int Inbox, int Idempotency)> PurgeWithAsync(
+        RetentionPolicy policy,
+        IIdempotencyStore claims)
     {
         RetentionPurgeService purge = new(
             Factory.Services.GetRequiredService<IServiceScopeFactory>(),
             Factory.Services.GetRequiredService<OutboxTable>(),
             Factory.Services.GetRequiredService<InboxTable>(),
             Factory.Services.GetRequiredService<IdempotencyMarkerTable>(),
-            Factory.Services.GetRequiredService<IIdempotencyStore>(),
+            claims,
             policy,
             Factory.Services.GetRequiredService<ILogger<RetentionPurgeService>>());
 
@@ -650,6 +673,48 @@ public sealed class ServiceFixture : IAsyncLifetime
         public object? GetService(Type serviceType) =>
             serviceType == typeof(TimeProvider) ? clock : inner.GetService(serviceType);
     }
+
+    /// <summary>
+    /// Deletes the marker under <paramref name="key"/> and writes a fresh one
+    /// back under the same key <em>and the same <c>CommittedAt</c></em> — the
+    /// ABA a purge pass can meet between its <c>SELECT</c> and its
+    /// <c>DELETE</c>, staged at its worst.
+    /// </summary>
+    /// <remarks>
+    /// <b>Preserving the timestamp is the whole of it.</b> A replacement
+    /// stamped at a fresh instant is caught by the <c>(Key, CommittedAt)</c>
+    /// pair the delete used before #173, so a test that let the column move
+    /// would pass against the defect it is aimed at. Reading the old value into
+    /// a variable and writing it back is how the coincidence ADR-041 describes
+    /// — a database clock set to the exact tick of a row already past its
+    /// window — is produced without touching the container's clock.
+    /// <para>
+    /// The <c>rowversion</c> is not carried across and cannot be: SQL Server
+    /// generates it, and that a replacement necessarily gets a new one is the
+    /// property being tested rather than something this helper arranges.
+    /// </para>
+    /// </remarks>
+    public Task ReplaceIdempotencyMarkerAsync(string key) =>
+        ExecuteAsync(
+            """
+            DECLARE @committedAt datetimeoffset(7);
+
+            SELECT @committedAt = CommittedAt
+            FROM catalog.IdempotencyMarkers
+            WHERE [Key] = {0};
+
+            DELETE FROM catalog.IdempotencyMarkers WHERE [Key] = {0};
+
+            INSERT INTO catalog.IdempotencyMarkers ([Key], CommittedAt)
+            VALUES ({0}, @committedAt);
+            """,
+            key);
+
+    /// <summary>The <c>rowversion</c> the purge identifies one marker by, or null if it is gone.</summary>
+    public Task<byte[]?> IdempotencyMarkerVersionAsync(string key) =>
+        ScalarAsync<byte[]?>(
+            "SELECT Value = RowVersion FROM catalog.IdempotencyMarkers WHERE [Key] = {0}",
+            key);
 
     /// <summary>Markers §8.5 holds for one key — nought or one, and which is the point.</summary>
     public Task<int> IdempotencyMarkerCountAsync(string key) =>
