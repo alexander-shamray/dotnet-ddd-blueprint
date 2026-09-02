@@ -47,6 +47,11 @@ What is under test, and which issue each half closes:
         label in any repository. This one is the odd entry: it never shipped
         wrong. It is a grant closed by moving it into a helper, and these cases
         are what keep it closed rather than what caught it.
+  #75   `gh issue create` was the same shape one helper over: `--repo` and
+        `--label` free under a prefix grant, and a `/`-title filed as a path
+        because the grant could not carry an env prefix. Closed the same way,
+        and the confinement never shipped wrong either; the title did, and
+        the case that reads the child's environment is the one for it.
   #56   /review-copilot read three comment feeds and filtered none of them,
         holding `Edit`, in a loop /ship runs unattended. The cases cover what a
         feed helper admits, that a dropped item's BODY reaches neither stream,
@@ -1736,6 +1741,158 @@ class LabelHelperHasNoFreeParameter(unittest.TestCase):
         for label in ("security", "bug", "critical", "high", "medium", "low"):
             with self.subTest(label=label):
                 self.assertRegex(text, rf"(?m)^\s*{label}\)\s+colour=")
+
+
+class IssueHelperHasNoFreeParameter(unittest.TestCase):
+    """#75 item 5 — `gh issue create` was a prefix grant with two free parameters.
+
+    `-R` unpinned put the issue in whichever repository a finding named, and
+    `--label` unpinned reached any label in any spelling; both were held as
+    prose in each sweep, which a finding can talk past. A third defect was the
+    grant's and not the command's: a title beginning with `/` filed four times
+    as a Windows path (#55, #56, #68), because an env-prefixed `gh` no longer
+    begins with `gh issue create` and the grant was a prefix match. Like the
+    label helper's cases these keep a closed grant closed rather than catch a
+    defect that shipped, and they are read on the label helper's terms.
+
+    A refusing `gh` sits first on PATH for every case. The negatives exit
+    before `gh repo view` is reached, so they need no network — and the stub is
+    what proves it, because a validation that regressed would otherwise reach a
+    real `gh` and file a real issue. The positive control answers the calls the
+    helper and its label sibling make, and records the argv and the
+    environment the `issue create` child actually received.
+    """
+
+    HELPER = SCRIPTS / "gh-issue-create.sh"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="issue-stub-")
+        d = Path(self.dir)
+        gh = d / "gh"
+        gh.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/usr/bin/env bash
+                printf '%s\\n' "$*" >> {(d / 'argv').as_posix()!r}
+                case "$*" in
+                  *"repo view"*)
+                    echo 'acme/widgets'; exit 0
+                    ;;
+                  *"label list"*)
+                    printf '%s\\n' security bug critical high medium low; exit 0
+                    ;;
+                  *"issue create"*)
+                    printf '%s\\n' "${{MSYS2_ARG_CONV_EXCL-unset}}" > {(d / 'conv').as_posix()!r}
+                    cat > {(d / 'body').as_posix()!r}
+                    exit 0
+                    ;;
+                esac
+                echo "stub gh: unexpected call: $*" >&2
+                exit 99
+                """
+            ),
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def run_helper(self, *args, body=""):
+        env = dict(os.environ)
+        env["PATH"] = self.dir + os.pathsep + env["PATH"]
+        return subprocess.run(
+            [BASH, str(self.HELPER), *args],
+            capture_output=True, text=True, input=body, env=env,
+        )
+
+    def calls(self):
+        f = Path(self.dir) / "argv"
+        return f.read_text(encoding="utf-8").splitlines() if f.exists() else []
+
+    def assert_refused_before_gh(self, result):
+        # Exit 2 is the validation code, and an empty argv file is the proof
+        # that the refusal happened before `gh repo view` rather than after it.
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertEqual([], self.calls())
+
+    def test_no_arguments_prints_the_usage_line(self):
+        result = self.run_helper()
+        self.assert_refused_before_gh(result)
+        self.assertIn(
+            "usage: gh-issue-create.sh <title> <security|bug> <critical|high|medium|low> < body",
+            result.stderr,
+        )
+
+    def test_the_argument_count_is_exactly_three(self):
+        self.assert_refused_before_gh(self.run_helper("a title", "bug"))
+        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", "--repo"))
+
+    def test_a_kind_outside_the_vocabulary_is_refused(self):
+        # `documentation` is a real label on this tracker and is refused on
+        # purpose: neither sweep files one, so the helper's vocabulary is the
+        # sweeps' and not the tracker's.
+        for kind in ("documentation", "Security", "security --force", "-R other/repo", ""):
+            with self.subTest(kind=kind):
+                self.assert_refused_before_gh(self.run_helper("a title", kind, "high"))
+
+    def test_a_severity_outside_the_four_is_refused(self):
+        for severity in ("info", "High", "high --force", "-R other/repo", ""):
+            with self.subTest(severity=severity):
+                self.assert_refused_before_gh(self.run_helper("a title", "bug", severity))
+
+    def test_an_empty_title_is_refused(self):
+        self.assert_refused_before_gh(self.run_helper("", "bug", "low"))
+
+    def test_a_title_with_a_newline_is_refused(self):
+        self.assert_refused_before_gh(self.run_helper("one line\nand another", "bug", "low"))
+
+    def test_a_valid_filing_reaches_gh_with_every_parameter_pinned(self):
+        # The positive control the negatives need: a helper that refused
+        # everything would pass every case above.
+        title = "`/security-sweep` files a title that begins with a slash"
+        body = "the body\n\nverified at filing by a second read-only auditor\n"
+        result = self.run_helper(title, "security", "high", body=body)
+        self.assertEqual(0, result.returncode, result.stderr)
+        create = [c for c in self.calls() if c.startswith("issue create ")]
+        self.assertEqual(1, len(create), self.calls())
+        self.assertIn("--repo acme/widgets", create[0])
+        self.assertIn(f"--title {title}", create[0])
+        self.assertIn("--label security", create[0])
+        self.assertIn("--label high", create[0])
+        self.assertIn("--body-file -", create[0])
+        self.assertNotIn("--force", create[0])
+        d = Path(self.dir)
+        self.assertEqual(body, (d / "body").read_text(encoding="utf-8"))
+        self.assertEqual("*", (d / "conv").read_text(encoding="utf-8").strip())
+
+    def test_force_is_never_spelled(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        code = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+        self.assertNotIn("--force", code)
+        self.assertNotIn(" -f ", code)
+
+    def test_the_repository_is_resolved_rather_than_accepted(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn("gh repo view --json nameWithOwner", text)
+        self.assertIn('--repo "$repo"', text)
+
+    def test_the_command_shape_is_the_one_the_sweeps_describe(self):
+        # Each of these is a claim a sweep's step 4 makes about the helper, and
+        # a source assertion is what stops the two drifting apart silently.
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn("MSYS2_ARG_CONV_EXCL='*' gh issue create", text)
+        self.assertIn('--repo "$repo"', text)
+        self.assertIn('--label "$kind"', text)
+        self.assertIn('--label "$severity"', text)
+        self.assertIn("--body-file -", text)
+
+    def test_both_labels_go_through_the_sibling_helper(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn('"$here/gh-label-ensure.sh" "$kind"', text)
+        self.assertIn('"$here/gh-label-ensure.sh" "$severity"', text)
 
 
 class CopilotFeedFilter(unittest.TestCase):
