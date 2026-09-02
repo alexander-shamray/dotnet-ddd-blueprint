@@ -286,7 +286,20 @@ jobs:
         timeout-minutes: 6
         run: |
           set -euo pipefail
-          for WORKLOAD in $(python deploy/canary/canary.py workloads); do
+          # ASSIGNED, THEN LOOPED -- the same lesson one line up. A command
+          # substitution used as a `for` word list does not propagate its
+          # failure under `set -e`: a `canary.py workloads` that exited
+          # non-zero would have become an empty list, the loop would have
+          # judged nothing, and the step would have passed green with no
+          # issue filed. The assignment preserves the status, and an empty
+          # answer is refused as well, because a plan with no workloads is
+          # not a plan this job has any business passing.
+          WORKLOADS=$(python deploy/canary/canary.py workloads)
+          if [ -z "$WORKLOADS" ]; then
+            echo "::error::canary.py workloads named no release, so nothing would be judged."
+            exit 1
+          fi
+          for WORKLOAD in $WORKLOADS; do
             echo "::group::$WORKLOAD"
             # `--all`, for the reason the rollout gives: `identity.authority`
             # has a default in every chart, and without it a release that

@@ -1055,6 +1055,19 @@ class TheScheduleStillCallsThisGate(unittest.TestCase):
         YAML — `deploy.yml`'s `options:` is a dispatch menu, this is a subject."""
         self.assertIn("canary.py workloads", self.job())
 
+    def test_the_workload_list_is_assigned_before_it_is_looped(self):
+        """`for X in $(cmd)` swallows cmd's failure under `set -e`: a plan
+        command that exited non-zero became an empty list, the loop judged
+        nothing, and the step passed green with no issue filed. The list is
+        captured first, an empty one is refused, and the loop reads the
+        variable."""
+        job = self.job()
+        self.assertIn("WORKLOADS=$(python deploy/canary/canary.py workloads)", job)
+        self.assertIn('if [ -z "$WORKLOADS" ]', job)
+        self.assertIn("for WORKLOAD in $WORKLOADS; do", job)
+        self.assertNotIn("for WORKLOAD in $(", job)
+        self.assertLess(job.find("WORKLOADS=$("), job.find("for WORKLOAD in"))
+
     def test_the_derivation_is_assigned_before_it_is_read(self):
         """`eval "$(cmd)"` and `< <(cmd)` both swallow a failed cmd under
         `set -e`, which is the rollout's own lesson. The derivation is captured
