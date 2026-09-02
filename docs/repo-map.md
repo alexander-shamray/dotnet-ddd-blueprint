@@ -191,8 +191,10 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              tree: deploy/compose/keycloak/realm-export.json,
                              which is the subject, and Common.Web's
                              AuthenticationExtensions.cs, out of which the 300
-                             a realm owes is READ rather than restated — both
-                             declared as SOURCE_INPUTS in realm_check.py,
+                             a realm owes is READ rather than restated — and,
+                             since ADR-043, deploy/canary/**, whose plan the
+                             scheduled job loops over — all declared as
+                             SOURCE_INPUTS in realm_check.py,
                              which asserts the triggers cover every entry and,
                              in the other direction, that no path the gate
                              reads is missing from the list. Split from

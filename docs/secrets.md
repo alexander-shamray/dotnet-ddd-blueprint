@@ -250,6 +250,20 @@ pod's.
 Environment *secret*, `KEYCLOAK_CHECK_CLIENT_SECRET`. A rotation that replaces
 the client rather than its secret has the first and the last to move.
 
+**The Environment's deployment branches are restricted to `main`, and that
+restriction is the boundary — not the step in either workflow that refuses
+another ref.** Both `deploy.yml`'s rollout and `realm.yml`'s scheduled job
+run whatever copy of the gate the dispatched ref carries, with this
+credential in hand, so a branch could delete the refusing step before
+dispatching and read the realm with a weakened predicate, or send the secret
+where its own copy of the origin check permits. A workflow cannot enforce a
+rule against the ref it was loaded from. GitHub's *deployment branches*
+setting on the `production` Environment can — under it a dispatch from any
+other ref never enters the job — and provisioning the Environment includes
+setting it. The in-workflow step stays as the guard against accident and as
+the sentence that tells a person who dispatched from a branch why nothing
+ran.
+
 **`KEYCLOAK_TRUSTED_ORIGIN` is not a convenience, it is where this credential
 may be sent.** The realm to check is *derived* from the release —
 `realm_check.py authority` takes it out of the `identity.authority` that `helm
@@ -292,7 +306,8 @@ rollout** — `read_admin.py` stops rather than reporting a realm nobody read �
 and, since ADR-043, a **red scheduled run**, which files an issue on the
 tracker labelled `security` and `critical`, or comments on the one already
 open. Both point in the correct direction for this failure. Fix the
-credential; never "fix" a red deploy or a red hour by deleting the check.
+credential; never "fix" a red deploy or a red scheduled run by deleting the
+check.
 Deleting it converts a rollout that could not see its own realm into one that
 never looked, which is the state
 [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157) was

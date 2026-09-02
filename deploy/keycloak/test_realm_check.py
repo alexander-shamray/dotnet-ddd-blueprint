@@ -1108,10 +1108,44 @@ class TheScheduleStillCallsThisGate(unittest.TestCase):
             if inside is None and stripped.startswith("EOF"):
                 self.fail(f"{realm_check.WORKFLOW_PATH}:{number} closes a "
                           "heredoc outside its run block")
+
+    def test_the_concurrency_key_is_the_subject(self):
         """A scheduled run and a pushed gate run share `refs/heads/main`, and
-        under a ref-only key each cancelled the other."""
-        self.assertIn("group: realm-${{ github.event_name }}-${{ github.ref }}",
-                      self.workflow())
+        under a ref-only key each cancelled the other. The two deployed
+        triggers share ONE key, because two judgements in flight race the
+        filing step's check-then-create and the tracker ends up with two
+        issues for one drift."""
+        text = self.workflow()
+        match = re.search(r"^  group: (.*)$", text, re.MULTILINE)
+        self.assertIsNotNone(match, "the workflow has no concurrency group")
+        group = match.group(1)
+        self.assertIn("github.event_name == 'schedule'", group)
+        self.assertIn("github.event_name == 'workflow_dispatch'", group)
+        self.assertIn("&& 'deployed'", group)
+        self.assertIn("format('{0}-{1}', github.event_name, github.ref)", group)
+
+    def test_the_judge_step_times_out_before_the_job_does(self):
+        """A job cancelled on its own timeout runs no `failure()` step, so the
+        hung read this budget exists for would be the one that filed nothing.
+        The step's timeout has to be the shorter one, with room after it."""
+        job = self.job()
+        job_cap = re.search(r"^    timeout-minutes: (\d+)$", job, re.MULTILINE)
+        self.assertIsNotNone(job_cap, "the deployed job has no timeout")
+        judge = job[job.find("id: judge"):]
+        step_cap = re.search(r"^        timeout-minutes: (\d+)$", judge, re.MULTILINE)
+        self.assertIsNotNone(step_cap, "the judge step has no timeout of its own")
+        self.assertLess(int(step_cap.group(1)), int(job_cap.group(1)))
+        self.assertLess(judge.find("timeout-minutes:"), judge.find("run: |"))
+
+    def test_the_workload_list_the_loop_reads_still_exists(self):
+        """`deploy/canary` is a declared input because the loop reads it, and
+        this is the read that earns the declaration: the subcommand the loop
+        depends on is asserted to exist, so a rename there runs this gate and
+        fails it rather than leaving the loop to fail at the next hour."""
+        plan = (Path(realm_check.__file__).resolve().parents[2]
+                / realm_check.CANARY_PLAN / "canary.py").read_text(encoding="utf-8")
+        self.assertIn('add_parser("workloads"', plan)
+        self.assertIn('args.command == "workloads"', plan)
 
     def test_the_readme_names_the_variable_the_workflow_reads(self):
         readme = (Path(realm_check.__file__).resolve().parent / "README.md").read_text(

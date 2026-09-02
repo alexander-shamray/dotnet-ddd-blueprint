@@ -120,7 +120,17 @@ jobs:
       # A step rather than a job-level `if`, deliberately: a skipped job says
       # nothing, and somebody who dispatched this on purpose should be told
       # why it did not run. The header above already names green CI over
-      # `main` as the intended source; this is that sentence enforced.
+      # `main` as the intended source.
+      #
+      # THIS STEP IS A GUARD AGAINST ACCIDENT AND NOT THE BOUNDARY, and the
+      # sentence it replaced said the opposite. It runs from the dispatched
+      # ref, so a branch can delete it before dispatching. What holds the
+      # boundary is the `production` Environment's own deployment-branch
+      # restriction -- `main` and nothing else -- provisioned with the
+      # Environment and stated as an obligation in docs/secrets.md. Under
+      # that restriction a dispatch from a branch never reaches this job at
+      # all; this step is for the repository where the Environment has not
+      # been provisioned yet, and for the person who needs to be told.
       - name: Production rolls from main
         run: |
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then

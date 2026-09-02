@@ -92,7 +92,18 @@ CHART_VALUES = "deploy/helm"
 # rather than the subject as its object.
 DEPLOY_WORKFLOW = ".github/workflows/deploy.yml"
 
-SOURCE_INPUTS = [LIFETIME_SOURCE, COMPOSE_REALM, CHART_VALUES, DEPLOY_WORKFLOW]
+# The canary plan is an input since ADR-043, and the workflow is the reader.
+# `realm.yml`'s scheduled job loops over `canary.py workloads` to find every
+# release whose realm it judges, so a change to the plan or to that subcommand
+# changes the subject of this gate — and a subtree this workflow's triggers do
+# not name is a change that reaches `main` with this gate skipped, which is
+# the failure the whole SOURCE_INPUTS mechanism exists to refuse. Declared
+# here and read by the suite, which asserts the subcommand the loop depends
+# on still exists, on the deploy-workflow entry's own reasoning: a gate that
+# cannot see its own invocation is a gate that stops being invoked quietly.
+CANARY_PLAN = "deploy/canary"
+
+SOURCE_INPUTS = [LIFETIME_SOURCE, COMPOSE_REALM, CHART_VALUES, DEPLOY_WORKFLOW, CANARY_PLAN]
 
 WORKFLOW_PATH = ".github/workflows/realm.yml"
 

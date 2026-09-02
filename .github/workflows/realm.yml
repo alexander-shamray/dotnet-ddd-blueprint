@@ -55,6 +55,10 @@ name: Realm
 #     #157 and its rollout job runs on `workflow_dispatch` alone. A change that
 #     deleted or reordered the derive/fetch/check steps would otherwise reach
 #     `main` with this workflow skipped and nothing else looking at them.
+#   - deploy/canary/**, because the `deployed` job below loops over
+#     `canary.py workloads` to find every release it judges. The plan and the
+#     subcommand are this gate's subject between rollouts, and the suite
+#     asserts the subcommand still exists.
 on:
   pull_request:
     paths:
@@ -63,6 +67,7 @@ on:
       - 'deploy/helm/**'
       - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
       - '.github/workflows/deploy.yml'
+      - 'deploy/canary/**'
       - '.github/workflows/realm.yml'
   push:
     branches: [main]
@@ -72,6 +77,7 @@ on:
       - 'deploy/helm/**'
       - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
       - '.github/workflows/deploy.yml'
+      - 'deploy/canary/**'
       - '.github/workflows/realm.yml'
   # HOURLY, AND OFF THE HOUR. The window #176 filed is the time between a
   # realm edit and the next rollout, and a schedule bounds it to its own
@@ -99,14 +105,23 @@ permissions:
   contents: read
 
 concurrency:
-  # KEYED BY EVENT AS WELL AS REF. A scheduled run and a pushed gate run both
+  # KEYED BY SUBJECT, NOT BY REF. A scheduled run and a pushed gate run both
   # carry `refs/heads/main`, so under a ref-only key each cancelled the other:
   # a merge to `main` during the hourly read would have cancelled the read,
   # and the read would have cancelled the gate over the merge. Neither is a
   # duplicate of the other -- they have different subjects -- and the thing
-  # `cancel-in-progress` is for is two runs of the SAME subject, which the
-  # event name is what distinguishes.
-  group: realm-${{ github.event_name }}-${{ github.ref }}
+  # `cancel-in-progress` is for is two runs of the SAME subject.
+  #
+  # THE TWO DEPLOYED TRIGGERS SHARE ONE KEY, and keying by event name alone
+  # would not have given them that. A schedule and a dispatch judge the same
+  # realm, and two of them in flight at once race the filing step's
+  # check-then-create -- both see no open issue, both file one, and the
+  # workflow that promises one issue per drift has two. So `schedule` and
+  # `workflow_dispatch` collapse to one group and the diff-carrying triggers
+  # keep theirs by event and ref. A dispatch arriving mid-schedule cancels
+  # the scheduled run, and a cancelled job runs no `failure()` step, so the
+  # cancellation files nothing either.
+  group: realm-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'deployed' || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -175,8 +190,12 @@ jobs:
     runs-on: ubuntu-latest
     # Ten, where the rollout has 150: this job reads and never waits on a
     # hook, a rung or a dwell. Four `helm get values`, four token requests and
-    # eight admin reads on a good hour; on a bad one the timeout is what
-    # turns a hung API into a red run rather than a run that never reports.
+    # eight admin reads on a good hour. THE JOB'S TIMEOUT IS NOT WHAT STOPS A
+    # HUNG READ -- the judge step's own, shorter one is, below -- because a
+    # job cancelled on its timeout runs no `failure()` step, so the one
+    # failure this budget exists for would be the one that filed nothing.
+    # The job's cap is the headroom the filing step needs after the judge
+    # step has been stopped.
     timeout-minutes: 10
     environment: production
     permissions:
@@ -197,9 +216,18 @@ jobs:
       # running whatever copy of `read_admin.py` and `realm_check.py` that ref
       # carries. An unmerged branch could therefore read the realm with its
       # own weakened predicate and report it compliant, or send the credential
-      # somewhere its own copy of the origin check permits. A step rather than
-      # a job-level `if`, so somebody who dispatched this on purpose is told
-      # why it did not run.
+      # somewhere its own copy of the origin check permits.
+      #
+      # THIS STEP IS A GUARD AGAINST ACCIDENT AND NOT THE BOUNDARY, because it
+      # runs from the dispatched ref too: a branch can delete it before
+      # dispatching. What holds the boundary is the `production` Environment's
+      # own deployment-branch restriction -- `main` and nothing else -- which
+      # is provisioned with the Environment and stated as an obligation in
+      # docs/secrets.md beside the credential it protects. Under that
+      # restriction a dispatch from a branch never reaches this job; this step
+      # is what tells somebody who dispatched from a branch on purpose why
+      # nothing ran, in a repository where the Environment has not been
+      # provisioned yet. A step rather than a job-level `if`, for that reason.
       - name: The realm is judged from main
         run: |
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
@@ -251,6 +279,11 @@ jobs:
       # keeps that refusal load-bearing rather than the last line of defence.
       - name: Every release points at a realm this deployment names, and each is read and judged
         id: judge
+        # A STEP TIMEOUT, so a hung Helm or admin API is a FAILED step rather
+        # than a cancelled job. `failure()` below fires on the first and not
+        # on the second; the gap between this and the job's cap is what the
+        # filing step runs in. Six is generous for eight reads.
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           for WORKLOAD in $(python deploy/canary/canary.py workloads); do
