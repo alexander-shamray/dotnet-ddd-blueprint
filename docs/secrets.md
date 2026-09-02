@@ -173,10 +173,16 @@ the local broker, and are an obligation on whoever provisions a deployed one.
 
 `KEYCLOAK_CHECK_CLIENT_SECRET`, and it is the first credential in this
 repository that **no pod ever reads**. It belongs to a workflow rather than to a
-workload: `deploy.yml`'s rollout job authenticates with it, fetches the realm
-that deployment is about to be rolled onto, and hands the document to
-`deploy/keycloak/realm_check.py` before the rollout changes anything
+workload, and two jobs hold it. `deploy.yml`'s rollout job authenticates with
+it, fetches the realm that deployment is about to be rolled onto, and hands
+the document to `deploy/keycloak/realm_check.py` before the rollout changes
+anything
 ([ADR-042](backend-architecture/appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)).
+`realm.yml`'s `deployed` job authenticates with the same value, hourly and on
+`workflow_dispatch`, under the same `production` Environment, and makes the
+same three calls over every release the canary plan names — between rollouts,
+which is the moment the rollout cannot be
+([ADR-043](backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)).
 
 **It is a service account of the realm being checked, with realm-read rights and
 nothing else.** Explicitly *not* a cross-realm admin account: one of those would
@@ -203,6 +209,29 @@ letting it through to a silently short list. The token it
 obtains can already see every client secret in the realm it does reach, which is
 why `read_admin.py` refuses a base URL that is not `https`, and why widening the
 grant costs more than widening it looks like it costs.
+
+**The scheduled consumer is a second grant, argued here rather than assumed
+to be covered by the first.** PR-36's row in
+[`docs/pr-decision-log.md`](pr-decision-log.md) said that a second unattended
+consumer — #176's scheduled run — would be a second grant to argue when it
+arrived, and it has arrived. What it holds is the same service account, in
+the same Environment, making the same two reads — the realm representation
+and its client list — and it asks for no wider role: the schedule adds a
+moment, not a right. What it changes is exposure. A credential the rollout
+exercised once per dispatch is now exercised twenty-four times a day from a
+runner, so a leaked or over-granted one is leaked or over-granted on every
+one of those hours, and a token that could once read every client secret in
+the realm at a rollout can now do so at seventeen minutes past any hour.
+That is why the `view-clients`-only grant, and `read_admin.py`'s refusal of a
+base URL that is not `https` or that answers with a redirect, matter more
+under the schedule and not less — each was sized for a read that happened
+rarely, and the same size now bounds a read that happens hourly. The consumer
+is opted in by the repository variable `REALM_CHECK_SCHEDULED`, set to
+`enabled` by whoever provisions the Environment; it is a *repository*
+variable and not an Environment one because the job-level `if:` that reads
+it is evaluated before the job enters `production`, so a variable scoped there
+is not visible to it. Until it is set the job is skipped and this credential
+has one consumer; once it is set, nothing in that job is optional.
 
 **A credential no pod reads is a new category here, and it is why this one
 reaches no row of §15.4's table.** That table is the inventory `ValidateOnStart`
@@ -248,21 +277,27 @@ proof:
 2. Update `KEYCLOAK_CHECK_CLIENT_SECRET` in the `production` Environment. There
    is no vault hop, no reconcile and no restart — nothing mounts this value, so
    the next workflow run reads it and no running process is holding the old one.
-3. Run a rollout, or wait for the next one. The *Read the deployed realm* step
-   printing the realm and its client count is the proof: that line is a read the
-   admin API answers only to a working credential, against a realm the step
-   before it derived from the chart.
+3. Run a rollout, or wait for the next one — or, cheaper, `workflow_dispatch`
+   `realm.yml` from `main`, whose `deployed` job makes the same read and prints
+   the same line. `read_admin.py` printing the realm and its client count is
+   the proof, in the rollout's *Read the deployed realm* step or per release in
+   the scheduled job's loop: that line is a read the admin API answers only to
+   a working credential, against a realm the step before it derived from the
+   chart.
 4. Retire the old secret in Keycloak.
 
 **Rotating this credential cannot break a running service**, because nothing
 reads it at run time. What a botched rotation produces is a **refused
 rollout** — `read_admin.py` stops rather than reporting a realm nobody read —
-and that is the correct direction for this failure to point in. Fix the
-credential; never "fix" a red deploy by deleting the check. Deleting it converts
-a rollout that could not see its own realm into one that never looked, which is
-the state
+and, since ADR-043, a **red scheduled run**, which files an issue on the
+tracker labelled `security` and `critical`, or comments on the one already
+open. Both point in the correct direction for this failure. Fix the
+credential; never "fix" a red deploy or a red hour by deleting the check.
+Deleting it converts a rollout that could not see its own realm into one that
+never looked, which is the state
 [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157) was
-filed about.
+filed about — and disabling the schedule to quiet the issue is the same
+conversion, arranged by hand.
 
 ## Local development is a deliberate exception
 
