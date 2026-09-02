@@ -115,8 +115,17 @@ and quote from the file rather than from the review.
 Then one final block, always present:
 
 ```
-found-while-adjudicating: <defects the review did not name but the search turned up, one per line as path:line — claim; or "none">
+found-while-adjudicating: <defects the review did not name but the search turned up, one per line as path:line — was — claim; or "none">
 ```
+
+**Each row is a site under the same contract as a numbered block's `site`
+and `was`**: one plain repository-relative path as `Grep` prints it — no
+leading slash, no `..` segment — one line number, the text at that line
+quoted verbatim, and then the claim in your own words, the three separated
+by ` — `. The applying step reads these rows as edit candidates and checks
+them the way it checks a block, so a row whose path is not plain, or whose
+quote is not at its line, is dropped by it rather than opened. A defect you
+cannot quote from the file is not a row.
 
 That block has historically been the more valuable half of a triage. Keep it
 separate; do not fold its rows into the numbered ones.
