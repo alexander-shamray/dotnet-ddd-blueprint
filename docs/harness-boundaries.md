@@ -615,12 +615,15 @@ resolves quoting but not expansion.
 
 **A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because
-the harness has no "only this type" allow — so `security-sweep.md` and
-`bug-sweep.md` each enumerate the registered types that hold a shell, an editor
-or the network, and **a newly added agent under `.claude/agents/` is admitted
-by default** until someone adds it to both lists. That is the shape this
-repository already knows rots; it is taken here because the alternative on
-offer is prose.
+the harness has no "only this type" allow — so `security-sweep.md`,
+`bug-sweep.md` and `review-grok.md` each enumerate the registered types that
+hold a shell, an editor or the network, and **a newly added agent under
+`.claude/agents/` is admitted by default** until someone adds it to all three
+lists. That is the shape this repository already knows rots; it is taken here
+because the alternative on offer is prose. **It rotted once already on the day
+a third agent arrived**: `review-adjudicator` was added for #149 and each of
+the three commands had to name the other two profiles, which is the
+enumeration's cost paid in the change that proves it.
 
 **The eighth was the push deny-list (#23), and it closed the way the sixth
 did.** Two broad allows — `Bash(git push origin:*)` and the `-u` form — paired
@@ -672,6 +675,32 @@ filenames are the spelling both files already used and the suite reads. The
 `**/*.targets`-style globs beside them are the documented gitignore syntax and
 are **not** measured in a `disallowed-tools` value — belt to the names' braces,
 and not the control.
+
+**The tenth is the one grant that was never wider than its operation, and
+the operation was the problem.** `/review-grok` held `Edit` and `Write` for
+the job it exists to do — fix every site a review names in one pass — and
+read `suggestions.md` in the same invocation, so one crafted review could
+steer an edit to any undenied path, unattended, inside `/ship`'s loop (#52,
+#149). Narrowing the grant was refused twice, correctly: the command needs
+to write, and `allowed-tools` withholds nothing. What closed it was a
+**split**: a `review-adjudicator` profile with `Read`, `Grep` and `Glob`
+reads the review and returns a structured record, and the writing invocation
+carries `Read(suggestions.md)` and the three machinery trees in
+`disallowed-tools`, so the review is refused to the step that writes by the
+harness rather than by a callout. The record is the residual — it is one hop
+from the prose and the parent's context receives it — and what bounds an
+accepted row is a predicate on the file (its quoted text is at its site) and
+the rule that an edit stays inside the row's own sites. `Grep` over the
+review's path under a `Read(...)` deny is unmeasured and stated so in the
+command. **The sweeps' item 5 (#75) closed by the same shape** — a second
+read-only dispatch returns a verdict, the parent opens nothing in `$work`,
+and `gh-issue-create.sh` leaves `gh issue create` with no free parameter —
+so the two residuals #149 named as one class went in one change. The raw
+`Bash(gh issue create:*)` left both sweeps' allow lists and joined neither
+deny list, because the `Bash(...)` form of `disallowed-tools` is the one the
+fifth entry names as unmeasured; the helper is the only spelled form in
+either body, and an omission from an allow list is a prompt rather than a
+refusal, which is the fifth entry's own point restated.
 
 **The two sweeps are one shape asking two questions**, split by what makes a
 finding rather than by where they look. `/security-sweep` files what an
