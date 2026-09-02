@@ -14,19 +14,26 @@
 # still passed and is no longer the risk it was — the blast radius is the
 # container, which is the whole reason to have one.
 #
-# Egress is NOT restricted, and that is one of two residuals, recorded rather
-# than hidden. Confining it to api.x.ai needs an allow-list proxy on an internal
-# network; Docker alone offers "all" or "none", and "none" stops the review too.
+# Egress is CONFINED to api.x.ai and auth.x.ai, and it takes two containers.
+# The reviewer runs on a network created with --internal, which Docker gives no
+# gateway: a member routes to the other members and to nothing else, and the
+# embedded resolver answers SERVFAIL for any name outside it. The one member
+# with a second leg on the bridge is a proxy — egress-proxy.py, beside the
+# Dockerfile, a CONNECT-only tunnel with a host allow-list — and the reviewer
+# reaches it through HTTPS_PROXY, which grok honours (measured: without it the
+# same call hangs on the internal network; with it api.x.ai answers).
+# Docker alone offers "all" or "none"; the proxy is the third option (#17).
 #
 # **The credential half is NARROWED, not closed, and this header said "closed"
 # for months (#58).** No gh token, no SSH keys and no host filesystem beyond the
 # clone — all three genuinely absent. But the fallback path below copies
 # ~/.grok/auth.json in, and that file carries a REFRESH-TOKEN-BEARING OAuth
-# session for the x.ai account: anything inside can read it and, given the
-# unrestricted egress above, post it anywhere. **The two residuals are therefore
-# not independent** — the open one is what makes the credential that crosses
-# exploitable — and writing them as separate bullet points is what let the
-# second one read as settled.
+# session for the x.ai account: anything inside can read it. What it can no
+# longer do is post it anywhere — the only hosts a byte can reach are the two
+# the session is for — which is why the egress half was the one to close: it
+# was what made the crossing credential exploitable. What remains is the
+# session's own blast radius against x.ai, which no boundary here can shrink;
+# a scoped, revocable XAI_API_KEY still crosses no file at all.
 #
 # XAI_API_KEY is the documented posture: scoped, revocable, and no file crosses
 # at all. The OAuth mount is a fallback, and the ordering below is that posture
@@ -223,7 +230,15 @@ sandbox=$(cd "$(dirname "${BASH_SOURCE[0]}")/../sandbox" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/grok-review-XXXXXX")
 result=$(mktemp "${TMPDIR:-/tmp}/grok-review-result-XXXXXX")
 auth=$(mktemp -d "${TMPDIR:-/tmp}/grok-review-auth-XXXXXX")
+# The proxy and its network are torn down here too, in that order: a network
+# with a member still attached refuses to be removed, and a proxy left running
+# is a container with egress that nothing is watching. Both names are assigned
+# after the build, so the guard is on the variable and not on docker's answer.
+net=""
+proxy=""
 cleanup() {
+  [ -z "$proxy" ] || docker rm --force "$proxy" >/dev/null 2>&1 || true
+  [ -z "$net" ] || docker network rm "$net" >/dev/null 2>&1 || true
   rm -rf "$work" "$auth" 2>/dev/null || true
   rm -f "$result" 2>/dev/null || true
 }
@@ -315,6 +330,54 @@ image=$(docker build --quiet "${build_args[@]}" \
 [ -n "$image" ] ||
   { echo "docker build produced no image id" >&2; exit 10; }
 
+# The network the reviewer runs on, and the one container allowed off it.
+# `--internal` is the mechanism: Docker gives the network no gateway, so a
+# member has a route to the other members and to nothing else, and the
+# embedded resolver refuses to forward a name outside it. The proxy is a member
+# with a second leg on the default bridge, running THIS image with no clone and
+# no credential mounted — it already carries python3 for the licence gate, so
+# the proxy is one stdlib script on PATH and no second image to pin.
+# `--network-alias proxy` is what the reviewer's HTTPS_PROXY names, and it is
+# unambiguous because the network is per review: both names derive from this
+# run's own temp directory, so two reviews on one daemon never share either.
+#
+# Created here, after the build and before the credential probes, because the
+# probes are model calls that carry the credential too. Every reviewer-side
+# `docker run` from here down takes $net_args.
+#
+# Waited for, not assumed: `--detach` returns before the script binds, and a
+# reviewer started into that gap fails its first call on a refused connection,
+# which reads like a dead proxy rather than an early start. Ten seconds, then
+# refuse — a proxy that never listened is not one to review behind.
+net="grok-review-$(basename "$work")"
+proxy="$net-proxy"
+docker network create --internal "$net" >/dev/null ||
+  { echo "could not create the reviewer's internal network" >&2; exit 15; }
+docker run --detach --name "$proxy" --network "$net" --network-alias proxy \
+  "$image" egress-proxy >/dev/null ||
+  { echo "could not start the egress proxy" >&2; exit 15; }
+docker network connect bridge "$proxy" ||
+  { echo "could not give the egress proxy its leg on the bridge" >&2; exit 15; }
+ready=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if docker exec "$proxy" python3 -c \
+       'import socket; socket.create_connection(("127.0.0.1", 8888), timeout=1).close()' \
+       >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+[ "$ready" -eq 1 ] ||
+  { echo "the egress proxy did not start listening; the review did not run" >&2; exit 15; }
+# HTTPS_PROXY is the variable grok reads for its API calls — measured: with
+# HTTP_PROXY alone the call hangs on the internal network. HTTP_PROXY is set
+# beside it so a plain-http attempt is refused by the proxy at once rather than
+# timing out on a route that does not exist.
+net_args=(--network "$net"
+          --env HTTPS_PROXY=http://proxy:8888
+          --env HTTP_PROXY=http://proxy:8888)
+
 # Credentials. XAI_API_KEY is the better of the two and needs no file at all:
 # grok falls back to it when no session token is present, and a fresh container
 # has none. It carries no refresh token and none of the account holder's
@@ -332,7 +395,7 @@ image=$(docker build --quiet "${build_args[@]}" \
 mounts=()
 key_probe=""
 if [ -n "${XAI_API_KEY:-}" ] &&
-   key_probe=$(docker run --rm --env XAI_API_KEY "$image" \
+   key_probe=$(docker run --rm "${net_args[@]}" --env XAI_API_KEY "$image" \
      grok -p "ok" 2>&1); then
   mounts+=(--env XAI_API_KEY)
 else
@@ -396,7 +459,7 @@ fi
 # was actually selected, so the OAuth path (which the block above never probes)
 # is covered too.
 probe_rc=0
-limit_probe=$(docker run --rm "${mounts[@]}" "$image" grok -p "ok" 2>&1) || probe_rc=$?
+limit_probe=$(docker run --rm "${net_args[@]}" "${mounts[@]}" "$image" grok -p "ok" 2>&1) || probe_rc=$?
 if grep -qiE "$limit_re" <<<"$limit_probe"; then
   echo "grok is out of usage limits — skipping this review, not failing it:" >&2
   grep -ioE "$limit_re" <<<"$limit_probe" | head -1 >&2
@@ -463,6 +526,7 @@ bash "$ledger" "$pr" reserve "$slot" "$mode" >&2 || ledger_rc=$?
 
 set +e
 docker run --rm \
+  "${net_args[@]}" \
   --volume "$(host_path "$work/repo"):/review:Z" \
   "${mounts[@]}" \
   --workdir /review \

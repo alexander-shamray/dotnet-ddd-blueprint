@@ -47,6 +47,17 @@ What is under test, and which issue each half closes:
         label in any repository. This one is the odd entry: it never shipped
         wrong. It is a grant closed by moving it into a helper, and these cases
         are what keep it closed rather than what caught it.
+  #75   `gh issue create` was the same shape one helper over: `--repo` and
+        `--label` free under a prefix grant, and a `/`-title filed as a path
+        because the grant could not carry an env prefix. Closed the same way,
+        and the confinement never shipped wrong either; the title did, and
+        the case that reads the child's environment is the one for it.
+  #17   egress from the reviewer was unrestricted, so the OAuth session that
+        crosses on the fallback path could be posted anywhere. Closed by an
+        internal network and a CONNECT-only proxy; these cases keep every
+        credential-bearing `docker run` on that network, which is the whole
+        of the confinement's width, and `test_egress_proxy.py` beside this
+        file exercises the proxy itself at the socket, which is its depth.
   #56   /review-copilot read three comment feeds and filtered none of them,
         holding `Edit`, in a loop /ship runs unattended. The cases cover what a
         feed helper admits, that a dropped item's BODY reaches neither stream,
@@ -1738,6 +1749,310 @@ class LabelHelperHasNoFreeParameter(unittest.TestCase):
                 self.assertRegex(text, rf"(?m)^\s*{label}\)\s+colour=")
 
 
+class IssueHelperHasNoFreeParameter(unittest.TestCase):
+    """#75 item 5 — `gh issue create` was a prefix grant with two free parameters.
+
+    `-R` unpinned put the issue in whichever repository a finding named, and
+    `--label` unpinned reached any label in any spelling; both were held as
+    prose in each sweep, which a finding can talk past. A third defect was the
+    grant's and not the command's: a title beginning with `/` filed four times
+    as a Windows path (#55, #56, #68), because an env-prefixed `gh` no longer
+    begins with `gh issue create` and the grant was a prefix match. Like the
+    label helper's cases these keep a closed grant closed rather than catch a
+    defect that shipped, and they are read on the label helper's terms.
+
+    A refusing `gh` sits first on PATH for every case. The negatives exit
+    before `gh repo view` is reached, so they need no network — and the stub is
+    what proves it, because a validation that regressed would otherwise reach a
+    real `gh` and file a real issue. The positive control answers the calls the
+    helper and its label sibling make, and records the argv and the
+    environment the `issue create` child actually received.
+    """
+
+    HELPER = SCRIPTS / "gh-issue-create.sh"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="issue-stub-")
+        d = Path(self.dir)
+        gh = d / "gh"
+        gh.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/usr/bin/env bash
+                printf '%s\\n' "$*" >> {(d / 'argv').as_posix()!r}
+                case "$*" in
+                  *"repo view"*)
+                    echo 'acme/widgets'; exit 0
+                    ;;
+                  *"label list"*)
+                    printf '%s\\n' security bug critical high medium low; exit 0
+                    ;;
+                  *"issue create"*)
+                    printf '%s\\n' "${{MSYS2_ARG_CONV_EXCL-unset}}" > {(d / 'conv').as_posix()!r}
+                    cat > {(d / 'body').as_posix()!r}
+                    exit 0
+                    ;;
+                esac
+                echo "stub gh: unexpected call: $*" >&2
+                exit 99
+                """
+            ),
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def run_helper(self, *args, body=""):
+        env = dict(os.environ)
+        env["PATH"] = self.dir + os.pathsep + env["PATH"]
+        return subprocess.run(
+            [BASH, str(self.HELPER), *args],
+            capture_output=True, text=True, input=body, env=env,
+        )
+
+    def calls(self):
+        f = Path(self.dir) / "argv"
+        return f.read_text(encoding="utf-8").splitlines() if f.exists() else []
+
+    def assert_refused_before_gh(self, result):
+        # Exit 2 is the validation code, and an empty argv file is the proof
+        # that the refusal happened before `gh repo view` rather than after it.
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertEqual([], self.calls())
+
+    TRAILER = "Filed by an authorised sweep and verified at filing by a second read-only auditor."
+    STDIN = f"a title\n\nthe body\n\n{TRAILER}\n"
+
+    def test_no_arguments_prints_the_usage_line(self):
+        result = self.run_helper()
+        self.assert_refused_before_gh(result)
+        self.assertIn(
+            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body ending in the trailer",
+            result.stderr,
+        )
+
+    def test_the_argument_count_is_exactly_two(self):
+        # A title on the command line is the free parameter the fifth review
+        # round named: it crossed the parent's shell before the helper ran.
+        self.assert_refused_before_gh(self.run_helper("bug", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "--repo", body=self.STDIN))
+
+    def test_a_kind_outside_the_vocabulary_is_refused(self):
+        # `documentation` is a real label on this tracker and is refused on
+        # purpose: neither sweep files one, so the helper's vocabulary is the
+        # sweeps' and not the tracker's.
+        for kind in ("documentation", "Security", "security --force", "-R other/repo", ""):
+            with self.subTest(kind=kind):
+                self.assert_refused_before_gh(self.run_helper(kind, "high", body=self.STDIN))
+
+    def test_a_severity_outside_the_four_is_refused(self):
+        for severity in ("info", "High", "high --force", "-R other/repo", ""):
+            with self.subTest(severity=severity):
+                self.assert_refused_before_gh(self.run_helper("bug", severity, body=self.STDIN))
+
+    def test_an_empty_title_is_refused(self):
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="\n\nthe body\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body=""))
+
+    def test_a_body_without_the_blank_separator_is_refused(self):
+        # A body piped without its title line would otherwise file under its
+        # own first sentence, with the second sentence lost into the title.
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="the body\nand more\n"))
+
+    def test_a_stdin_that_ends_before_the_separator_is_refused(self):
+        # The sixth review round's case: `read` fails at EOF and leaves the
+        # separator unset, which an `|| true` read as blank and filed with an
+        # empty body.
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title"))
+
+    def test_a_body_without_the_trailer_is_refused(self):
+        # The detector for an early heredoc close: a body cut short by a
+        # repository line equal to the delimiter has lost its last line.
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n\nthe body\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n\n"))
+        self.assert_refused_before_gh(
+            self.run_helper("bug", "low", body=f"a title\n\n{self.TRAILER}\n\nmore after it\n")
+        )
+
+    def test_a_repository_line_equal_to_a_naive_delimiter_is_the_hazard_and_the_token_is_the_rule(self):
+        # The real composition again, with the payload the sweeps' rule is
+        # written for: a quoted repository line that reads `EOF`, followed by
+        # a substitution that would run in the parent if the heredoc closed
+        # there. Under the token delimiter the rule prescribes, the whole
+        # payload reaches the stub and the marker is never created. The naive
+        # delimiter is not run here on purpose — its failure mode is the
+        # parent's shell executing the tail — and the helper's part of it is
+        # the trailer case above.
+        d = Path(self.dir)
+        marker = (d / "pwned").as_posix()
+        body = f"the affected lines:\n\n    EOF\n    $(touch {marker})\n\n{self.TRAILER}\n"
+        env = dict(os.environ)
+        env["PATH"] = self.dir + os.pathsep + env["PATH"]
+        script = (
+            'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
+            f"bash {str(self.HELPER)!r} bug high <<'ISSUE_BODY_END'\n"
+            "a title\n"
+            "\n"
+            f"{body}"
+            "ISSUE_BODY_END\n"
+        )
+        result = subprocess.run([BASH, "-c", script], capture_output=True, text=True, env=env)
+        self.assertNotEqual(97, result.returncode, "the stub gh was not first on PATH")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse((d / "pwned").exists())
+        self.assertEqual(body, (d / "body").read_text(encoding="utf-8"))
+
+    def test_the_title_never_crosses_the_parents_command_line(self):
+        # The real boundary: the parent is a shell composing a command string
+        # around a quoted heredoc, and the title carries every expansion a
+        # verdict record could smuggle. The stub must receive the bytes as
+        # written, and the marker file the substitution would create must not
+        # exist — the argv-array cases above cannot show either.
+        d = Path(self.dir)
+        marker = (d / "pwned").as_posix()
+        title = f"`touch {marker}` and $(touch {marker}) and \"quoted\" and $HOME"
+        # The stub is put on PATH through the environment, the way run_helper
+        # does it, and the script refuses to go on unless `gh` resolves to it.
+        # The first form of this case set PATH inside the script with a
+        # Windows-spelt directory bash could not use, reached the real `gh`,
+        # and filed a real issue on the tracker (#180). A test of a filing
+        # helper fails closed or it is not run.
+        env = dict(os.environ)
+        env["PATH"] = self.dir + os.pathsep + env["PATH"]
+        script = (
+            'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
+            f"bash {str(self.HELPER)!r} security high <<'ISSUE_BODY_END'\n"
+            f"{title}\n"
+            "\n"
+            "the body\n"
+            "\n"
+            f"{self.TRAILER}\n"
+            "ISSUE_BODY_END\n"
+        )
+        result = subprocess.run([BASH, "-c", script], capture_output=True, text=True, env=env)
+        self.assertNotEqual(97, result.returncode, "the stub gh was not first on PATH")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse((d / "pwned").exists())
+        create = [c for c in self.calls() if c.startswith("issue create ")]
+        self.assertEqual(1, len(create), self.calls())
+        self.assertIn(f"--title {title}", create[0])
+        self.assertEqual(f"the body\n\n{self.TRAILER}\n", (d / "body").read_text(encoding="utf-8"))
+
+    def test_a_valid_filing_reaches_gh_with_every_parameter_pinned(self):
+        # The positive control the negatives need: a helper that refused
+        # everything would pass every case above.
+        title = "`/security-sweep` files a title that begins with a slash"
+        body = f"the body\n\n{self.TRAILER}\n"
+        result = self.run_helper("security", "high", body=f"{title}\n\n{body}")
+        self.assertEqual(0, result.returncode, result.stderr)
+        create = [c for c in self.calls() if c.startswith("issue create ")]
+        self.assertEqual(1, len(create), self.calls())
+        self.assertIn("--repo acme/widgets", create[0])
+        self.assertIn(f"--title {title}", create[0])
+        self.assertIn("--label security", create[0])
+        self.assertIn("--label high", create[0])
+        self.assertIn("--body-file -", create[0])
+        self.assertNotIn("--force", create[0])
+        d = Path(self.dir)
+        self.assertEqual(body, (d / "body").read_text(encoding="utf-8"))
+        self.assertEqual("*", (d / "conv").read_text(encoding="utf-8").strip())
+
+    def test_force_is_never_spelled(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        code = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+        self.assertNotIn("--force", code)
+        self.assertNotIn(" -f ", code)
+
+    def test_the_repository_is_resolved_rather_than_accepted(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn("gh repo view --json nameWithOwner", text)
+        self.assertIn('--repo "$repo"', text)
+
+    def test_the_command_shape_is_the_one_the_sweeps_describe(self):
+        # Each of these is a claim a sweep's step 4 makes about the helper, and
+        # a source assertion is what stops the two drifting apart silently.
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn("MSYS2_ARG_CONV_EXCL='*' gh issue create", text)
+        self.assertIn('--repo "$repo"', text)
+        self.assertIn('--label "$kind"', text)
+        self.assertIn('--label "$severity"', text)
+        self.assertIn("--body-file -", text)
+
+    def test_both_labels_go_through_the_sibling_helper(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn('"$here/gh-label-ensure.sh" "$kind"', text)
+        self.assertIn('"$here/gh-label-ensure.sh" "$severity"', text)
+
+
+class EveryReviewerRunIsBehindTheProxy(unittest.TestCase):
+    """#17 — egress is confined by an internal network, and the confinement is
+    only as wide as the `docker run`s that join it.
+
+    Three invocations in `grok-review.sh` carry the credential — the key
+    probe, the limit probe and the review — and a fourth is the proxy itself.
+    A probe that reaches the network unconfined is the residual back for one
+    second per round, so the property is not "the review is on the network"
+    but "every reviewer-side run is": each `docker run` naming `"$image"`
+    carries `"${net_args[@]}"`, except the one that starts the proxy, which
+    is the member with the leg on the bridge and is identified by what it
+    runs. The gate shape this repository trusts — a subject test over the
+    script's own text — because nothing here can run a review.
+    """
+
+    def commands(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        joined = text.replace("\\\n", " ")
+        return [line for line in joined.splitlines()
+                if "docker run" in line and '"$image"' in line
+                and not line.lstrip().startswith("#")]
+
+    def test_every_credential_bearing_run_joins_the_internal_network(self):
+        runs = self.commands()
+        self.assertGreaterEqual(len(runs), 4, runs)
+        proxy = [r for r in runs if "egress-proxy" in r]
+        reviewer = [r for r in runs if "egress-proxy" not in r]
+        self.assertEqual(1, len(proxy), proxy)
+        self.assertEqual(3, len(reviewer), reviewer)
+        for run in reviewer:
+            self.assertIn('"${net_args[@]}"', run, run)
+        self.assertNotIn("net_args", proxy[0])
+
+    def test_the_network_is_internal_and_the_proxy_alone_reaches_the_bridge(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        self.assertIn('docker network create --internal "$net"', text)
+        self.assertEqual(1, text.count("docker network connect bridge"))
+        self.assertIn('docker network connect bridge "$proxy"', text)
+        self.assertIn("--env HTTPS_PROXY=http://proxy:8888", text)
+
+    def test_the_network_exists_before_the_first_credential_probe(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        created = text.find('docker network create --internal')
+        first_probe = text.find("key_probe=$(docker run")
+        self.assertNotEqual(created, -1)
+        self.assertNotEqual(first_probe, -1)
+        self.assertLess(created, first_probe)
+
+    def test_cleanup_removes_the_proxy_before_the_network(self):
+        text = REVIEW.read_text(encoding="utf-8")
+        body = text[text.find("cleanup() {"):text.find("trap cleanup EXIT")]
+        proxy = body.find('docker rm --force "$proxy"')
+        net = body.find('docker network rm "$net"')
+        self.assertNotEqual(proxy, -1, body)
+        self.assertNotEqual(net, -1, body)
+        self.assertLess(proxy, net)
+
+    def test_the_proxy_is_baked_into_the_image(self):
+        dockerfile = (SCRIPTS.parent / "sandbox" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("COPY --chmod=755 egress-proxy.py /usr/local/bin/egress-proxy", dockerfile)
+        self.assertTrue((SCRIPTS.parent / "sandbox" / "egress-proxy.py").is_file())
+
+
 class CopilotFeedFilter(unittest.TestCase):
     """#56 — the three Copilot feeds arrived unfiltered into a command holding `Edit`.
 
@@ -3009,11 +3324,40 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
         #
         # Denied as a tree AND as a file, because in a worktree `.git` is a
         # file pointing at the real directory rather than the directory itself.
-        for name in self.SUBJECTS:
+        #
+        # `/review-grok` is covered here and not in SUBJECTS: it holds `Edit`
+        # for `src/`, `tests/` and `docs/` by design, so the tracked-tree
+        # cases above are not its shape, but a site under `.git/` is a
+        # regular file a crafted review can quote a real line from, and both
+        # invocations would verify it (review round eight).
+        for name in (*self.SUBJECTS, "review-grok.md"):
             rules = self.disallowed(name)
             for target in (".git/**", "./.git/**", ".git", "./.git"):
                 with self.subTest(command=name, target=target):
                     self.assertIn(f"Edit({target})", rules)
+
+    def test_the_repository_tracks_no_symbolic_link(self):
+        # `/review-grok`'s site contract holds its path denies by spelling, and
+        # a tracked symbolic link inside an allowed tree is a spelling the deny
+        # never sees while its target can be anywhere. The command states the
+        # premise that no such link is tracked and that an invocation whose
+        # only writers are `Write` and `Edit` cannot add one; this case is what
+        # makes the first half a gate on every push rather than a sentence
+        # about one checkout. The edit-time guard that would close a branch
+        # adding one is a hook behind the self-lock, filed rather than folded
+        # (review round ten).
+        out = subprocess.run(
+            [GIT, "ls-files", "-s"], cwd=str(SCRIPTS.parent.parent),
+            capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            raise AssertionError(f"git ls-files failed: {out.stderr}")
+        entries = out.stdout.splitlines()
+        # The positive control: the parse is over a real listing, so an empty
+        # result would be a broken command rather than a clean tree.
+        self.assertGreater(len(entries), 100, "git ls-files -s returned almost nothing")
+        links = [e for e in entries if e.startswith("120000 ")]
+        self.assertEqual([], links, f"tracked symbolic links: {links}")
 
     def test_the_git_directory_is_not_tracked(self):
         # The positive control, and the reason the case above cannot be folded

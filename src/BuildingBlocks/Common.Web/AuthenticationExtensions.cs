@@ -212,9 +212,11 @@ public static class AuthenticationExtensions
                 // minutes and then admitted for its last 330 seconds — so a
                 // non-conforming realm is CONTAINED rather than detected. What
                 // detects it is ADR-042's gate, which reads the realm at a
-                // rollout; a realm edited between rollouts is unobserved until
-                // the next one (#176), and this is what bounds that window.
-                // What this buys is that no token from any realm is ever
+                // rollout, and since ADR-043 on a nominally hourly schedule
+                // between rollouts — so a realm edited after a rollout is seen
+                // at the next scheduled run, as reliably as GitHub runs a
+                // schedule (#176), and this is what bounds the window inside
+                // it. What this buys is that no token from any realm is ever
                 // accepted for more than the window below.
                 //
                 // THE SKEW IS THEREFORE SPENT TWICE, and that is a real cost

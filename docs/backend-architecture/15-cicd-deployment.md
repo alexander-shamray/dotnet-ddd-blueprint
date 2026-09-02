@@ -271,6 +271,21 @@ where the realm is derived**, because the fetch authenticates to it: an
 authority is a value held in the cluster, and deriving *where to send a client
 secret* from one would hand that decision to whoever can edit a release.
 
+**The same predicate runs a third time, and the third moment is the one a
+rollout cannot be.** `realm.yml`'s `deployed` job runs it hourly and on
+`workflow_dispatch`, under the same `production` Environment, over every
+workload the canary plan lists — read out of `canary.py workloads` rather than
+restated — deriving each release's realm from `helm get values` exactly as the
+rollout does. A red run **files a tracker issue** rather than paging, labelled
+`security` and `critical`, or comments on the one already open: nothing in
+§13.6 fires it, and an issue stays open until somebody closes it where a
+notification is read once
+([ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)).
+The job is opted in by a repository variable, because an hourly job in a
+repository with no Environment would go red twenty-four times a day for want
+of a cluster, and that guard reads a configuration rather than a runtime
+failure — which is the skip this repository refuses, and the difference.
+
 **That is also what the CI half is for.** A deploy-time check nothing has ever
 executed is a check nobody has established is looking at anything, and the
 local realm is the one subject available to establish it on.
@@ -293,8 +308,11 @@ checks each `serviceName` against a real entry assembly, and
 file rather than restating them; the realm one names
 `src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs`, because the
 lifetime every realm owes is read out of `AccessTokenLifetime` rather than
-restated, and `deploy/compose/keycloak/realm-export.json`, because that file is
-its subject in CI. **None of the four keeps that list in its own YAML.**
+restated, `deploy/compose/keycloak/realm-export.json`, because that file is
+its subject in CI, and `deploy/canary/**`, because its scheduled job loops
+over the plan's workloads to find every release it judges
+([ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)).
+**None of the four keeps that list in its own YAML.**
 `smoke.sh`, `check.py`, `canary.py` and `realm_check.py` each declare
 `SOURCE_INPUTS` beside the reads, and each asserts that both of its workflow's
 triggers cover every entry — a copy of a list drifts exactly as a copy of a

@@ -68,6 +68,238 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-37 — the moment the rollout cannot be
+
+**#176 was PR-36's own residual, and this row pays it, which is PR-32's
+kind.** ADR-042 reads a deployed realm at one moment and the moment is a
+rollout — so a realm edited afterwards, `accessTokenLifespan` raised, a
+client-level override added, `use.refresh.tokens` flipped, the password grant
+turned back on, is unobserved until somebody deploys again. On a weekly
+service that is a week; on a stabilised one it is unbounded, and the four
+settings ADR-033 and ADR-034 rest on are exactly the ones an operator reaches
+for under pressure. PR-36's *What is owed* named the window and filed it
+rather than closing it, because closing it needed a decision about what a red
+scheduled run *does*, and that is an operating decision rather than a build
+one.
+
+**The rule that moved is ADR-042's third consequence: that a rollout is the
+only moment a deployed realm is read.** It stands as written, because it was
+true when it was written, and
+[ADR-043](backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)
+amends it rather than rewriting it: `realm.yml` gains a `deployed` job that
+runs the rollout's own three calls, nominally hourly, over every release the
+canary plan names. Nothing about the predicate changed and nothing about
+either realm changed; what changed is how often the question is asked, and of
+how many releases — and *nominally* is load-bearing, because a `schedule` is a
+cadence GitHub runs as best effort and not a bound, which the residual under
+*What is owed* carries.
+
+### The three things the issue said a fix owed
+
+**A trigger that is not a rollout, and it sits on `realm.yml` rather than on
+`deploy.yml`.** The subject is the realm gate's — the same `realm_check.py`,
+the same `read_admin.py`, the same suite run before either — and everything
+about `deploy.yml` is a rollout's: its concurrency group, its dispatch inputs
+and its 150-minute budget. A `schedule:` on that file would have inherited all
+three for a job that reads and never waits on a hook, a rung or a dwell. The
+cron is `17 * * * *`, off the hour because GitHub sheds top-of-the-hour
+schedules under load, and a dropped run is a silence rather than a red one —
+the failure §13.6 spends a callout on.
+
+**A statement of what a red run does, and it is an issue.** Not a runbook:
+`docs/runbooks/` is one file per Prometheus alert, `deploy/observability/`'s
+`check.py` fails the build on a runbook with no alert behind it, and nothing
+in §13.6 fires this — so the procedure lives beside the gate, in
+`deploy/keycloak/README.md` under *What a red scheduled run means*, and the
+issue points at it. Not a notification either: a notification is read once
+and an issue is open until somebody closes it, which is the property a drift
+that persists across the hours needs. The next red run comments on the open
+issue rather than filing a second, found by its own title, so the tracker
+holds one issue per drift and not one per hour — and only the `judge` step's
+failure files anything, so a dispatch refused for coming from a branch is not
+a drift. `issues: write` is the first write permission any workflow here
+holds; it is scoped to the `deployed` job alone, and the `check` job keeps
+`contents: read` with everything else.
+
+**The environment the credential belongs to, and it is the same one.** The
+scheduled job reads with the account the rollout reads with —
+`KEYCLOAK_CHECK_CLIENT_ID` and `KEYCLOAK_CHECK_CLIENT_SECRET` from the
+`production` Environment, the same two reads, the same `view-clients` role
+checked rather than assumed. PR-36's row said a second unattended consumer
+was a second grant to argue rather than one the first covers, and
+`docs/secrets.md` argues it as one, beside the first grant; the README's *The
+credential* section names both callers.
+
+### The opt-in is not the skip this repository refuses
+
+**The `deployed` job runs only when a repository variable,
+`REALM_CHECK_SCHEDULED`, is `enabled`, and what separates that from the skip
+refused everywhere else is what the guard reads.** `deploy.yml` runs on
+`workflow_dispatch` alone because a rollout on `push` would go red on every
+merge for want of a cluster and train everyone to ignore a red pipeline; an
+hourly job in a repository with no environment would do that twenty-four
+times a day. The skip refused since PR-08 — a Docker daemon that did not
+answer, a `helm status` that failed on an expired credential — reads a
+*runtime failure* as absence. This guard reads a *configuration*: a variable
+nobody has set means no Environment has been provisioned and there is no
+realm to be silent about. Once it is set nothing in the job is optional — an
+absent credential, a release the gate cannot read, a realm that cannot be
+fetched and a realm that disagrees are all red, on the rollout's own rule.
+
+**A repository variable and not an Environment one, and the reason is the
+harness's.** A job-level `if:` is evaluated before the job enters its
+Environment, so a variable scoped to `production` is invisible to it. The
+three values the job uses are Environment-scoped exactly as the rollout's
+are; only the opt-in sits one level up, and its name is declared once, in
+`realm_check.py`, so the README and the workflow are asserted to agree on it.
+
+### Every release, the rollout's derivation, and two lessons it had taught
+
+**The set of releases is the canary plan's, read out of `canary.py
+workloads`.** The rollout judges the workload it is rolling; between rollouts
+the question is whether *any* deployed workload points at a realm that has
+drifted, so the job loops. A list restated in the workflow would agree with
+`canary.json` until a fifth workload joined one and not the other — which is
+`deploy.yml`'s `options:` one artefact over, and that one is a dispatch menu
+rather than a subject. The subcommand prints one name per line for a shell
+loop, and its own test pins that it lists the plan and not its comments.
+
+**Inside the loop the derivation is assigned, then exported per line — never
+`eval`ed and never process-substituted.** `realm_check.py authority` prints
+two `NAME=value` lines for `$GITHUB_ENV`, and inside a loop there is no
+`$GITHUB_ENV` to append to. `eval "$(cmd)"` swallows a failed cmd under
+`set -e` — the substitution yields an empty string and `eval ""` returns
+success — which is the rollout's own lesson at its `plan` step, and
+`while read; done < <(cmd)` swallows it the same way. So the output is
+captured into a variable first, where `set -e` sees the gate refuse, and each
+line is exported as a literal with `export "$NAME=$VALUE"`, which no shell
+re-parses. The gate's refusal of whitespace in either value is what makes
+that safe, and this is what keeps that refusal load-bearing rather than
+decorative.
+
+**The concurrency key gained the event name, because a schedule run and a
+push run share `refs/heads/main`.** Under the ref-only key each cancelled the
+other: a merge to `main` during the hourly read cancelled the read, and the
+read cancelled the gate over the merge. Neither is a duplicate of the other —
+they have different subjects — and what `cancel-in-progress` is for is two
+runs of the *same* subject, which the event name is what distinguishes.
+
+**A dispatch from a branch is refused before checkout, on `deploy.yml`'s
+reasoning.** A schedule always runs `main`'s copy of the file, but
+`workflow_dispatch` lets the caller pick a ref, and this job authenticates to
+the production realm with the production credential using whatever copy of
+`read_admin.py` and `realm_check.py` that ref carries. An unmerged branch
+could read the realm with a weakened predicate and report it compliant, or
+send the credential where its own copy of the origin check permits. It is a
+step rather than a job-level `if`, so somebody who dispatched it on purpose is
+told why it did not run.
+
+### `critical` is decided rather than hedged
+
+**The job cannot tell a realm that drifted from a realm it could not read** —
+an expired credential and a raised lifespan are both red — and the label is
+chosen for the worse case on the rollout's rule that a realm nobody can see
+holds no guarantee anybody can state. So the procedure's first step is to read
+the run log, decide which of the two it was, and relabel: an issue relabelled
+down after a read of the log costs less than a five-hour token lifetime in
+production filed as something to look at next week. The second step is that a
+drift is corrected in the realm and never in the gate, and the last is that
+the issue closes on a green `workflow_dispatch` from `main` and on nothing
+weaker — a run that goes green because the schedule was disabled is the
+sixty-day silence below, arranged by hand.
+
+### The suite's subject is whether anything still asks the gate
+
+**`TheRolloutStillCallsThisGate` and `TheScheduleStillCallsThisGate` assert
+the same three calls in the same order, out of one list.** `REALM_CALLS` —
+derive, fetch, judge — is the invariant both files share, so it is declared
+once and `realm_call_positions` reads it for both. `commands_of` strips the
+comment lines from either workflow before anything searches it, because both
+explain each call in a comment beside it and a raw search would find
+`realm_check.py authority` whether or not anything ran it — the fourth
+matcher in this tree found matching the prose about itself, and the third
+artefact to need stripping. The schedule's class then slices the `deployed`
+job out of the file, so a property of it cannot be satisfied by the `check`
+job above — both run the suite, and only one may go on to read a realm — and
+asserts the shape the workflow's own comments argue: the schedule and the
+dispatch declared, the `check` job on a diff only, the guard's variable and
+its two events, the Environment, the refusal before checkout, the loop over
+`canary.py workloads`, the assign-then-export with no `eval` and no `< <(`,
+the concurrency key, and that only the `judge` step's failure files.
+
+### What is owed
+
+- **The schedule's own silence, and it is stated rather than filed.** A
+  dropped run and the sixty-day suspension are the same silence at two
+  scales: GitHub sheds or delays a scheduled run under load, and suspends the
+  `schedule` trigger outright in a repository with no commit for sixty days,
+  and neither leaves a red run — and a stabilised service is exactly the
+  repository with no commits and exactly the one #176 said the window is
+  longest on. Nothing in this repository can observe its own absence, which
+  is why the hour above is nominal. What closes both, and what would make
+  the hour a bound, is a monitor outside GitHub asking whether `realm.yml`
+  ran in the last day, which is an operating decision the README names and
+  does not take. It is not an issue
+  because the platform has no environment to schedule against, which was
+  #176's own reason for being filed rather than fixed — and this row does not
+  repeat that: the mechanism is built, and the one thing it cannot see is
+  written down beside it.
+- **The deployed half has still never run, and neither moment has.** The
+  job's first command is a `helm get values` that needs the cluster login
+  `deploy.yml` states it is missing, and it inherits that exactly. What has
+  been executed is the local half and the suite over both workflows' text; a
+  scheduled check nothing has ever executed is a check nobody has established
+  is looking at anything, and the subject-tests above are what stand in until
+  an environment exists.
+
+### The harness half, in the same pull request
+
+**One pull request is one row, and this one carried three harness issues
+beside the realm's.** They share nothing with ADR-043 except the branch, and
+they are recorded here rather than in Appendix C because the harness is not
+the blueprint's subject. Each is a grant question, and each was settled by a
+measurement rather than by reading.
+
+**#149 and #75's last item closed by one shape — adjudicate in a step that
+cannot write, apply from a record — and the boundary the shape promised
+turned out to be discipline, for a measured reason.** A `review-adjudicator`
+profile with `Read`, `Grep` and `Glob` reads the review and returns
+structured rows; the sweeps verify by a second read-only dispatch under a
+verdict contract; and `gh-issue-create.sh` leaves `gh issue create` with no
+free parameter. The first form of `/review-grok` also put
+`Read(suggestions.md)` in its `disallowed-tools`, so the writing step would
+be refused the review by the harness. A nested-session probe showed what
+that reaches: a command's deny list propagates to the subagents it spawns,
+so the adjudicator's own reads were refused and it returned
+`unreadable-review`; and a path deny reaches a `Bash` command naming the
+path, so the size preflight was refused beside it. The harness offers no
+deny that reaches the parent and not the child. The entry is gone, the
+command says the review is readable to the writing step and that the split
+holds because it does not read it, and the three machinery trees refused to
+`Edit` are the half the harness holds.
+
+**The same probing measured the `Bash(...)` form of `disallowed-tools`,
+which the boundaries inventory had named as owed since #23.** A throwaway
+command carrying `Bash(git diff:*)` in both keys had the diff refused with
+the harness's own text while a `wc` in the same session ran, which
+separates a rejected pattern from a command that failed to load exactly.
+Both sweeps now deny `git push origin`, its `-u` form and the raw
+`gh issue create` by name — the fix their own residual paragraphs had
+refused to write unmeasured.
+
+**#17's two Docker-testable items were built on evidence, and the third is
+a procedure.** The uid collision was reproduced against the base image's own
+accounts, the tempting `useradd --non-unique` was built and rejected because
+`id` then answers `nobody`, and the reuse-or-rename fix was built at four id
+pairs. Egress is an internal network and a CONNECT-only proxy baked into the
+reviewer image; the grok CLI's honouring of `HTTPS_PROXY` was measured, and
+the network is brought up before the credential probes because those are
+model calls too. What was not measured is stated in the boundaries
+inventory: an authenticated call through the proxy, which the classifier
+refused to stage, and SELinux, which needs an enforcing host. The plan under
+`docs/superpowers/plans/2026-09-02-sandbox-hardening.md` is the measurement
+record, verbatim.
+
 ## PR-36 — where a check sits decided what it could hold
 
 **#157 had been open since PR #156 and had been narrowed twice without being

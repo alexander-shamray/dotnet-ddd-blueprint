@@ -96,8 +96,9 @@ service may touch from that service's own source and holds §14.1's
 §11.3's access-token lifetime, ADR-034's absent refresh token, §11.2's
 password grant — against a Keycloak realm representation, and reads no realm
 of its own here beyond §14.1's realm export, because the half that judges a
-deployed realm runs from `deploy.yml`'s rollout job, where a credential
-exists; and the last covers the review loop's own
+deployed realm runs from `deploy.yml`'s rollout job and, since ADR-043,
+hourly from `realm.yml`'s own `deployed` job, where a credential exists; and
+the last covers the review loop's own
 helpers under `.claude/scripts/`. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
@@ -141,8 +142,20 @@ path-scope `Edit` away from every tracked tree while each keeps its own subject
 editable; **#30** and **#23**, the argv guard — the `--output` write primitive
 in every spelling including the quoted one, `ext::`, command substitution, and
 a push allow-list that refuses anything but one remote, one refspec naming a
-destination, and options from a fixed set; and **#150**, that what suppresses a
-sweep finding is decided by a helper rather than by a reader.
+destination, and options from a fixed set; **#150**, that what suppresses a
+sweep finding is decided by a helper rather than by a reader; **#75**
+again, that the issue helper leaves `gh issue create` no free parameter and
+that the conversion exclusion reaches its own child rather than only its
+source — the second helper of the kind that never shipped wrong, whose title
+did; and **#17**, that every credential-bearing `docker run` in the reviewer
+joins the internal network and only the proxy reaches the bridge, which is
+the whole of the egress confinement's width and the one part of it a text
+gate can hold. Its depth is `test_egress_proxy.py` in the same directory,
+which the same `discover` picks up: it runs the proxy on loopback and drives
+a socket at it, so the allowed tunnel relays, a host off the list, an
+allowed host on another port, a plain `GET` and an upstream that refuses
+are each answered as the file says, and the log line never carries the
+request as the reviewer wrote it.
 
 **Two of those took their counterfactual somewhere other than the previous
 commit, and that is worth knowing before trusting them.** #140's read-side
@@ -183,7 +196,8 @@ Each has its own reference for what it asserts and — more usefully — what it
 does not: `deploy/helm/README.md`, since that gate reaches no cluster;
 `deploy/observability/README.md`, since that one reaches no Prometheus and does
 not validate rule syntax; and `deploy/keycloak/README.md`, since that one
-reaches a live realm from `deploy.yml` and a file from CI, and the difference
+reaches a live realm from `deploy.yml` and — since ADR-043 — hourly from
+`realm.yml`'s own `deployed` job, and a file from CI, and the difference
 between those two subjects is the whole of what it is for.
 
 **Running a gate is the other half, and the block above carries some of those

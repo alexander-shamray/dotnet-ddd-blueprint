@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -864,6 +865,52 @@ class WhatTheGateHolds(unittest.TestCase):
         self.assertNotIn("pkce.code.challenge.method", held["clients"][0]["attributes"])
 
 
+def commands_of(relative: str) -> str:
+    """A workflow's COMMANDS, with its comment lines removed.
+
+    Both workflows explain each realm call in a comment beside it, so a raw
+    search finds `realm_check.py authority` whether or not anything runs it —
+    deleting the command outright would have left every case below green. It
+    is the fourth time in this tree that a matcher matched the prose about the
+    matcher, and the third artefact to need stripping: Python comments, Python
+    docstrings, and now YAML.
+
+    Whole lines only. An inline `#` cannot be stripped safely from a shell
+    line — a URL fragment and a `sed` expression both carry one — and no
+    command in either file has a trailing comment.
+    """
+    text = (Path(realm_check.__file__).resolve().parents[2]
+            / relative).read_text(encoding="utf-8")
+    return "\n".join(line for line in text.splitlines()
+                      if not line.lstrip().startswith("#"))
+
+
+# The three calls that close #157, in the order they have to be in. The
+# rollout makes them once; the scheduled job makes them per release; the
+# order is the same invariant in both files, so it is one list.
+REALM_CALLS = (
+    "realm_check.py authority",       # which realm, out of the chart
+    "read_admin.py --out",            # fetch it
+    "realm_check.py check",           # judge it
+)
+
+
+def realm_call_positions(case: unittest.TestCase, relative: str,
+                         text: str | None = None) -> list[int]:
+    """Where each call sits in `relative`'s commands — or in `text`, when the
+    caller has already cut the file down to the one job that may make them."""
+    text = commands_of(relative) if text is None else text
+    found = []
+    for call in REALM_CALLS:
+        index = text.find(call)
+        case.assertNotEqual(
+            index, -1,
+            f"{relative} no longer contains `{call}`, so nothing in it judges "
+            "a deployed realm")
+        found.append(index)
+    return found
+
+
 class TheRolloutStillCallsThisGate(unittest.TestCase):
     """The three calls that close #157, and the order they have to be in.
 
@@ -875,40 +922,10 @@ class TheRolloutStillCallsThisGate(unittest.TestCase):
     """
 
     def workflow(self) -> str:
-        """The rollout's COMMANDS, with its comment lines removed.
-
-        This file explains each of the three calls in a comment beside it, so a
-        raw search finds `realm_check.py authority` whether or not anything
-        runs it — deleting the command outright would have left every case in
-        this class green. It is the fourth time in this branch that a matcher
-        matched the prose about the matcher, and the third artefact to need
-        stripping: Python comments, Python docstrings, and now YAML.
-
-        Whole lines only. An inline `#` cannot be stripped safely from a shell
-        line — a URL fragment and a `sed` expression both carry one — and no
-        command here has a trailing comment.
-        """
-        text = (Path(realm_check.__file__).resolve().parents[2]
-                / realm_check.DEPLOY_WORKFLOW).read_text(encoding="utf-8")
-        return "\n".join(line for line in text.splitlines()
-                          if not line.lstrip().startswith("#"))
+        return commands_of(realm_check.DEPLOY_WORKFLOW)
 
     def positions(self) -> list[int]:
-        text = self.workflow()
-        calls = [
-            "realm_check.py authority",       # which realm, out of the chart
-            "read_admin.py --out",            # fetch it
-            "realm_check.py check",           # judge it
-        ]
-        found = []
-        for call in calls:
-            index = text.find(call)
-            self.assertNotEqual(
-                index, -1,
-                f"{realm_check.DEPLOY_WORKFLOW} no longer contains `{call}`, so "
-                "nothing in the rollout closes #157")
-            found.append(index)
-        return found
+        return realm_call_positions(self, realm_check.DEPLOY_WORKFLOW)
 
     def test_all_three_calls_are_there_and_in_that_order(self):
         found = self.positions()
@@ -955,6 +972,221 @@ class TheRolloutStillCallsThisGate(unittest.TestCase):
             self.assertEqual(
                 pins, 1,
                 f"{pins} authority pin(s) on: {command[:120]}")
+
+
+class TheScheduleStillCallsThisGate(unittest.TestCase):
+    """The same three calls, between rollouts (ADR-043).
+
+    `realm.yml`'s `deployed` job is the one moment the rollout cannot be, and
+    it has the rollout's failure mode exactly: it runs on `schedule` and
+    `workflow_dispatch`, so a change that deleted a step, dropped the guard or
+    lost the trigger reaches `main` with no diff-driven job that would have
+    noticed. Each case here is a property the workflow's own comment argues,
+    asserted against the commands rather than the prose about them.
+    """
+
+    def workflow(self) -> str:
+        return commands_of(realm_check.WORKFLOW_PATH)
+
+    def job(self) -> str:
+        """The `deployed` job alone, so a property of it cannot be satisfied
+        by the `check` job above it — both run this suite, and only one of
+        them may go on to read a realm."""
+        text = self.workflow()
+        start = text.find("\n  deployed:")
+        self.assertNotEqual(start, -1,
+                            f"{realm_check.WORKFLOW_PATH} has no `deployed` job")
+        return text[start:]
+
+    def test_the_schedule_and_the_dispatch_are_declared(self):
+        text = self.workflow()
+        self.assertIsNotNone(
+            re.search(r"^  schedule:\s*\n\s*- cron: ", text, re.MULTILINE),
+            "the deployed realm is no longer read on a schedule")
+        self.assertIsNotNone(
+            re.search(r"^  workflow_dispatch:", text, re.MULTILINE),
+            "an operator can no longer re-run the judgement by hand")
+
+    def test_the_local_job_runs_only_on_a_diff(self):
+        """A schedule has no diff to gate, and the `deployed` job runs the
+        suite itself — so the `check` job on a schedule would be the same
+        command twice in one run, and its `if:` says so."""
+        text = self.workflow()
+        check = text[text.find("\n  check:"):text.find("\n  deployed:")]
+        self.assertIn("github.event_name == 'pull_request' || "
+                      "github.event_name == 'push'", check)
+
+    def test_the_job_is_opted_in_by_the_declared_variable(self):
+        """Not the fail-open skip this repository refuses: the guard reads a
+        configuration and not a runtime failure, and the name is the one
+        `realm_check.py` declares so the README and the workflow agree."""
+        job = self.job()
+        match = re.search(r"^    if: (.*)$", job, re.MULTILINE)
+        self.assertIsNotNone(match, "the deployed job carries no guard at all")
+        guard = match.group(1)
+        self.assertIn(f"vars.{realm_check.SCHEDULE_OPT_IN} == 'enabled'", guard)
+        self.assertIn("github.event_name == 'schedule'", guard)
+        self.assertIn("github.event_name == 'workflow_dispatch'", guard)
+
+    def test_the_job_runs_under_the_production_environment(self):
+        self.assertIn("environment: production", self.job())
+
+    def test_a_dispatch_from_a_branch_is_refused_before_anything_is_checked_out(self):
+        job = self.job()
+        refusal = job.find('"$GITHUB_REF" != "refs/heads/main"')
+        checkout = job.find("actions/checkout")
+        self.assertNotEqual(refusal, -1, "a branch may now judge production")
+        self.assertLess(refusal, checkout)
+
+    def test_all_three_calls_are_there_and_in_that_order(self):
+        found = realm_call_positions(self, realm_check.WORKFLOW_PATH, self.job())
+        self.assertEqual(found, sorted(found),
+                         "the scheduled job derives, fetches and judges out of order")
+
+    def test_the_negatives_run_before_the_judgement_in_this_job_too(self):
+        job = self.job()
+        suite = job.find("unittest discover -s deploy/keycloak")
+        judged = job.find("realm_check.py check")
+        self.assertNotEqual(suite, -1, "the deciding copy of the gate is no longer observed red")
+        self.assertLess(suite, judged)
+
+    def test_every_release_in_the_plan_is_judged(self):
+        """The set of releases is the canary plan's, not a list restated in
+        YAML — `deploy.yml`'s `options:` is a dispatch menu, this is a subject."""
+        self.assertIn("canary.py workloads", self.job())
+
+    def test_the_workload_list_is_assigned_before_it_is_looped(self):
+        """`for X in $(cmd)` swallows cmd's failure under `set -e`: a plan
+        command that exited non-zero became an empty list, the loop judged
+        nothing, and the step passed green with no issue filed. The list is
+        captured first, an empty one is refused, and the loop reads the
+        variable."""
+        job = self.job()
+        self.assertIn("WORKLOADS=$(python deploy/canary/canary.py workloads)", job)
+        self.assertIn('if [ -z "$WORKLOADS" ]', job)
+        self.assertNotIn("for WORKLOAD in $(", job)
+        self.assertLess(job.find("WORKLOADS=$("), job.find("for WORKLOAD in"))
+
+    def test_the_workload_list_keeps_its_line_protocol_into_the_loop(self):
+        """An unquoted `$WORKLOADS` as the word list re-splits the answer on
+        whitespace and expands a glob against the checkout (review round
+        eleven). `mapfile` keeps one line as one release, the loop quotes the
+        array, and the array is not filled through a process substitution,
+        which would lose the status the assignment keeps."""
+        job = self.job()
+        self.assertIn('mapfile -t WORKLOAD_LIST <<< "$WORKLOADS"', job)
+        self.assertIn('for WORKLOAD in "${WORKLOAD_LIST[@]}"; do', job)
+        self.assertNotIn("for WORKLOAD in $WORKLOADS", job)
+        self.assertLess(job.find('if [ -z "$WORKLOADS" ]'), job.find("mapfile -t"))
+
+    def test_the_derivation_is_assigned_before_it_is_read(self):
+        """`eval "$(cmd)"` and `< <(cmd)` both swallow a failed cmd under
+        `set -e`, which is the rollout's own lesson. The derivation is captured
+        first and each line exported as a literal."""
+        job = self.job()
+        self.assertIn("DERIVED=$(python deploy/keycloak/realm_check.py authority", job)
+        self.assertIn('<<< "$DERIVED"', job)
+        self.assertIn('export "$NAME=$VALUE"', job)
+        self.assertNotIn("eval ", job)
+        self.assertNotIn("< <(", job)
+
+    def test_a_red_judgement_files_an_issue_and_only_a_red_judgement(self):
+        """What a red run DOES. Guarded on the judge step's own outcome, so a
+        dispatch refused for coming from a branch files nothing."""
+        job = self.job()
+        match = re.search(r"^      - name: A drifted realm is an issue.*\n"
+                          r"        if: (.*)$", job, re.MULTILINE)
+        self.assertIsNotNone(match, "a red run no longer files anything")
+        self.assertIn("failure()", match.group(1))
+        self.assertIn("steps.judge.outcome == 'failure'", match.group(1))
+        self.assertIn("id: judge", job)
+        self.assertIn("gh issue create", job)
+        self.assertIn("--label security --label critical", job)
+        self.assertIn("gh issue comment", job)
+        self.assertIn("issues: write", job)
+
+    def test_the_open_issue_is_looked_for_past_the_default_page(self):
+        """One issue per drift is only true while the listing can see the
+        open one. `gh issue list` defaults to 30 and the first form said 100;
+        past either the next hourly red files a duplicate, which is the
+        argument `.claude/scripts/gh-issue-list.sh` already makes for 1000."""
+        job = self.job()
+        match = re.search(r"gh issue list (.*?)\\\n", job)
+        self.assertIsNotNone(match, "the filing step no longer lists issues")
+        self.assertIn("--limit 1000", match.group(1))
+        self.assertIn("--state open", match.group(1))
+        self.assertIn("--label security", match.group(1))
+
+    def test_every_line_of_a_run_block_stays_inside_the_block(self):
+        """A `run: |` block ends at the first line indented less than its
+        body, and a heredoc written the way bash wants it — terminator at
+        column 0 — did exactly that on the first push: GitHub refused the
+        file and the run had no jobs. YAML strips the block's indentation, so
+        the terminator sits at column 0 of the SCRIPT when it sits at the
+        block's indentation in the FILE. No YAML parser is in the stdlib, so
+        this asserts the shape rather than the parse."""
+        text = (Path(realm_check.__file__).resolve().parents[2]
+                / realm_check.WORKFLOW_PATH).read_text(encoding="utf-8")
+        lines = text.splitlines()
+        inside = None
+        for number, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if inside is not None:
+                if stripped == "":
+                    continue
+                indent = len(line) - len(line.lstrip())
+                if indent >= inside:
+                    continue
+                inside = None
+            if stripped == "run: |":
+                inside = len(line) - len(line.lstrip()) + 2
+                continue
+            if inside is None and stripped.startswith("EOF"):
+                self.fail(f"{realm_check.WORKFLOW_PATH}:{number} closes a "
+                          "heredoc outside its run block")
+
+    def test_the_concurrency_key_is_the_subject(self):
+        """A scheduled run and a pushed gate run share `refs/heads/main`, and
+        under a ref-only key each cancelled the other. The two deployed
+        triggers share ONE key, because two judgements in flight race the
+        filing step's check-then-create and the tracker ends up with two
+        issues for one drift."""
+        text = self.workflow()
+        match = re.search(r"^  group: (.*)$", text, re.MULTILINE)
+        self.assertIsNotNone(match, "the workflow has no concurrency group")
+        group = match.group(1)
+        self.assertIn("github.event_name == 'schedule'", group)
+        self.assertIn("github.event_name == 'workflow_dispatch'", group)
+        self.assertIn("&& 'deployed'", group)
+        self.assertIn("format('{0}-{1}', github.event_name, github.ref)", group)
+
+    def test_the_judge_step_times_out_before_the_job_does(self):
+        """A job cancelled on its own timeout runs no `failure()` step, so the
+        hung read this budget exists for would be the one that filed nothing.
+        The step's timeout has to be the shorter one, with room after it."""
+        job = self.job()
+        job_cap = re.search(r"^    timeout-minutes: (\d+)$", job, re.MULTILINE)
+        self.assertIsNotNone(job_cap, "the deployed job has no timeout")
+        judge = job[job.find("id: judge"):]
+        step_cap = re.search(r"^        timeout-minutes: (\d+)$", judge, re.MULTILINE)
+        self.assertIsNotNone(step_cap, "the judge step has no timeout of its own")
+        self.assertLess(int(step_cap.group(1)), int(job_cap.group(1)))
+        self.assertLess(judge.find("timeout-minutes:"), judge.find("run: |"))
+
+    def test_the_workload_list_the_loop_reads_still_exists(self):
+        """`deploy/canary` is a declared input because the loop reads it, and
+        this is the read that earns the declaration: the subcommand the loop
+        depends on is asserted to exist, so a rename there runs this gate and
+        fails it rather than leaving the loop to fail at the next hour."""
+        plan = (Path(realm_check.__file__).resolve().parents[2]
+                / realm_check.CANARY_PLAN / "canary.py").read_text(encoding="utf-8")
+        self.assertIn('add_parser("workloads"', plan)
+        self.assertIn('args.command == "workloads"', plan)
+
+    def test_the_readme_names_the_variable_the_workflow_reads(self):
+        readme = (Path(realm_check.__file__).resolve().parent / "README.md").read_text(
+            encoding="utf-8")
+        self.assertIn(f"`{realm_check.SCHEDULE_OPT_IN}`", readme)
 
 
 class TheRealmIsLoaded(unittest.TestCase):

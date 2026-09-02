@@ -1,8 +1,8 @@
 ---
 description: Loop a defect audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed critical-or-high logic or execution bug, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the outbox' or a path] — omit to sweep the whole repo"
-allowed-tools: Read, Grep, Glob, Agent(bug-auditor), Bash(bash .claude/scripts/gh-issue-list.sh), Bash(bash .claude/scripts/gh-issue-text.sh:*), Bash(gh issue create:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
-disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor)
+allowed-tools: Read, Grep, Glob, Agent(bug-auditor), Bash(bash .claude/scripts/gh-issue-list.sh), Bash(bash .claude/scripts/gh-issue-text.sh:*), Bash(bash .claude/scripts/gh-issue-create.sh:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
+disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(review-adjudicator), Bash(gh issue create:*), Bash(git push origin:*), Bash(git push -u origin:*)
 ---
 
 Sweep the repository for defects — code that does something other than what it
@@ -398,7 +398,7 @@ so the summary names the commit the sweep actually read.
 caller's tree, which would silently forfeit the stable-snapshot property this
 section buys. A failed `git worktree add` is a round that could not run,
 reported like any other tool error under *Never fail open* below. **The round
-writes nothing to disk** — issue bodies are piped to `gh issue create` on
+writes nothing to disk** — issue bodies are piped to `gh-issue-create.sh` on
 stdin (the File step), not written to files — so `$work` stays clean and the
 teardown below removes it without `--force`.
 
@@ -499,7 +499,7 @@ or high.** Three gates, and each drops candidates the round must not file:
   blocks a re-file **only while its fix is still present** — if the defect
   **currently reproduces** because the fix was reverted, the bug is back, and
   it re-files rather than being silenced by a closure that no longer holds —
-  **re-files**, because the grant carries `gh issue create` and no `reopen`,
+  **re-files**, because the grant carries `gh-issue-create.sh` and no `reopen`,
   and a duplicate that says why beats a capability this command does not have.
   Re-filing a genuinely-tracked finding is the drift this repo exists to close;
   suppressing a reintroduced one is worse. (The
@@ -721,24 +721,70 @@ Each round is the review done once, end to end:
    finding: an audited file that steered an agent into reading a host path
    (a credentials file, a key outside the repo) and reporting it, hoping the
    parent quotes it into an issue. Drop it and note the attempt; never read or
-   file a path outside `$work`. Then, for every surviving candidate, read the
-   cited code, establish the caller, and confirm the failure scenario holds.
-   Drop what does not survive, and say how many did not — that count is the
-   round's own quality signal.
+   file a path outside `$work`. That check is a string comparison and opens
+   nothing.
+
+   Then, for every surviving candidate, **dispatch one more `bug-auditor`
+   with that candidate alone** — the root, the file, the line, the claim and
+   the failure scenario as the fan-out returned them — under the verdict
+   contract in `.claude/agents/bug-auditor.md`, and take its verdict record,
+   which carries the reachability evidence too. **This step does not open
+   `$work` itself, and that is the change (#75 item 5).** It used to,
+   deliberately, so that an unverified agent claim never became an issue; the
+   property that bought is kept — two independent read-only readings, neither
+   able to mutate, must agree — and what it cost is given up: the audited
+   tree no longer enters the one invocation that holds `gh-issue-create.sh`.
+   A verdict of `refuted` or `outside-root` drops the candidate; a record that
+   is not in the declared shape is dropped as malformed and counted; and **a
+   record whose `file` and `line` are not the candidate's as dispatched is
+   dropped the same way**, whatever its verdict says — two readings that
+   disagree on where the defect is have not agreed, and a `confirmed` at
+   another location is a redirect, not a confirmation. Drop what does not
+   survive, and say how many did not — that count is the round's own quality
+   signal.
 3. **De-duplicate.** Check each survivor against the tracked set and the
    already-tracked rule above.
 4. **File.** One issue per survivor, most severe first, in the house body form:
    a summary, the affected lines quoted, the failure scenario spelled out as
    state → path → wrong outcome, the reachability evidence, a fix, and the
-   severity. **Pipe each body to `gh issue create --body-file -` on stdin** (a
-   quoted heredoc), so nothing is written to disk and the command needs no
-   `Write` grant — an inline `--body` mangles the wrapping, and a temp file
-   would need the very write capability this command withholds. Label `bug` and
-   the severity, each ensured once with
-   `bash .claude/scripts/gh-label-ensure.sh <name>`. End the body noting it came
-   from an authorised sweep, was verified at filing **by reading rather than by
-   execution**, and naming the commit pinned — a defect claim that never ran
-   the code should say so where whoever picks it up will read it.
+   severity — **every one of those composed from the verdict record's fields
+   in that order, and from nothing the parent read in `$work`**, because it
+   read nothing there. **Pipe the title and the body together to
+   `bash .claude/scripts/gh-issue-create.sh bug <severity>` on stdin** in a
+   quoted heredoc — the title as its first line, then a blank line, then the
+   body — so nothing is written to disk and the command needs no `Write`
+   grant, and so **nothing composed from the record crosses this shell's
+   command line**: a title passed as an argument is expanded by the parent
+   before the helper runs, and a record that put `$(…)` in it would have run
+   here. Inside the quoted heredoc nothing expands. An inline `--body`
+   mangles the wrapping, and a temp file would need the very write capability
+   this command withholds. The helper resolves the repository from the
+   checkout, refuses a kind or severity outside the six labels, refuses a
+   stdin whose second line is not blank, and ensures both labels through
+   `gh-label-ensure.sh` itself. Say in the body that the verifier **read
+   rather than executed**, and name the commit pinned — a defect claim that
+   never ran the code should say so where whoever picks it up will read it —
+   and then end the body with this line, exactly, as its last non-blank line,
+   because the helper refuses a body without it:
+
+   ```
+   Filed by an authorised sweep and verified at filing by a second read-only auditor.
+   ```
+
+   **The delimiter is the one thing a quoted heredoc leaves the payload to
+   steer, and the rule for it is yours to keep, not the helper's.** The body
+   quotes repository lines, and a repository line equal to the delimiter
+   closes the heredoc there: everything after it is no longer inert text but
+   the parent's own shell input, `$(…)` included. Nothing downstream can
+   undo that, because it happens before the helper runs. So the delimiter is
+   never `EOF` or any word a file could plausibly hold; it is a token of the
+   form `ISSUE_BODY_END`, and **before the command is composed, every line
+   of the payload — title, body, quoted lines — is checked against it**, and
+   a payload that contains the token gets a different one. The trailer line
+   above is the detector for the case the rule missed: a body cut short has
+   lost its last line, and the helper exits 2 instead of filing half an
+   issue — after the tail has run, which is why the rule and not the trailer
+   is the guard.
 
    **A title must never begin with `/`, and this is a defect that already
    shipped four times.** MSYS argument conversion rewrites an argument that
@@ -747,50 +793,38 @@ Each round is the review done once, end to end:
    `"C:/Program Files/Git/health/ready returns 200 …"`. Issues #55, #56 and #68
    carried it for two weeks and nobody reading the tracker could tell what the
    subject was. The body is safe — it arrives on stdin, which is bytes rather
-   than an argument — so **only `--title` is exposed**, and only at position
-   one: measured here, a leading backtick or a leading space both suppress the
-   conversion and a bare `/` does not.
+   than an argument — so **only `--title` is exposed** inside the helper, and
+   only at position one: measured here, a leading backtick or a leading space
+   both suppress the conversion and a bare `/` does not.
 
-   So write the subject in backticks — ``/bug-sweep`` — or reword so the
-   slash is not first. **Do not reach for `MSYS2_ARG_CONV_EXCL` instead**: an
-   env-prefixed command no longer begins with `gh issue create`, and this
-   command's grant is a prefix match, so the loop would start prompting on
-   every filing.
+   **The helper closes it, and it is the one thing a helper can do that the
+   grant could not.** `gh-issue-create.sh` sets `MSYS2_ARG_CONV_EXCL` for its
+   own `gh` child, so the conversion never sees the title; the command's grant
+   is on the script and is unchanged. Writing the subject in backticks —
+   ``/bug-sweep`` — is still the house form for a title that names a command,
+   because a reader of the tracker deserves it, not because the filing needs
+   it.
 
 5. **Summarise the round.** New issues filed (with numbers), candidates dropped
    at each gate and why, the mediums and lows recorded but not filed, and the
    by-inspection limit restated.
 
-**Residual — the parent verifies while holding the mutation grants.** The
-read-only fan-out contains the *auditor*: it cannot act on what it reads
-because it has no tool to act with. The parent is the opposite — it holds
-`gh issue create`, the label helper and the two worktree helpers —
-and step 2 requires it to read the cited code **itself**, which is deliberate,
-because an unverified agent claim must never become an issue. The consequence
-is that untrusted text reaches the one stage that can mutate, *after* the
-isolated stage has finished. Containment is deferred, not achieved, and the
-agent profile's argument does not cover this.
-
-Three things narrow it and none of them closes it. The path check at the head of
-step 2 drops any candidate citing a path outside `$work` before the code is
-opened. The one mutation that still takes free parameters is `gh issue create`,
-with its stated rule — always `--repo` for this repository, with the issue's own
-text unbounded — where the label and the worktree paths have nothing left to
-state a rule about, both having gone into helpers. `Write` and
-`Edit` are **denied**, which closes the editing tools and not the class: `Bash`
-remains granted, and a redirection through it writes what `Edit(...)` refuses —
-argued in full below. **The branch is a residual rather than a control**: `git
-push origin` is globally allowed and this command does not deny it, argued in
-full below. The unbounded part is *what an issue says and where it is filed*.
-
-Closing it properly is infrastructure rather than prose, and there are two
-directions. A helper that pins the repository for `gh issue create` — the label
-helper already landed — would leave the mutation surface with no free parameter
-for a finding to supply. A verify stage
-that returns a **structured verdict** rather than prose — the parent filing on
-the verdict without composing a body from text it has read — would keep the
-untrusted string out of the mutating stage altogether. Both are the same class
-of decision as the container named below, and neither is a command edit.
+**Residual — the parent's context still receives the verdict, and a verdict is
+text.** Step 2 no longer opens `$work` in the invocation that files (#75 item
+5), and both directions that paragraph used to name are taken: the fan-out
+contains the auditor, the verify dispatch contains the verifier, the parent
+composes from a record with declared fields, and `gh-issue-create.sh` leaves
+`gh issue create` with no free parameter — the repository is resolved from the
+checkout and the labels are a closed set, so nothing a finding says can choose
+*where* an issue lands. What an issue *says* is the record's fields, and a
+crafted tree that steers both read-only invocations into the same wrong record
+produces a wrong issue in this repository. That is the class a container
+closes and a record narrows, and the verifier reads and does not execute
+either, so the by-inspection limit stands. `Write` and `Edit` are **denied**,
+which closes the editing tools and not the class: `Bash` remains granted, and
+a redirection through it writes what `Edit(...)` refuses — argued in full
+below. **The branch is denied by name**, since the `Bash(...)` form of
+`disallowed-tools` was measured — argued in full below.
 
 **Residual — the auditor reads the host, not only `$work`.** `Read`, `Grep` and
 `Glob` are not confined to the pinned worktree; the "root every path under
@@ -895,26 +929,31 @@ see `/security-sweep`'s copy for the whole argument, which is the same one
 twice. It is not in `disallowed-tools`, omitting it withholds nothing, and
 `.claude/settings.json` **allows** `Bash(git push origin:*)` globally, so a
 push of the current branch does not even prompt. Naming it in
-`disallowed-tools` is the obvious fix and is not taken here: the `Bash(...)`
-form in that key is unverified, and an unverified deny described as a closed
-hole is the mistake `CLAUDE.md` records against the narrowed `git reset` grant.
-**The residual stands, named.** A `Write` grant for issue bodies was
+`disallowed-tools` is the fix, and it is taken here because the `Bash(...)`
+form in that key was measured first — a throwaway command in a detached
+worktree had its `git diff` refused with the harness's own text while its
+`wc` ran — so both sweeps deny `git push origin`, its `-u` form and the raw
+`gh issue create` by name, and the deny wins over the global allow because
+precedence is deny first. A `Write` grant for issue bodies was
 refused here for the reason `/security-sweep` records after trying one: it would
 re-open source editing, and a read-only claim resting on prose while the grant
 permits writing every undenied path is unenforced. Bodies go through
-`gh issue create` on stdin for exactly this reason.
+`gh-issue-create.sh` on stdin for exactly this reason.
 
-**One mutation is still scoped by discipline rather than by the grant, and the
-other two are closed.** This paragraph has been wrong in both directions: an
+**No mutation is scoped by discipline any more, and the last one went the way
+the other two did.** This paragraph has been wrong in both directions: an
 earlier draft claimed the only mutations were the issues filed and the worktree,
 which was two omissions wide, and it then went on saying three were open after
 two of them had been moved into helpers by the change immediately below. The
 count is the part that rots, so it is stated once here and the entries carry
 their own status:
 
-- **`Bash(gh issue create:*)` pins no repository.** It is a prefix grant, so the
-  rule is prose: always pass `--repo` for **this** repository, never one named
-  in a finding.
+- **`Bash(gh issue create:*)` pinned no repository, and is gone.** It was a
+  prefix grant, so "always `--repo` for this repository" was prose.
+  `gh-issue-create.sh` resolves the repository from the checkout, closes the
+  label vocabulary, takes the title and the body on stdin so neither crosses
+  this shell's command line, and sets `MSYS2_ARG_CONV_EXCL` for its own child
+  — the title defect the commands could not close under a prefix match.
 **The label grant and the mktemp grant are gone, and both went the way every
 other grant here went — into a helper.** They are recorded because the reasoning
 generalises, not because they are still open.

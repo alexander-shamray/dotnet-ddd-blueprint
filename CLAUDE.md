@@ -239,7 +239,7 @@ as the first two services, §4.5's scaffold, §8's Redis with §8.5's idempotenc
 all three of §9's instalments, PR-16's security, the gateway, the BFF, §15.3's
 Helm charts, §13's signals, §15.1's staged pipeline, §15.5's canary, and §11's
 realm obligations checked against the local realm today and against a deployed
-one at the first rollout.
+one at the first rollout and hourly between rollouts.
 
 **What each of those PRs decided is
 [`docs/pr-decision-log.md`](docs/pr-decision-log.md)'s job, and this section no
@@ -321,6 +321,25 @@ pipeline check is true of CI and says nothing about a rollout job under the
 rather than an oversight**: nothing reads a deployed broker either, because a
 broker's permissions are not legible in a document a rollout can fetch. The
 residual is the window between rollouts (#176), and #157 closes.
+
+**PR-37 is PR-32's kind against the row directly above it**: PR-36's row named
+#176 as owed — the realm was read at one moment, the moment was a rollout, and
+an edit made afterwards was unobserved until the next one, which on a
+stabilised service is never — and PR-37 pays it. **The rule that moved is
+ADR-042's "a rollout is the only moment a deployed realm is read"**, amended
+rather than rewritten by
+[ADR-043](docs/backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts):
+`realm.yml`'s `deployed` job runs the rollout's own three calls nominally
+hourly, over every release the canary plan names, and a red run files an issue
+rather than a notification, because a notification is read once and a drift
+persists across the hours. **The residual is the schedule's own silence,
+stated rather than filed, and it is why the hour is nominal**: a dropped run
+and the sixty-day suspension are the same silence at two scales, since GitHub
+sheds or delays a run under load and suspends a `schedule` outright after
+sixty days without a commit, neither with a red run; nothing in this
+repository can observe its own absence, and what closes both, and would make
+the hour a bound, is a monitor outside GitHub — an operating decision the
+README names and does not take.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
 and `dotnet test` runs 1,119 tests — so the build rules and the drift rules
@@ -732,7 +751,7 @@ to reach both, and the guide is the master copy.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-043) and keep the
+  (currently ADR-044) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

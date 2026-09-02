@@ -803,7 +803,8 @@ same argument as never calling a branch clean because asking failed.
       limits will not allow did not run, and neither a clean verdict nor a stop
       may be minted from it. It is the one non-zero exit that does not halt the
       chain; every other non-zero exit is the loop not having run and stops
-      it.
+      it — **exit 15 among them**, the egress proxy or its network failing to
+      come up, which sits above the reservation and spends no slot.
 
       **The skip is final, and it used to owe a re-entry.** That debt was
       payable while the chain ended at an open PR: a later `/ship` re-entered
@@ -830,9 +831,11 @@ same argument as never calling a branch clean because asking failed.
       is work no later run can perform and no branch will carry. Name the
       verification that did not happen; do not record it as a debt.
 
-      Residual, stated in the script and in `CLAUDE.md`: **egress is not
-      restricted**. The container reaches the network, and confining it to
-      `api.x.ai` needs an allow-list proxy Docker cannot supply alone.
+      **Egress is confined since #17**: the reviewer runs on an internal
+      network and reaches `api.x.ai` and `auth.x.ai` through a CONNECT-only
+      proxy the script brings up beside it, and nothing else. The script and
+      `docs/harness-boundaries.md` carry the mechanism; what stands is the
+      credential residual below, narrower than it was.
 
       **One credential does cross, and this paragraph used to say none did
       (#58).** No `gh` token, no SSH keys and no host filesystem beyond the
@@ -840,10 +843,12 @@ same argument as never calling a branch clean because asking failed.
       unusable the script copies `~/.grok/auth.json`, `agent_id` and
       `config.toml` in, and `auth.json` carries a **refresh-token-bearing OAuth
       session for the x.ai account**. Anything running in the container can read
-      it. **So the two halves of the residual are not independent**: the open
-      half is exactly what makes the credential that crosses exploitable, and a
-      reader who stopped at "the credential half is closed" stopped one file
-      short of the mount.
+      it, and can now post it to the two hosts the session is for and nowhere
+      else. **The two halves of the residual were never independent**: the
+      open egress half was exactly what made the credential that crosses
+      exploitable, which is why it was the half to close, and a reader who
+      stopped at "the credential half is closed" stopped one file short of
+      the mount.
 
       **Prefer `XAI_API_KEY`** — scoped and revocable — and treat the OAuth
       mount as the fallback it is rather than an equivalent path. The script

@@ -191,8 +191,10 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              tree: deploy/compose/keycloak/realm-export.json,
                              which is the subject, and Common.Web's
                              AuthenticationExtensions.cs, out of which the 300
-                             a realm owes is READ rather than restated — both
-                             declared as SOURCE_INPUTS in realm_check.py,
+                             a realm owes is READ rather than restated — and,
+                             since ADR-043, deploy/canary/**, whose plan the
+                             scheduled job loops over — all declared as
+                             SOURCE_INPUTS in realm_check.py,
                              which asserts the triggers cover every entry and,
                              in the other direction, that no path the gate
                              reads is missing from the list. Split from
@@ -200,9 +202,17 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              reasoning: path filtering is per-workflow, so
                              sharing one would drag that smoke's pulls onto
                              every identity change or leave this gate blind to
-                             the realm it reads. It runs the local half only —
-                             the deployed realm is judged from deploy.yml,
-                             where a credential exists
+                             the realm it reads. Two jobs since ADR-043:
+                             `check` is the local half, on the two triggers
+                             that carry a diff, and `deployed` is the third
+                             moment — the rollout's own derive-fetch-judge
+                             calls over every release the canary plan names,
+                             hourly and on dispatch, under the production
+                             Environment, opted in by the repository variable
+                             REALM_CHECK_SCHEDULED and filing a tracker issue
+                             when red. The realm a rollout is about to land
+                             on is still judged from deploy.yml; this is the
+                             moment between rollouts
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/secret-scan/         §15.1's other half since #61 — twelve rules, an
                              allow-list of fingerprints, and its tests. Since
@@ -300,13 +310,18 @@ deploy/keycloak/             §11's token obligations against a Keycloak realm
                              talks to anything, and the suite is the mutations
                              the decision has to refuse. ADR-042's one
                              predicate has TWO subjects and they reach
-                             differently: `realm.yml` judges §14.1's Compose
-                             export and reaches only files — that export and
-                             the `AccessTokenLifetime` the 300 is READ out of
-                             rather than restated — while `deploy.yml`'s
-                             rollout job judges the realm a deployment points
-                             at, and that half reaches a live realm and has
-                             never run. `--kind` has no default because one
+                             differently: `realm.yml`'s `check` job judges
+                             §14.1's Compose export and reaches only files —
+                             that export and the `AccessTokenLifetime` the 300
+                             is READ out of rather than restated — while
+                             `deploy.yml`'s rollout job judges the realm a
+                             deployment points at, and since ADR-043
+                             `realm.yml`'s own `deployed` job judges the realm
+                             every release points at between rollouts, hourly
+                             and on dispatch, under production, opted in by
+                             REALM_CHECK_SCHEDULED and filing an issue when
+                             red. Those two reach a live realm and have never
+                             run. `--kind` has no default because one
                              obligation inverts between the two: §11.2's
                              password grant is on locally and off in a
                              deployed realm

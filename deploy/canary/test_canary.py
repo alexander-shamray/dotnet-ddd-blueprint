@@ -15,6 +15,8 @@ through a reading nobody took.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import re
 import unittest
@@ -318,6 +320,45 @@ class PlanDocumentTests(unittest.TestCase):
 
     def test_the_shipped_plan_is_consistent(self) -> None:
         self.assertEqual(canary.check(self.document), [])
+
+    def test_a_workload_key_that_is_not_a_release_name_fails_the_plan(self) -> None:
+        """Two shells read the key as one word — `deploy.yml`'s `helm upgrade`
+        and `realm.yml`'s loop, which also makes a file name of it. A space is
+        two releases, a glob expands against the checkout, a slash is a path
+        (review round eleven). Held here, before either job sees it; the
+        shipped keys are the positive control."""
+        # The trailing newline is the case `match` plus `$` lets through and
+        # `fullmatch` does not (review round twelve).
+        for bad in ("two words", "cat*", "../etc", "Catalog", "-lead", "a" * 54, "", "catalog-api\n"):
+            with self.subTest(key=bad):
+                document = json.loads(json.dumps(self.document))
+                document["workloads"][bad] = dict(document["workloads"]["catalog-api"])
+                failures = canary.check(document)
+                self.assertTrue(
+                    any("is not a Helm release name" in f and repr(bad) in f for f in failures),
+                    failures,
+                )
+        for good in ("catalog-api", "a", "x" * 53, "a-1"):
+            with self.subTest(key=good):
+                self.assertIsNotNone(canary.RELEASE_NAME.fullmatch(good))
+
+    def test_workloads_lists_the_plan_and_not_its_comments(self) -> None:
+        """`realm.yml`'s scheduled job loops over this output (ADR-043).
+
+        One name per line and nothing else on stdout, because a shell reads
+        it; and no `$comment` key, because that would be a release nothing
+        installed handed to `helm get values`.
+        """
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = canary.main(["canary", "workloads"])
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            out.getvalue().splitlines(),
+            list(canary.entries(self.document["workloads"])),
+        )
+        self.assertNotIn("$comment", out.getvalue())
+        self.assertIn("catalog-api", out.getvalue().splitlines())
 
     def test_the_ladder_is_the_chapters(self) -> None:
         """§15.5, verbatim: 5, 25, 50, 100, ten minutes each. Not trimmed to

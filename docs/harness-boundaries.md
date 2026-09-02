@@ -184,26 +184,39 @@ hook arrives behind a control rather than behind a sentence that used to be
 true.
 
 **The external review runs in a container over a disposable clone — not a
-worktree — and it has TWO residuals, which are not independent.** The boundary
+worktree — and it had TWO residuals, which were not independent; the egress
+one is closed and the credential one is what stands.** The boundary
 is `.claude/sandbox/Dockerfile`; a worktree could not be the thing mounted,
 because a worktree's `.git` is a file pointing back into this checkout, which
 is the one path the container must not reach. No `gh` token, no SSH keys, no
 host filesystem beyond the clone, non-root inside, and `bypassPermissions` is
 no longer the risk it was because the blast radius is the box.
 
-**Egress is not restricted** — the container reaches the network, and confining
-it to `api.x.ai` needs an allow-list proxy Docker cannot supply alone. **And
-the credential half is narrowed rather than closed**, which this paragraph
+**Egress is confined to `api.x.ai` and `auth.x.ai` since #17**, and it takes
+two containers of the reviewer image: the reviewer on a network created with
+`--internal`, which Docker gives no gateway and whose embedded resolver
+answers `SERVFAIL` for any name outside it, and `egress-proxy.py` as the one
+member with a second leg on the bridge — a CONNECT-only tunnel with a host
+allow-list that the reviewer reaches through `HTTPS_PROXY`, which grok
+honours (measured: without it the same call hangs, with it `api.x.ai`
+answers). It is not a grant wider than its operation: the session runs
+nothing new to bring it up, and the proxy carries no clone and no credential.
+**The credential half is narrowed rather than closed**, which this paragraph
 asserted as settled until #58: where `XAI_API_KEY` is unset or unusable,
 `grok-review.sh` copies `~/.grok/auth.json` in, and that file carries a
 refresh-token-bearing OAuth session for the x.ai account. The three things
-enumerated as absent genuinely are; a fourth was never enumerated. **The open
-residual is what makes the crossing one exploitable** — anything inside can
-read the session and post it anywhere — so listing them as two independent
-bullets is precisely what let the second read as finished. Prefer
-`XAI_API_KEY`, which is scoped, revocable and crosses no file; on this host it
-authenticates against a team with no credits, so the fallback is the path that
-actually runs.
+enumerated as absent genuinely are; a fourth was never enumerated. What the
+proxy changes is what the crossing credential can reach — the two hosts the
+session is for and nothing else — which is why the egress half was the one to
+close: it was what made the crossing one exploitable. What remains is the
+session's own blast radius against x.ai, which no boundary here can shrink.
+Prefer `XAI_API_KEY`, which is scoped, revocable and crosses no file; on this
+host it authenticates against a team with no credits, so the fallback is the
+path that actually runs. **An authenticated call through the proxy is the
+one thing the measurement did not reach** — the classifier refused the probe
+that would have copied the host's session into a container — so the first
+real review behind it is that measurement, and the proxy logs a `deny` line
+naming any host it refuses.
 
 Stated here as well as in the script because `/ship` and both
 sweeps cite `CLAUDE.md` as where the boundary and its residuals are recorded,
@@ -596,11 +609,16 @@ which reads an *absence* as a control, the exact rule the sentence beside it
 had just retired. `.claude/settings.json` **allows** `Bash(git push origin:*)`
 and `Bash(git push -u origin:*)` globally, so a push of the current branch does
 not prompt at all; only force-pushes and pushes to `main` are denied. Naming
-`git push` in each sweep's `disallowed-tools` is the obvious fix and is
-**unverified**: that key's `Bash(...)` form has never been measured here — the
-`Agent(...)` form is what was — and a nested `claude -p` probe could not
-separate a rejected pattern from a command that failed to load. Both files now
-state the residual instead of claiming the control.
+`git push` in each sweep's `disallowed-tools` was the obvious fix and stayed
+**unverified** for a while: that key's `Bash(...)` form had never been
+measured here — the `Agent(...)` form is what was — and a nested `claude -p`
+probe could not separate a rejected pattern from a command that failed to
+load. **It is measured now**, by a throwaway command in a detached worktree
+carrying `Bash(git diff:*)` in both keys: the diff was refused with the
+harness's own "has been denied" text while a `Bash(wc:*)` in the same session
+ran, which separates the two exactly. Both sweeps deny `git push origin`,
+its `-u` form and the raw `gh issue create` by name, and the deny wins over
+the global allow because precedence is deny first.
 
 The sixth **was** the `--output` deny itself — the inventory's one entry that
 is a *deny* rather than an allow, listed because a deny over a command string
@@ -615,12 +633,15 @@ resolves quoting but not expansion.
 
 **A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because
-the harness has no "only this type" allow — so `security-sweep.md` and
-`bug-sweep.md` each enumerate the registered types that hold a shell, an editor
-or the network, and **a newly added agent under `.claude/agents/` is admitted
-by default** until someone adds it to both lists. That is the shape this
-repository already knows rots; it is taken here because the alternative on
-offer is prose.
+the harness has no "only this type" allow — so `security-sweep.md`,
+`bug-sweep.md` and `review-grok.md` each enumerate the registered types that
+hold a shell, an editor or the network, and **a newly added agent under
+`.claude/agents/` is admitted by default** until someone adds it to all three
+lists. That is the shape this repository already knows rots; it is taken here
+because the alternative on offer is prose. **It rotted once already on the day
+a third agent arrived**: `review-adjudicator` was added for #149 and each of
+the three commands had to name the other two profiles, which is the
+enumeration's cost paid in the change that proves it.
 
 **The eighth was the push deny-list (#23), and it closed the way the sixth
 did.** Two broad allows — `Bash(git push origin:*)` and the `-u` form — paired
@@ -672,6 +693,51 @@ filenames are the spelling both files already used and the suite reads. The
 `**/*.targets`-style globs beside them are the documented gitignore syntax and
 are **not** measured in a `disallowed-tools` value — belt to the names' braces,
 and not the control.
+
+**The tenth is the one grant that was never wider than its operation, and
+the operation was the problem.** `/review-grok` held `Edit` and `Write` for
+the job it exists to do — fix every site a review names in one pass — and
+read `suggestions.md` in the same invocation, so one crafted review could
+steer an edit to any undenied path, unattended, inside `/ship`'s loop (#52,
+#149). Narrowing the grant was refused twice, correctly: the command needs
+to write, and `allowed-tools` withholds nothing. What closed it was a
+**split**: a `review-adjudicator` profile with `Read`, `Grep` and `Glob`
+reads the review and returns a structured record, and the writing invocation
+carries the three machinery trees in `disallowed-tools`, so a finding whose
+fix lands in the machinery is refused to the step that writes by the harness
+rather than by a callout. The record is the residual — it is one hop
+from the prose and the parent's context receives it — and what bounds an
+accepted row is a predicate on the file (its quoted text is at its site) and
+the rule that an edit stays inside the row's own sites. **The
+`Read(suggestions.md)` deny the first form carried is gone, and why is a
+measurement rather than a preference**: a command's `disallowed-tools`
+propagate to the subagents it spawns, so the adjudicator's `Read`, `Grep` and
+`Glob` on the review were refused too and it returned `unreadable-review`;
+and a path deny reaches a `Bash` command naming the path, so the `wc -c`
+preflight was refused beside it. The harness offers no deny that reaches
+the parent and not the child, so the review is readable to the writing step
+and the split holds by discipline — stated in the command as its residual.
+**The writing invocation denies `Bash` whole, and that is the fifth entry
+arriving here**: it held `Bash(wc:*)` for a size preflight and `Bash(ls:*)`
+for a link check, and a redirection on either writes what the tree deny
+refuses, so the deny was defence in depth for as long as they stood beside
+it. The size check moved into the adjudicator, which has no `Bash` and
+returns `oversized-review`; the link check became a gated premise — the
+helper suite fails on any tracked mode `120000`, so `main` carries no
+symbolic link on any push, and an invocation without `Bash` cannot add one.
+**The premise is `main`'s and not the reviewed branch's, and that is a
+residual with a number**: the branch is what introduces files, the command
+runs over it locally before CI goes red on it, and the edit-time guard that
+would canonicalise a target and refuse a link is a hook behind the
+self-lock (#181). The bare tool name is the documented form of a
+`disallowed-tools` entry; the pattern form is the one the fifth entry
+measured.
+**The sweeps' item 5 (#75) closed by the same shape** — a second read-only
+dispatch returns a verdict, the parent opens nothing in `$work`, and
+`gh-issue-create.sh` leaves `gh issue create` with no free parameter — so
+the two residuals #149 named as one class went in one change, and the raw
+`Bash(gh issue create:*)` is denied by name in both sweeps now that the
+fifth entry's measurement exists.
 
 **The two sweeps are one shape asking two questions**, split by what makes a
 finding rather than by where they look. `/security-sweep` files what an

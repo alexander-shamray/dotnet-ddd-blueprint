@@ -79,6 +79,11 @@ WORKFLOW = ROOT / WORKFLOW_PATH
 PROMOTE = "promote"
 ROLLBACK = "rollback"
 
+# Helm's release-name alphabet: a DNS-1123 label, at most 53 characters so the
+# suffixed resource names still fit 63. Every workload key is one, and `check`
+# holds it to this before a shell reads it as a word or a path.
+RELEASE_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$")
+
 
 class PlanError(Exception):
     """The plan is unusable. Raised by the loader and by `check`."""
@@ -542,6 +547,22 @@ def check(plan_document: dict, root: Path = ROOT) -> list[str]:
     if not workloads:
         failures.append("workloads is empty: the rollout has nothing to deploy")
     for name, workload in sorted(workloads.items()):
+        # 4a. The key is a Helm release name, and two shells read it as one.
+        #     `deploy.yml` passes it to `helm upgrade` and `realm.yml`'s
+        #     scheduled job reads it off `workloads` one line at a time, then
+        #     uses it as a file name under RUNNER_TEMP. A key with a space, a
+        #     glob character or a slash would be two releases, an expansion
+        #     against the checkout, or a path — so the key is held to the
+        #     alphabet Helm holds a release to, here, before either job sees it.
+        #     `fullmatch`, as `validate_tag` already uses: `match` with a `$`
+        #     anchor accepts a key ending in a newline, which the line-oriented
+        #     `workloads` output would emit as an extra, empty release.
+        if not RELEASE_NAME.fullmatch(name):
+            failures.append(
+                f"workloads.{name!r} is not a Helm release name: lower-case "
+                "letters, digits and hyphens, starting and ending with a letter "
+                "or digit, at most 53 characters"
+            )
         service_name = workload.get("serviceName")
         if service_name not in hosts:
             failures.append(
@@ -773,6 +794,14 @@ def main(argv: list[str]) -> int:
     chart = sub.add_parser("chart", help="the chart directory a workload deploys")
     chart.add_argument("--workload", required=True)
 
+    # One name per line, for a shell loop. `realm.yml`'s scheduled job reads
+    # every release's authority between rollouts (ADR-043), and the set of
+    # releases is this plan's — a list restated in that workflow would agree
+    # with this one until a fifth workload joined here and not there, which is
+    # `deploy.yml`'s `options:` list one artefact over, and that one at least
+    # is a dispatch menu rather than a subject.
+    sub.add_parser("workloads", help="every workload in the plan, one per line")
+
     planner = sub.add_parser("plan", help="canary replicas for one step")
     planner.add_argument("--workload", required=True)
     planner.add_argument("--stable", type=int, required=True)
@@ -820,6 +849,11 @@ def main(argv: list[str]) -> int:
             print(f"canary: no workload {args.workload!r} in the plan", file=sys.stderr)
             return 1
         print(workloads[args.workload]["chart"])
+        return 0
+
+    if args.command == "workloads":
+        for name in entries(document["workloads"]):
+            print(name)
         return 0
 
     if args.command == "required":
