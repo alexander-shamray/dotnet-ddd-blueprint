@@ -328,18 +328,18 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     public async Task A_batch_spanning_more_than_one_delete_chunk_is_deleted_whole()
     {
         // The chunked delete, which nothing else here reaches. `BatchSize`
-        // defaults to 5,000 and the delete is chunked at a thousand keys —
-        // Dapper expands `IN @Keys` to one parameter each and SQL Server
-        // refuses more than 2,100 — so every other marker case in this file
-        // deletes inside a single chunk and the second one never runs. An early
-        // `break`, an off-by-one on the chunk boundary, or a `Take` where a
-        // `Skip` belonged would leave all of them green and surface first
-        // against a production backlog.
+        // defaults to 5,000 and the delete is chunked at 900 rows — each costs
+        // two parameters, its key and its version, against SQL Server's 2,100
+        // — so every other marker case in this file deletes inside a single
+        // chunk and the second one never runs. An early `break`, an off-by-one
+        // on the chunk boundary, or a `Take` where a `Skip` belonged would
+        // leave all of them green and surface first against a production
+        // backlog.
         //
-        // ONE MORE THAN THE CHUNK, because the boundary is the defect: exactly
-        // a thousand fits one chunk and proves nothing. The figure is coupled
-        // to `RetentionPurgeService.KeysPerDelete`, which is private because it
-        // is not a knob — so raising that constant above this number makes this
+        // MORE THAN ONE CHUNK, because the boundary is the defect: a batch
+        // inside one chunk proves nothing. The figure is coupled to
+        // `RetentionPurgeService.RowsPerDelete`, which is private because it is
+        // not a knob — so raising that constant to 1,001 or beyond makes this
         // test pass while covering nothing, and its comment there says to move
         // this one with it. That is a rule in two places, stated rather than
         // arrived at.

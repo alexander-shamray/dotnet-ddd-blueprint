@@ -37,13 +37,13 @@ namespace Common.Infrastructure.Messaging;
 /// compare a column against a cutoff and are done; the marker's compares a
 /// column against a cutoff to find <em>candidates</em>, asks
 /// <see cref="Common.Application.IIdempotencyStore"/> which of them it has
-/// already let go of, and then deletes under <em>two</em> predicates that
-/// cover each other — no row newer than the newest it selected, and none
-/// inside its own window. A key names a command rather than a row, so a retry
-/// can commit a fresh marker under one this pass already chose, and no single
-/// predicate excludes that in every direction the clock can move. Deleting on
-/// age alone put the claim's window and the
-/// marker's on two servers' clocks with nothing coupling their rates, so a
+/// already let go of, and then deletes each row by <em>identity</em> — its key
+/// and the <c>CommittedAt</c> the select returned. A key names a command
+/// rather than a row, so a retry can commit a fresh marker under one this pass
+/// already chose; three successive predicates were tried against that and each
+/// fell to a different clock movement, which is why the delete names the write
+/// instead of describing it. Deleting on age alone put the claim's window and
+/// the marker's on two servers' clocks with nothing coupling their rates, so a
 /// forward step of the database's deleted the row while the claim it backs up
 /// was still live
 /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>,
@@ -71,23 +71,25 @@ public sealed class RetentionPurgeService : BackgroundService
             new EventId(2, nameof(PurgeFailed)),
             "Retention purge failed; retrying next pass.");
 
-    // Keys per DELETE, and the number is SQL Server's rather than this
-    // platform's. Dapper expands `IN @Keys` into one parameter per element and
-    // the server refuses a statement carrying more than 2,100 of them, so a
-    // pass at the default BatchSize of 5,000 would fail on the batch rather
-    // than on the configuration. Chunking here keeps BatchSize meaning what it
-    // says — rows considered per batch — instead of quietly capping it at a
-    // limit belonging to a different layer.
+    // Rows per DELETE, and the number is SQL Server's rather than this
+    // platform's. Each row costs TWO parameters — its key and the version that
+    // identifies it — and the server refuses a statement carrying more than
+    // 2,100, so a pass at the default BatchSize of 5,000 would fail on the
+    // batch rather than on the configuration. Chunking here keeps BatchSize
+    // meaning what it says — rows considered per batch — instead of quietly
+    // capping it at a limit belonging to a different layer.
+    //
+    // 900 rather than 1,000 for that reason and no other: 1,800 parameters
+    // leaves room under the ceiling, where 2,000 does not leave much.
     //
     // Private because it is not a knob, and coupled to a test that says so.
-    // `A_batch_spanning_more_than_one_delete_chunk_is_deleted_whole` stages one
-    // more marker than this, in both service suites, and is the only case that
-    // reaches the second chunk at all. RAISING THIS NUMBER ABOVE 1,001 MAKES
-    // THAT TEST PASS WHILE COVERING NOTHING, so move it in the same change —
-    // a gate that silently stops covering its surface is this repository's
-    // most-repeated failure, and this comment is the half of the couple that
-    // lives here.
-    private const int KeysPerDelete = 1000;
+    // `A_batch_spanning_more_than_one_delete_chunk_is_deleted_whole` stages
+    // 1,001 markers, in both service suites, and is the only case that reaches
+    // the second chunk at all. RAISING THIS NUMBER ABOVE 1,001 MAKES THAT TEST
+    // PASS WHILE COVERING NOTHING, so move it in the same change — a gate that
+    // silently stops covering its surface is this repository's most-repeated
+    // failure, and this comment is the half of the couple that lives here.
+    private const int RowsPerDelete = 900;
 
     private readonly IServiceScopeFactory _scopes;
     private readonly IIdempotencyStore _claims;
@@ -100,7 +102,10 @@ public sealed class RetentionPurgeService : BackgroundService
     private readonly string _outboxSql;
     private readonly string _inboxSql;
     private readonly string _idempotencyCandidateSql;
-    private readonly string _idempotencyDeleteSql;
+
+    // Not a statement: the delete's is composed per chunk, because its VALUES
+    // list is as long as the chunk. This is the qualified table name it needs.
+    private readonly string _markerTable;
 
     public RetentionPurgeService(
         IServiceScopeFactory scopes,
@@ -202,36 +207,26 @@ public sealed class RetentionPurgeService : BackgroundService
         // and it goes anyway. An age against a moving clock is not an ABA
         // guard, and this pull request exists because that clock moves.
         //
-        // SO BOTH PREDICATES ARE HERE, and neither is redundant: each covers
-        // the other's blind spot, and a replacement escapes only if it escapes
-        // both.
+        // SO THE DELETE NAMES THE ROW IT SELECTED, and nothing weaker will do.
+        // Three predicates were tried before this one and each failed to a
+        // different clock movement, which is the argument for identity rather
+        // than a fourth: a key alone deletes a replacement outright; the age
+        // cutoff re-reads a clock that a FORWARD step has moved on; a bound on
+        // the newest selected CommittedAt is defeated by a BACKWARD step; and
+        // the two together fall to a backward step followed by a correction,
+        // because the replacement is then both below the bound and past a
+        // re-read cutoff. An arbitrary clock cannot be out-predicated.
         //
-        // @SelectedThrough is the newest CommittedAt the SELECT actually
-        // returned — captured from the rows in hand, so no later clock movement
-        // changes it. A replacement committed after this pass selected is
-        // stamped above it and is excluded, which is what covers a FORWARD
-        // step: the age cutoff would have re-read a clock that had moved on and
-        // let the row through.
+        // (Key, CommittedAt) is the row's identity here: the key names the
+        // command and the timestamp names the write. A replacement is a
+        // different write, so it carries a different version and this statement
+        // cannot reach it however the clock behaves — which is the property the
+        // single statement had for free and the split had to buy back.
         //
-        // The age cutoff covers the other direction, and the reason is that a
-        // row cannot be older than the window at the instant the same clock
-        // stamps it. After a BACKWARD step the replacement's CommittedAt can
-        // fall at or below @SelectedThrough — the bound alone would admit it —
-        // but the cutoff moves back with the clock that stamped it, so the row
-        // is never past its own window and survives. Under no step at all the
-        // cutoff excludes it for the same reason.
-        //
-        // What that leaves is nothing this repository can name: a replacement
-        // reaches this statement only by being both newer than every row the
-        // SELECT returned and older than a window measured on the clock that
-        // stamped it, and those cannot hold together for one row.
-        _idempotencyDeleteSql =
-            $"""
-            DELETE FROM {markers.QualifiedName}
-            WHERE [Key] IN @Keys
-                AND CommittedAt <= @SelectedThrough
-                AND CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
-            """;
+        // Composed per chunk because the VALUES list is as long as the chunk.
+        // The only interpolation is the table name, whose shape
+        // IdempotencyMarkerTable checks, and the row count — never a value.
+        _markerTable = markers.QualifiedName;
     }
 
     // stoppingToken, not ct: CA1725 requires an override to keep the base's
@@ -363,8 +358,15 @@ public sealed class RetentionPurgeService : BackgroundService
             // is the failure this call exists to remove.
             IReadOnlyCollection<string> unheld = await _claims.UnheldAsync(keys, ct);
 
-            int deleted =
-                await DeleteKeysAsync(connection, unheld, selectedThrough, windowSeconds, ct);
+            // Back to the rows, because the delete names a version and not just
+            // a key. A HashSet rather than a scan per candidate: the batch is
+            // five thousand by default.
+            HashSet<string> gone = [.. unheld];
+
+            int deleted = await DeleteRowsAsync(
+                connection,
+                [.. candidates.Where(candidate => gone.Contains(candidate.Key))],
+                ct);
             total += deleted;
 
             // Two ways to stop, and the second is PROGRESS rather than
@@ -396,41 +398,64 @@ public sealed class RetentionPurgeService : BackgroundService
     }
 
     /// <summary>
-    /// Deletes the given keys that are still past their window, chunked to stay
-    /// inside SQL Server's parameter limit. Returns the rows actually removed.
+    /// Deletes exactly the rows given — each matched on key <em>and</em>
+    /// version — chunked to stay inside SQL Server's parameter limit. Returns
+    /// the rows actually removed.
     /// </summary>
     /// <remarks>
-    /// <b>Two predicates bound it and each covers the other's blind spot.</b>
-    /// A key names a command and not a row, so a retry can commit a fresh
-    /// marker under a key this pass has already selected — and neither a
-    /// key-only delete, nor the selection's own timestamp bound, nor a re-read
-    /// age cutoff excludes it alone. See the statement's own comment; this is
-    /// why the count returned can be lower than the number of keys handed in.
+    /// <b>Identity rather than a predicate, because an arbitrary clock cannot
+    /// be out-predicated.</b> A key names a command and not a row, so a retry
+    /// can commit a fresh marker under a key this pass has already selected;
+    /// the statement's own comment records the three predicates that were tried
+    /// and which clock movement defeated each. A count lower than the number of
+    /// rows handed in means another replica got there first, which is ordinary.
     /// </remarks>
-    private async Task<int> DeleteKeysAsync(
+    private async Task<int> DeleteRowsAsync(
         IDbConnection connection,
-        IReadOnlyCollection<string> keys,
-        DateTimeOffset selectedThrough,
-        int windowSeconds,
+        IReadOnlyCollection<MarkerCandidate> rows,
         CancellationToken ct)
     {
         int deleted = 0;
 
-        foreach (string[] chunk in keys.Chunk(KeysPerDelete))
+        foreach (MarkerCandidate[] chunk in rows.Chunk(RowsPerDelete))
         {
+            DynamicParameters parameters = new();
+
+            for (int index = 0; index < chunk.Length; index++)
+            {
+                parameters.Add($"k{index}", chunk[index].Key, DbType.String);
+                parameters.Add($"v{index}", chunk[index].CommittedAt, DbType.DateTimeOffset);
+            }
+
             deleted += await connection.ExecuteAsync(
-                new CommandDefinition(
-                    _idempotencyDeleteSql,
-                    new
-                    {
-                        Keys = chunk,
-                        SelectedThrough = selectedThrough,
-                        WindowSeconds = windowSeconds,
-                    },
-                    cancellationToken: ct));
+                new CommandDefinition(DeleteSql(chunk.Length), parameters, cancellationToken: ct));
         }
 
         return deleted;
+    }
+
+    /// <summary>
+    /// The delete for a chunk of <paramref name="rows"/> rows, joining the
+    /// table to the (key, version) pairs the pass selected.
+    /// </summary>
+    /// <remarks>
+    /// <b>The row count is the only thing that varies, and it is an int.</b>
+    /// Every value travels as a parameter; the table name is
+    /// <c>IdempotencyMarkerTable</c>'s, shape-checked where it is composed.
+    /// </remarks>
+    private string DeleteSql(int rows)
+    {
+        string pairs = string.Join(
+            ", ",
+            Enumerable.Range(0, rows).Select(index => $"(@k{index}, @v{index})"));
+
+        return $"""
+            DELETE marker
+            FROM {_markerTable} marker
+            INNER JOIN (VALUES {pairs}) AS selected([Key], CommittedAt)
+                ON marker.[Key] = selected.[Key]
+                AND marker.CommittedAt = selected.CommittedAt;
+            """;
     }
 
     /// <summary>

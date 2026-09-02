@@ -2686,20 +2686,31 @@ This decision keeps the TTL and moves the question instead.
   moving clock cannot guard an ABA**, and this record exists because that clock
   moves; a fix that assumes it does not is this decision arguing against
   itself.
-- **The version bound alone is not enough either, and the `DELETE` therefore
-  carries two predicates.** `CommittedAt <= @SelectedThrough` — the newest
-  timestamp the `SELECT` returned, captured from the rows in hand — is immune
-  to a *forward* step, which is what defeats the age cutoff. A *backward* step
-  is the mirror: it can stamp a replacement at or below that bound, and there
-  the age cutoff is what saves the row, because it moves back with the same
-  clock and a row is never past its own window at the instant that clock stamps
-  it. **Neither predicate is redundant and neither is sufficient**, which is
-  the shape worth carrying away: a replacement would have to be both newer than
-  every row the selection returned and older than a window measured on the
-  clock that stamped it, and no single row can be both. The defect and two
-  successive wrong fixes were all found by review rather than by a test — the
-  interleaving needs three purgers, a retry and a clock step, and nothing here
-  stages one.
+- **No predicate closes it, and the third failure is what settled the shape.**
+  A bound on the newest selected `CommittedAt` survives a *forward* step, which
+  defeats the age cutoff; a *backward* step defeats the bound; and the two
+  together fall to a backward step followed by a correction, which leaves the
+  replacement both below the bound and past a re-read cutoff. **An arbitrary
+  clock cannot be out-predicated**, and a fourth attempt would have been the
+  guess this appendix spends ADR-037 and ADR-038 refusing.
+- **So the `DELETE` names the row rather than describing it.** It joins the
+  `(Key, CommittedAt)` pairs the `SELECT` returned: the key names the command
+  and the timestamp names the write, so a replacement — a different write —
+  cannot be matched however the clock behaves. That is the property the single
+  statement had for free, and buying it back is what the split owed. Rows are
+  chunked at 900 rather than 1,000 because each now costs two parameters
+  against SQL Server's 2,100.
+- **A `rowversion` column would say the same thing in a byte or two, and was
+  not taken.** It is a column, a migration for each service, a change to
+  §4.5's scaffold and an Appendix D row, to identify a row that
+  `(Key, CommittedAt)` already identifies — the key is the primary key and the
+  timestamp is written once by a column default. Should a marker ever become
+  updatable, that reasoning fails and the column is the answer.
+- **The defect and three successive wrong fixes were all found by review rather
+  than by a test.** The interleaving needs several purgers, a retry and one or
+  two clock steps, and nothing here stages one; what the suite does hold is
+  that the identity join still deletes, which is the failure a join can have
+  that a predicate cannot.
 - **The candidates are ordered oldest first, and the pass stops when it stops
   making progress.** A batch that deletes nothing has every row still held, and
   the next `SELECT` would return those same rows — nothing about them has
@@ -2723,11 +2734,12 @@ This decision keeps the TTL and moves the question instead.
   survives* ends where the claim does. That is a real reduction in the promise
   and not a correctness hole, which is exactly the distinction the floor could
   not draw before.
-- **Deleting by key rather than by predicate meets a limit belonging to
-  another layer.** Dapper expands `IN @Keys` into one parameter per element and
-  SQL Server refuses more than 2,100 of them, where the default `BatchSize` is
-  5,000. The delete is chunked at a thousand keys so `BatchSize` keeps meaning
-  rows considered per batch rather than being quietly capped.
+- **Deleting by row rather than by predicate meets a limit belonging to
+  another layer.** Each row costs two parameters — its key and its version —
+  and SQL Server refuses a statement carrying more than 2,100, where the
+  default `BatchSize` is 5,000. The delete is chunked at 900 rows so
+  `BatchSize` keeps meaning rows considered per batch rather than being quietly
+  capped.
 - **What this does not close is the claim expiring under a running handler.**
   Past `Window` a successor may claim the key and both attempts run, and what
   keeps the loser from corrupting the winner's entry is still the claim token

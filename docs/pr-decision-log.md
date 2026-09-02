@@ -239,16 +239,24 @@ constant without saying which would read as the reverse.
   the stale delete takes it regardless. **An age against a moving clock cannot
   guard an ABA**, in a pull request whose entire subject is that the clock
   moves: the fix assumed away the fault the change exists to survive. The
-  delete bounds on `@SelectedThrough` — the newest `CommittedAt` the `SELECT`
-  returned, captured from the rows in hand — **and keeps the age cutoff beside
-  it**, because neither is sufficient alone. A forward step defeats the cutoff
-  and cannot touch the bound; a backward step can stamp a replacement at or
-  below the bound and is caught by the cutoff, which moves back with the same
-  clock. A row cannot be older than the window at the instant that clock stamps
-  it, so the pair leaves a replacement no way through. It took two review rounds
-  after the first fix to arrive there, and a `rowversion` was considered and
-  declined: a column, a migration per service, a scaffold change and an
-  Appendix D row to close what the pair closes.
+  delete **names the row rather than describing it**, and it took three failed
+  predicates to get there. A bound on the newest selected `CommittedAt`
+  survives a forward step and falls to a backward one; the age cutoff is the
+  mirror; and the two together fall to a backward step followed by a
+  correction, which puts the replacement below the bound and past a re-read
+  cutoff at once. **An arbitrary clock cannot be out-predicated**, and a fourth
+  attempt would have been the guess ADR-037 and ADR-038 exist to refuse. The
+  statement now joins the `(Key, CommittedAt)` pairs the `SELECT` returned: the
+  key names the command, the timestamp names the write, and a replacement is a
+  different write.
+- **Three rounds spent on one defect is the entry's own lesson.** Each fix was
+  a smaller predicate over the same moving quantity, and each review found the
+  movement it did not cover. The shape that ended it was giving up on
+  describing the row and identifying it — which is what the atomic statement
+  had been doing implicitly all along. **A `rowversion` says the same thing and
+  was declined**: a column, a migration per service, a scaffold change and an
+  Appendix D row, to identify a row that its primary key and a
+  write-once timestamp already identify.
 - **Two review rounds were needed to reach that**, and neither the defect nor
   the wrong fix could have been caught by the suite: the interleaving needs
   three purgers, a retry and a clock step, and nothing here stages one. What
