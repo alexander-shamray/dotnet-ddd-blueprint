@@ -58,6 +58,8 @@ bash deploy/helm/smoke.sh                       # needs helm 3, no Docker, no SD
 py -3.12 deploy/observability/check.py          # no helm, no Docker, no SDK
 py -3.12 -m unittest discover -s deploy/compose/rabbitmq   # then check_permissions.py
 py -3.12 deploy/compose/rabbitmq/check_permissions.py   # ADR-036's broker ACL
+py -3.12 -m unittest discover -s deploy/keycloak   # then realm_check.py
+py -3.12 deploy/keycloak/realm_check.py check --kind local   # §11's obligations
 
 (cd .github/licence-gate && py -3.12 -m unittest)        # §4.4's register gate
 (cd .github/secret-scan && py -3.12 -m unittest)         # §15.1's secret scan
@@ -88,10 +90,24 @@ PR-25's three cover the pipeline's own inventories, the coverage merge, and
 §15.5's rollout arithmetic; the closure gate compares what a pull request
 says it closes against what GitHub will actually close; the secret scan reads
 the working tree for credential shapes and holds every accepted one as a
-fingerprinted line with a reason; and the last covers the review loop's own
+fingerprinted line with a reason; ADR-036's broker ACL derives what each
+service may touch from that service's own source and holds §14.1's
+`definitions.json` to it; the realm gate asserts §11's token obligations —
+§11.3's access-token lifetime, ADR-034's absent refresh token, §11.2's
+password grant — against a Keycloak realm representation, and reads no realm
+of its own here beyond §14.1's realm export, because the half that judges a
+deployed realm runs from `deploy.yml`'s rollout job, where a credential
+exists; and the last covers the review loop's own
 helpers under `.claude/scripts/`. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
+
+**ADR-036's broker ACL was missing from that list until this change**, and
+`CLAUDE.md`'s enumeration already carried it — which is what made the gap here
+visible at all, since the paragraph above the block tells a reader to compare
+the two. A prose list of what each suite covers is a second enumeration of
+the block above it, so it goes stale on the block's clock and nothing
+structural reads either.
 
 **The review helpers' suite needs `bash`, `grep`, `git` and `jq`, and no
 network** — the `gh` its
@@ -164,17 +180,20 @@ gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid
 ```
 
 Each has its own reference for what it asserts and — more usefully — what it
-does not: `deploy/helm/README.md`, since that gate reaches no cluster, and
+does not: `deploy/helm/README.md`, since that gate reaches no cluster;
 `deploy/observability/README.md`, since that one reaches no Prometheus and does
-not validate rule syntax.
+not validate rule syntax; and `deploy/keycloak/README.md`, since that one
+reaches a live realm from `deploy.yml` and a file from CI, and the difference
+between those two subjects is the whole of what it is for.
 
 **Running a gate is the other half, and the block above carries some of those
 runs but not all of them.** Each gate is tested and then run — the pattern
 every gate here follows, across `ci.yml` and the path-filtered workflows
 beside it — so a green suite says the gate works and not that this checkout
 passes it. The block above already runs the observability gate, the broker ACL,
-the secret scan and the chart gate; these are the gate invocations it does
-**not** carry, and all four need no daemon, no SDK and no network:
+the realm gate, the secret scan and the chart gate; these are the gate
+invocations it does **not** carry, and all four need no daemon, no SDK and no
+network:
 
 ```bash
 (cd .github/licence-gate && py -3.12 licence_gate.py)    # from its own directory

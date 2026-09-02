@@ -73,10 +73,12 @@ Validation is cheap; assume the network is hostile.
 > records the removal, and `web-app`'s `use.refresh.tokens: "false"` is what
 > enforces it — pinned by `RealmImportTests`, because a realm attribute is
 > exactly the kind of setting that gets changed back by someone debugging a
-> logout. **In the local realm**: the charts point at an externally
-> provisioned authority, so a deployed realm owes the same attribute and
-> nothing here checks that it has it. ADR-034 states the obligation and its
-> limit.
+> logout. **In the local realm, and since
+> [ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+> in a deployed one too**: the charts point at an externally provisioned
+> authority, which a deployed realm still owes the same attribute — and the
+> rollout now reads that realm and refuses to roll onto one that does not have
+> it. ADR-034 states the obligation; ADR-042 is where it is checked.
 >
 > **The access-token lifetime beside it is in the same position, and what
 > changed is only what an unchecked realm costs.** Since
@@ -86,9 +88,16 @@ Validation is cheap; assume the network is hostile.
 > since a long-lived token is admitted once it approaches expiry. **A refresh
 > token affords not even that**: it passes between the browser and Keycloak and
 > never reaches a service, so there is nothing at a host to observe it with.
-> Both settings remain obligations on whoever provisions the deployed realm, and
-> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
-> stays open for both.
+> **Neither is observed at a host and both are now observed in the realm**, and
+> the distinction is worth keeping: ADR-040 bounds what a token can cost, and
+> [ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+> reads the configuration that issued it. Both settings remain obligations on
+> whoever provisions the deployed realm — a repository cannot make somebody
+> else's realm correct — but a realm that fails to hold them now fails the
+> rollout instead of passing unnoticed
+> ([#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)).
+> What is left is the window between rollouts
+> ([#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)).
 >
 > **Continuity is a silent renewal against the authorization endpoint**, bounded
 > by the SSO session, so the user sees a login when that session has ended
@@ -116,25 +125,35 @@ Validation is cheap; assume the network is hostile.
 > username and password could mint tokens directly, bypassing PKCE and the
 > browser flow entirely.
 >
-> **A deployed realm must turn it off, and nothing here establishes that one
-> has.** That is a requirement rather than a description — this repository
-> owns the Compose realm and no other, so the sentence above states an
-> obligation on whoever provisions the deployed one, exactly as the
-> refresh-token attribute does. **The lifetime is the third item on that list
-> and stays on it**:
+> **A deployed realm must turn it off, and since
+> [ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+> a rollout establishes that one has.** It is still a requirement rather than a
+> description — this repository owns the Compose realm and no other — but the
+> obligation is now read at the moment it matters, and a deployed realm that
+> keeps the password grant fails the deploy.
+>
+> **This flag is the one the two realms disagree about, and the disagreement is
+> the shape of the check.** `RealmImportTests` asserts it *on*, because §14.1's
+> documented login is a password grant and a local realm without it makes the
+> README's `curl` a lie; the deploy-time check asserts it *off*. Both are right
+> about their own realm, which is why `realm_check.py` takes the realm's kind as
+> an argument with **no default** — a check that guessed would pass a production
+> realm on the local realm's terms, which is this failure wearing the costume of
+> its own fix.
+>
+> **The three settings are checked in the realm because none of them is visible
+> at a host, and that has not changed.** `standardFlowEnabled` and
+> `directAccessGrantsEnabled` decide how a token is *obtained*, and a token that
+> arrives at a service does not say which grant minted it; a refresh token
+> never arrives at all. What
 > [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
-> holds every inbound token to the bound at every host, which bounds what an
-> unchecked realm can cost rather than checking it — a long-lived token is
-> admitted in its final window, so the realm's answer to that question is still
-> nobody's to read here. A flow
-> flag affords nothing of the kind: `standardFlowEnabled` and
-> `directAccessGrantsEnabled` decide how a token is *obtained*, and a token
-> that arrives at a service does not say which grant minted it. So
+> reaches is the lifetime alone, and only as a ceiling on remaining life. So the
+> configuration is where all three are legible, and reading it is what closed
 > [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
-> stays open for these flags and for the refresh-token attribute rather than
-> closed by a change that covers only the lifetime; writing any of them as a
-> fact would have been the third security property in this chapter to read as
-> enforced while being true only locally.
+> rather than a change covering only the lifetime. **What is still true only
+> locally is the moment**: a realm is read when a deployment reads it, so an
+> edit made between rollouts is unobserved until the next one
+> ([#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)).
 
 ## 11.3 Service configuration
 
@@ -211,11 +230,15 @@ public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplication
             // one into the other.
             options.MapInboundClaims = true;
 
-            // ADR-033's bound, enforced rather than stated (#157, ADR-040). A
-            // token is where the realm's answer is observable without admin
-            // credentials this repository does not hold: whatever the realm was
-            // configured to do, a token reaching a host carries how long it has
-            // left. REMAINING life against this host's clock, not `exp - iat` —
+            // ADR-033's bound, enforced rather than stated (ADR-040). A
+            // token is where the realm's answer is observable WITHOUT A
+            // CREDENTIAL AT A HOST: whatever the realm was configured to do, a
+            // token reaching a host carries how long it has left. Since
+            // ADR-042 the realm is also asked directly, by a deploy-time gate
+            // with a credential — a different question at a different moment,
+            // and this one is what holds continuously, including against a
+            // realm edited since the last rollout (#176).
+            // REMAINING life against this host's clock, not `exp - iat` —
             // `iat` is optional in RFC 7519, so an issuer omitting it would
             // switch the control off by omission. Refused rather than logged,
             // for the reason RequireHttpsMetadata above is.
@@ -387,24 +410,42 @@ listing of a token denylist among Redis's contents.
 > still names them: a 401 on every request is a worse way to discover a
 > checkbox than a red test is.
 >
-> **Every one of those checks reads the local realm, and none reads a deployed
-> one.** `RealmImportTests` parses [§14.1](14-local-development.md)'s
-> `realm-export.json`; the charts point at an externally provisioned authority
-> this repository holds no configuration for. That is still true of the suite
-> and it stopped settling the question, which is the correction
+> **Every one of those checks reads the local realm, and one other check reads
+> a deployed one at a rollout — which no deployment of this platform has yet
+> reached.** That qualification belongs here rather than in a footnote, because
+> the rest of this callout is about the difference between a control that holds
+> and a control that is written down. `RealmImportTests` parses
+> [§14.1](14-local-development.md)'s `realm-export.json`; the charts point at an
+> externally provisioned authority this repository still holds no configuration
+> for. That is unchanged, and it stopped settling the question twice over —
+> first by the correction
 > [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
-> makes to the sentence that used to follow it.
+> makes to the sentence that used to follow it, and then by
+> [ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time),
+> which answers it.
 >
 > **That sentence said the number above is *verified* only where the platform
-> provisions its own identity provider, which is locally, and it is still
-> true.** No check in this repository reads a deployed realm: a pipeline check
-> needs admin credentials CI does not hold, a startup assertion reads a
-> discovery document that publishes no token lifetime at all, and committing a
-> production realm makes somebody's operational input into this repository's
-> artefact. What ADR-040 adds is not verification but **containment** — every
-> service already validates a token on every request, and a token carries how
-> long it has left whatever the realm was configured to do, so no host will
-> accept one with more than the bound remaining.
+> provisions its own identity provider, which is locally.** It is no longer
+> true, and the reason it stopped being true is worth reading precisely,
+> because two of the three refusals behind it still stand. A startup assertion
+> reads a discovery document that publishes no token lifetime at all, and
+> committing a production realm makes somebody's operational input into this
+> repository's artefact — both still refused. The third was that a pipeline
+> check "needs admin credentials CI does not hold", and CI holds none to this
+> day: the check ADR-042 runs is not in CI but in `deploy.yml`'s rollout job,
+> under the `production` GitHub Environment, which is the mechanism §15.4
+> already relies on to scope a deployment's secrets. **Where a check sits
+> decides what it may hold**, and that was the whole of the obstacle.
+>
+> **What ADR-040 adds is still containment rather than verification, and it is
+> still load-bearing.** Every service validates a token on every request, and a
+> token carries how long it has left whatever the realm was configured to do,
+> so no host accepts one with more than the bound remaining. That holds
+> continuously, where the realm check holds at a rollout — so the two cover
+> different moments rather than one superseding the other, and the gap between
+> rollouts is what
+> [#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)
+> carries.
 >
 > **Containment is weaker than verification and the difference is worth being
 > exact about, because a first draft of this callout was not.** The control
@@ -413,25 +454,32 @@ listing of a token denylist among Redis's contents.
 > admitted for the last 330 seconds. That is a large reduction in what a stolen
 > token is worth and it is **not** the deploy-time check
 > [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
-> asks for, so the issue stays open. A realm edited to 400 fails
-> `RealmImportTests` — which reads the constant the control is built from — and
-> would still serve requests in each token's final window.
+> asked for; that check is ADR-042's, and this paragraph is why one was owed. A
+> realm edited to 400 fails `RealmImportTests` — which reads the constant the
+> control is built from — and, if it were the realm a rollout pointed at, fails
+> the rollout as well; without either it would still serve requests in each
+> token's final window.
 >
-> **The refresh-token attribute and the flow flags stay where this callout put
-> them, and the asymmetry is a property of what a host can see.**
-> `use.refresh.tokens`, `standardFlowEnabled` and `directAccessGrantsEnabled`
-> decide what Keycloak issues and to whom; a refresh token never reaches a
-> service, and the grant that minted a token that does reach one leaves no
-> trace in it. So a deployed realm still owes those settings, and
+> **The refresh-token attribute and the flow flags are invisible at a host and
+> legible in the realm, and that asymmetry is why the check reads a realm at
+> all.** `use.refresh.tokens`, `standardFlowEnabled` and
+> `directAccessGrantsEnabled` decide what Keycloak issues and to whom; a
+> refresh token never reaches a service, and the grant that minted a token that
+> does reach one leaves no trace in it. No runtime control can observe any of
+> the three, which is what
 > [ADR-034](appendix-a-adrs.md#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)
-> records that obligation as one this repository states and cannot check — the
-> division §15.4 already draws for every Secret, which
+> records — and reading the configuration is the one place all three are
+> visible, so ADR-042 checks them beside the lifetime rather than instead of it.
+>
+> **A deployed realm still *owes* those settings, and being checked is not the
+> same as being owned.** The division §15.4 draws for every Secret is
+> undiminished: the charts create no Secrets and provision no realm, so the
+> identity provider remains somebody's operational input. What changed is that
+> the input is now inspected before it is deployed onto, which is a smaller
+> claim than owning it and a bigger one than stating it —
 > [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
-> records for the lifetime as well. ADR-040 does not discharge that half — it
-> gates *remaining* life rather than the *issued* lifetime, so it contains what
-> an unchecked realm costs without reading one — and
-> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
-> stays open in full.
+> ran the two together in one clause and only the observation half has been
+> paid.
 
 **The authority is read eagerly and the throw names the key**, which is the
 posture `AddSqlServer` and `AddMassTransitMessaging` already take: a host that

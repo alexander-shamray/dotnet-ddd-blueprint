@@ -124,12 +124,16 @@ public class JwtAuthenticationTests
     [Fact]
     public async Task A_token_with_more_life_left_than_the_bound_is_refused()
     {
-        // #157's control. §11.3's 300 seconds is a realm setting, and every
-        // chart points at a realm this repository holds no configuration for —
-        // so before this the platform could be handed five-hour access tokens
-        // with every test green and ADR-033's bound untrue in the only place
-        // it mattered. A token is where the realm's answer is observable
-        // without credentials, and this is what reads it.
+        // ADR-040's control. §11.3's 300 seconds is a realm setting, and
+        // every chart points at a realm this repository holds no configuration
+        // for — so before this the platform could be handed five-hour access
+        // tokens with every test green and ADR-033's bound untrue in the only
+        // place it mattered. A token is where the realm's answer is observable
+        // WITHOUT A CREDENTIAL AT A HOST, and this is what reads it.
+        //
+        // ADR-042 asks the realm itself, at a rollout, and does not replace
+        // this: a realm edited since the last rollout is unread (#176), and
+        // this control still holds every token it issues to the bound.
         TokenValidatedContext context = Validated(
             AuthenticationExtensions.RevocationBound + TimeSpan.FromSeconds(30));
 
