@@ -1984,6 +1984,27 @@ the two with no Redis today, and a fan-out rule across per-service keyspaces.
 > `ClockSkew` sentence stands exactly as written**, and is worth keeping where
 > an operator reaching for a realm setting will read it.
 
+> **The realm half of this callout is now *observed* — by
+> [ADR-042](#adr-042--the-deployed-realm-is-checked-at-deploy-time) — and
+> nothing here has been edited.** Observed and not owned, which is why the
+> amendment above can go on saying the realm half is stated rather than closed
+> and the bound half-guaranteed: both remain true of what this repository
+> *provisions*. The decision this record took — a bounded
+> revocation window of 330 seconds, no denylist and no introspection call — is
+> untouched and still binding, and so is the arithmetic and the `ClockSkew`
+> sentence the amendment above already declined to move.
+>
+> **What moved is the sentence saying nothing here reads a deployed realm.**
+> `deploy/keycloak/realm_check.py` reads one, from `deploy.yml`'s rollout job,
+> before the first step that touches a cluster — so a realm issuing five-hour
+> access tokens now fails the deploy rather than being deployed onto. The two
+> sentences this record is careful about stay careful: only one of the two
+> settings in the bound is the realm's, and the realm this repository *owns* is
+> still the Compose one. What has changed is not ownership but observation, and
+> those were being run together — "holds no configuration for" and "runs no
+> deploy-time check against" were one clause here, and only the second half of
+> it has been paid.
+
 ## ADR-034 — The browser holds an access token and no refresh token
 
 **Decision.** [§11.2](11-identity-authorization.md)'s browser client obtains a
@@ -2049,6 +2070,33 @@ than leaving to a realm-file description.
 > stays open for this half. A reader who has just seen ADR-033's amendment
 > should not carry it across to this record, which is why the two notes are
 > written the opposite way round.
+
+> **The obligation this record states is checked at deploy time by
+> [ADR-042](#adr-042--the-deployed-realm-is-checked-at-deploy-time), and what
+> that supersedes is the *first* callout above rather than the ADR-040 note
+> beside it.** The first callout ends "enforcing it where the realm is actually
+> provisioned is an operational obligation this repository states and cannot
+> check", and the last four words are the ones that moved: `deploy.yml`'s
+> rollout job reads `use.refresh.tokens` off the realm it is about to roll onto
+> and refuses a realm that does not carry it. Everything before those four
+> words stands — this repository still provisions no realm and owns only the
+> Compose one.
+>
+> **The ADR-040 note is untouched, and its argument is still exactly right.** A
+> refresh token never reaches a service, so no runtime control can observe one
+> and ADR-040 does not discharge this record's gap. ADR-042 does not observe
+> one either — it reads the realm's configuration rather than a token, which is
+> the one place `use.refresh.tokens`, `standardFlowEnabled` and
+> `directAccessGrantsEnabled` are visible at all.
+>
+> **So the two notes stay written the opposite way round, and now for a second
+> reason.** A reader who has seen ADR-033's amendment should still not carry it
+> across; what they may carry across is the *later* record, which reaches this
+> obligation and ADR-033's alike because both are settings in one document.
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> closes for this half as well, and what is left is narrower and filed:
+> a realm edited between rollouts is unobserved until the next one
+> ([#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)).
 
 ## ADR-035 — An integration event carries identifiers, not personal data
 
@@ -2938,6 +2986,39 @@ paragraph above declines for a reason that has not changed.
   the last 330 seconds of each — which is one misconfiguration caught twice,
   and neither catch is the deploy-time check #157 asks for.
 
+> **The deploy-time check this record's last consequence names as absent now
+> exists — [ADR-042](#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+> — and nothing here has been edited.** The decision this record took is
+> untouched and still binding: every host still refuses a token carrying more
+> than the revocation bound of remaining life, the 360 is still the longest
+> window the guard admits, and the reasons for declining `exp - iat` have not
+> changed.
+>
+> **Two clauses of this record are named here, because a callout that moves a
+> record without saying which sentence it moved is the TODO nothing
+> re-checks.** The Decision says "**#157 stays open in full**" and the *Why*
+> says the deployed authority is one this repository "runs no deploy-time check
+> against". The first is closed and the second is false: the check exists and
+> runs in `deploy.yml`'s rollout job. What is still true in both sentences is
+> the obligation itself — a deployed realm owes `accessTokenLifespan` 300 and
+> no client-level override, whoever provisions it.
+>
+> **What moved in the *Why* is one of its three refusals.** This record set
+> aside a pipeline check because it "needs admin credentials in CI", and that
+> was true of CI and is still true of CI. The check ADR-042 runs is not in CI:
+> it is in the rollout job, under the `production` GitHub Environment, which is
+> the mechanism [§15.4](15-cicd-deployment.md) already relies on to scope a
+> deployment's secrets. The other two refusals stand as written — a discovery
+> document publishes no token lifetime, and committing a production realm makes
+> somebody's operational input into this repository's artefact.
+>
+> **The consequence saying neither obligation is discharged is superseded, and
+> the containment argument in it is not.** A five-hour token is still admitted
+> in its final window and a refresh token is still invisible to every host, so
+> what this record buys is unchanged and still worth having — it is what bounds
+> a realm nobody has read yet, including one read at the last rollout and
+> edited since. What is no longer true is that nothing reads a deployed realm.
+
 ## ADR-041 — The marker's delete identifies a row by a rowversion, not a timestamp
 
 **Decision.** `IdempotencyMarkers` gains a `rowversion` column, and
@@ -3024,6 +3105,132 @@ standing in for one.
   besides this — the claim expiring under a running handler
   ([#127](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/127))
   — and it is §8.5's, unchanged, and still the only one.
+
+## ADR-042 — The deployed realm is checked at deploy time
+
+**Decision.** `deploy/keycloak/realm_check.py` asserts §11's token obligations
+against a Keycloak **realm representation**, and two things run it. `realm.yml`
+runs it over `deploy/compose/keycloak/realm-export.json` on every change to
+that file, to `AuthenticationExtensions` or to the gate itself; `deploy.yml`'s
+rollout job runs it over the realm a deployment actually points at, fetched
+through the admin API by `read_admin.py`, **before the first step that touches
+the cluster**. A realm that disagrees fails the rollout rather than being rolled
+onto. What is asserted is the table
+[#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+drew: `accessTokenLifespan` equal to the `AccessTokenLifetime`
+[ADR-040](#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+made `Common.Web`'s one declaration of 300, no client-level
+`access.token.lifespan` override, no client enabling the implicit flow,
+`use.refresh.tokens` `"false"` on `web-app` with `standardFlowEnabled` `true`
+beside it, and `directAccessGrantsEnabled` **off in a deployed realm and on in
+the local one**. `ClockSkew` is not among them and cannot be: it is
+`Common.Web`'s, pinned by `JwtAuthenticationTests`, and an operator told to
+configure a realm `ClockSkew` would be looking for something that does not
+exist.
+
+**Why.** [ADR-033](#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+and [ADR-034](#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)
+state platform-wide security guarantees whose settings live in a realm, and
+until this record the only realm anything read was §14.1's Compose export. Every
+chart points at `https://id.example.com/realms/commerce`, so both guarantees
+were verified in one realm and *stated* for the one that matters. ADR-040
+narrowed what that could cost — a token carrying more than the revocation bound
+of remaining life is refused at every host — and said in its own consequences
+that the obligations were contained rather than checked.
+
+**ADR-040 declined a pipeline check because one "needs admin credentials in
+CI", and that objection is answered by *where* this sits rather than by having
+found credentials.** CI holds none and still holds none: the job that reads a
+live realm is the rollout job, under the `production` GitHub Environment, which
+is the mechanism §15.4 already relies on to scope a deployment's secrets. The
+credential is a service account **of the realm being checked**, with realm-read
+rights and nothing else — a cross-realm admin account would hold rights over
+realms this check has no business reading — and `docs/secrets.md` carries its
+provisioning and rotation. The other two shapes are still refused for the
+reasons ADR-040 gave: a discovery document publishes no token lifetime at all,
+and committing a production realm makes somebody's operational input into this
+repository's artefact.
+
+**One predicate, two subjects, and the second one is what makes the first
+trustworthy.** A realm export and the admin API's `RealmRepresentation` are the
+same document — the export is that representation serialised, and the client
+list a full export carries under `clients` is what
+`GET /admin/realms/{realm}/clients` answers — so one piece of code judges both.
+That is not a convenience. A deploy-time check nothing has ever executed is a
+check nobody has established is looking at anything, and this platform has no
+cluster to execute it against; running the deciding half against the local realm
+on every change is what keeps the instrument honest in the meantime, and the
+network half is on the other side of a file boundary so the deciding half has a
+suite at all — `deploy/canary`'s split, adopted rather than re-invented.
+
+**One obligation inverts between the two realms, and it is why the kind is an
+argument with no default.** §11.2 documents `directAccessGrantsEnabled` as a
+local affordance — the password grant a developer obtains a token with — and
+says a deployed realm turns it off. So `RealmImportTests` asserts that flag
+**true** and this gate asserts it **false** for a deployed realm, and the two
+are only coherent if which realm is being judged is named rather than inferred.
+A check that guessed would pass a production realm on the local realm's terms,
+which is the failure it exists to prevent wearing the costume of the fix.
+
+**The 300 is read out of `AuthenticationExtensions` rather than written into the
+gate.** ADR-040 made that declaration the one place the number lives and argued
+that a composition nothing pins can be recomposed wrongly and still look
+composed; a literal in a Python file would be the same defect in a second
+language. The gate stops rather than defaulting when it cannot find the
+declaration — substituting 300 for a number it failed to read would make the
+read decorative, which is the shape ADR-033 was written to withdraw.
+
+**Consequences.**
+
+- **#157 closes, and what closes it is the rollout step and not the CI one.**
+  The issue's complaint is precise: this repository "holds no configuration for
+  that realm and runs no deploy-time check against it". It now runs one, and
+  the check is the same code that has been observed red — against a lifespan of
+  18000, an issued refresh token, and the local realm judged as a deployed one.
+  Every row of the issue's table is asserted except `ClockSkew`, which the issue
+  itself excludes.
+- **A rollout is the only moment a deployed realm is read, and a realm edited
+  between rollouts is unobserved until the next one.** That is a narrower gap
+  than the one this record closes and it is a real one:
+  [#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)
+  carries it, because an accepted gap here gets an issue rather than a
+  paragraph. Closing it means a scheduled run against an environment, which is
+  a decision about operating this platform rather than about building it.
+- **The deploy path has never reached a cluster, and this step inherits that
+  exactly.** `deploy.yml` says so in its own header — there is no dev, staging
+  or production environment, no kubeconfig and no registry — so what has been
+  executed is the local half. Writing the step anyway is the same decision that
+  workflow already took for the whole rollout, and it is **not** the fiction its
+  header refuses: that header declines to write a cluster login for a provider
+  nobody has chosen, where Keycloak is chosen in §11.1 and its admin API is not
+  a guess.
+- **It fails closed in every direction, and each refusal was a decision.** An
+  absent environment variable stops the run naming every one that is missing; a
+  base URL that is not `https` is refused, because the token this fetch carries
+  can read every client secret in the realm; a realm that cannot be read stops
+  the rollout on the rule the Prometheus read beside it already follows; a realm
+  document with no `clients` array is refused rather than passed, because every
+  per-client obligation is vacuously true of an empty one; a flag that is not a
+  boolean is refused rather than compared, because every comparison here is an
+  identity test and a string is neither; and a lifetime declaration this gate
+  cannot anchor stops it rather than defaulting. **No count opens that
+  sentence**, and the omission is deliberate: the list grew by two inside the
+  pull request that wrote it.
+- **`RealmImportTests` is unchanged and is not superseded.** It pins far more
+  than these obligations — the audience mapper, the permission vocabulary, the
+  two development logins — and it is the one suite that runs a real Keycloak.
+  What this record adds is a second instrument with a different subject: the
+  settings that must hold of **any** realm, in a form a deployment can run.
+- **The gate is a fifth `deploy/**` subtree exercised by CI rather than
+  deployed**, and §15.1's count moves with it. It is also the fifth workflow to
+  reach outside its own tree, and the fifth copy of the Helm tree's
+  `SOURCE_INPUTS` — so it arrives owing the reads-direction self-check every
+  copy of that pattern was found to owe. `realm_check.py inputs` asserts both
+  that every path it reads is declared and that both of its workflow's
+  triggers cover every declaration.
+- **Nothing about either realm changes.** The Compose realm already held every
+  obligation this gate asserts, which is why the gate had to be observed red
+  against a mutated copy rather than trusted for passing.
 
 ---
 

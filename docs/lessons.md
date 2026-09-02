@@ -355,6 +355,30 @@ own line rather than sending a reader to a file that does not hold it.
   `check.py`'s as a check of its own, and `smoke.sh`'s over its own `$ROOT/…`
   literals. Each was observed red against a removed entry. A fourth copy of
   `SOURCE_INPUTS` arrives owing the same test.
+  **The fifth copy had that test and shipped broken anyway**, which sharpens
+  the lesson rather than repeating it: `realm_check.py`'s reads-direction
+  pattern allowed a dot only at the start of a path segment, so `Common.Web/`
+  matched nothing, so the one read that gate most depends on was invisible to
+  the check written to declare it — and the check reported a pass. **A
+  self-check whose own matcher can find nothing is the vacuous gate one level
+  up.** What caught it was the negative case that empties `SOURCE_INPUTS` and
+  demands a failure naming a specific path; the positive case, which is the
+  natural one to write, was green throughout. Write the emptying test, and
+  assert on *which* path is named rather than on a non-empty list.
+- **A pattern matched against raw source will match the prose about the
+  source.** Two of the same PR's matchers had this shape and only one of them
+  had been thought about. A gate reading a C# constant out of a file matched
+  `AccessTokenLifetime = TimeSpan.FromSeconds(300)` anywhere in the text,
+  including a `///` comment quoting the assignment — so a comment plus a
+  *reformatted* declaration leaves exactly one match, in the comment, and the
+  gate asserts a number the platform has stopped holding. A gate scanning its
+  own source for path literals then did it in reverse: the sentence describing
+  the pattern satisfied it, and the check reported a read of a path nothing
+  opens. **The tell is a matcher whose corpus includes documentation of the
+  matcher** — which is every self-check, and every gate that reads code as
+  text rather than through a parser. Strip the comment lines, and anchor on
+  something a sentence would not say: `readonly TimeSpan <name> =` is a
+  declaration, where the bare name is a word.
 - **A `helm upgrade --install` of a new release inherits nothing.** A second
   release of the same chart takes the chart's defaults for every value the
   environment overlay would have supplied — authority, OTLP endpoint, database
@@ -961,3 +985,27 @@ own line rather than sending a reader to a file that does not hold it.
   if the column silently became an ordinary `binary(8)` — two rows in one test
   still differ in a value nobody updates — so what has to be asserted is that
   the *database* generates it.
+- **A refusal that names a constraint may be naming a *place*, and the two read
+  identically.** ADR-040 set aside a pipeline realm check because one "needs
+  admin credentials in CI", listed that beside two refusals that are properties
+  of the world — a discovery document publishes no token lifetime, and
+  committing somebody's production realm makes their input this repository's
+  artefact — and the three then travelled together into four chapters as one
+  settled answer. Only the first was about a *job*: the credential CI must not
+  hold is one a deploy job under a scoped environment already holds, and the
+  same sentence is true of CI and irrelevant to the pipeline. **The tell is a
+  refusal whose subject is a capability rather than a fact** — "needs X we do
+  not have" is a claim about a location, and locations differ inside one
+  pipeline. Re-read the refusals a record inherited before treating them as
+  the shape of the problem; two of these three survived unchanged, which is
+  what made the third worth finding.
+- **When two suites assert opposite things about one setting, the parameter
+  they differ on has to be named, not defaulted.** The Compose realm needs
+  `directAccessGrantsEnabled` on — §14.1's documented login is a password
+  grant — and a deployed realm must have it off. One predicate covers both only
+  if it is told which realm it is judging, and the tempting default is the
+  local one, because that is the subject every test run has. **A default there
+  is a production artefact judged on a development artefact's terms**, which is
+  the failure the check exists to prevent, arriving inside the fix. Make the
+  discriminator a required argument, and write the test that runs the *same*
+  document under both values and asserts it passes exactly one.

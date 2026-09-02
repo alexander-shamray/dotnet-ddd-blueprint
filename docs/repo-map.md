@@ -63,7 +63,7 @@ rule forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..041),
+                             15-cicd-deployment, appendix A (ADR-001..042),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
@@ -186,6 +186,23 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              so sharing one would either drag the smoke
                              onto every messaging change or leave the gate
                              blind to the code it checks
+.github/workflows/realm.yml  §11.3's token obligations on deploy/keycloak/**,
+                             and the FIFTH workflow to reach outside its own
+                             tree: deploy/compose/keycloak/realm-export.json,
+                             which is the subject, and Common.Web's
+                             AuthenticationExtensions.cs, out of which the 300
+                             a realm owes is READ rather than restated — both
+                             declared as SOURCE_INPUTS in realm_check.py,
+                             which asserts the triggers cover every entry and,
+                             in the other direction, that no path the gate
+                             reads is missing from the list. Split from
+                             compose.yml on broker-permissions.yml's
+                             reasoning: path filtering is per-workflow, so
+                             sharing one would drag that smoke's pulls onto
+                             every identity change or leave this gate blind to
+                             the realm it reads. It runs the local half only —
+                             the deployed realm is judged from deploy.yml,
+                             where a credential exists
 .github/licence-gate/        the gate, its allow-list and its tests
 .github/secret-scan/         §15.1's other half since #61 — twelve rules, an
                              allow-list of fingerprints, and its tests. Since
@@ -277,6 +294,22 @@ deploy/observability/        §13.8's dashboards, §13.6's alert rules and
                              list self-clearing instead of a list of alerts
                              nobody ever turned on. It reaches no Prometheus
                              and does not validate rule syntax, and says so
+deploy/keycloak/             §11's token obligations against a Keycloak realm
+                             representation, since PR-36. `realm_check.py`
+                             decides, `read_admin.py` is the one file that
+                             talks to anything, and the suite is the mutations
+                             the decision has to refuse. ADR-042's one
+                             predicate has TWO subjects and they reach
+                             differently: `realm.yml` judges §14.1's Compose
+                             export and reaches only files — that export and
+                             the `AccessTokenLifetime` the 300 is READ out of
+                             rather than restated — while `deploy.yml`'s
+                             rollout job judges the realm a deployment points
+                             at, and that half reaches a live realm and has
+                             never run. `--kind` has no default because one
+                             obligation inverts between the two: §11.2's
+                             password grant is on locally and off in a
+                             deployed realm
 
 src/BuildingBlocks/          all five, and complete since PR-15
   Common.Domain/               Entity<TId>, AggregateRoot<TId>, IDomainEvent

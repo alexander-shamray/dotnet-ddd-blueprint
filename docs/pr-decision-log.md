@@ -68,6 +68,151 @@ those edits would guarantee the staleness the one rule exists to prevent.**
 
 ---
 
+## PR-36 — where a check sits decided what it could hold
+
+**#157 had been open since PR #156 and had been narrowed twice without being
+closed.** ADR-033 composes a 330-second revocation bound out of a realm setting
+and a `Common.Web` one; ADR-034 gives the browser no refresh token; §11.2
+documents the password grant as a local affordance a deployed realm turns off.
+All four settings live in a Keycloak realm, and the only realm anything read
+was `deploy/compose/keycloak/realm-export.json` — §14.1's Compose export, which
+`RealmImportTests` parses. Every chart points at
+`https://id.example.com/realms/commerce`. So four security guarantees read as
+platform-wide and were verified in the one realm that is not deployed anywhere.
+
+**The issue itself listed three shapes and said none was obviously right, which
+is why it stayed an issue.** ADR-040 then refused all three in one sentence — a
+pipeline check needs admin credentials in CI, a startup assertion reads a
+discovery document that publishes no token lifetime at all, and committing a
+production realm makes somebody's operational input into this repository's
+artefact — and built the containment instead: no host accepts a token with more
+than the bound of remaining life. That was worth having and it is untouched.
+It is also not what the issue asked for, and ADR-040 said so.
+
+**Two of those three refusals survived this PR and the third turned out to be a
+statement about a job rather than about the platform.** "Admin credentials in
+CI" is true of CI. It says nothing about `deploy.yml`'s rollout job, which runs
+under the `production` GitHub Environment — the mechanism §15.4 already relies
+on to scope a deployment's secrets, and the same one that supplies
+`PROMETHEUS_URL` to the canary two steps later. The obstacle was never the
+credential; it was reading "a pipeline check" as one thing when a pipeline has
+two halves with different rights.
+
+### One predicate, two subjects, and the second is what makes the first
+trustworthy
+
+**A Keycloak realm export and the admin API's `RealmRepresentation` are the
+same document.** The export is that representation serialised, and the client
+list a full export carries under `clients` is what
+`GET /admin/realms/{realm}/clients` answers. So `realm_check.py` judges a
+`dict` and does not know, or care, which of the two produced it;
+`read_admin.py` fetches and never interprets, on `deploy/canary`'s split, which
+is what lets the deciding half have a suite at all.
+
+**That is not a convenience, it is the answer to a question this repository
+asks of every deploy-time artefact.** `deploy.yml` has never reached a cluster
+and says so in its own header, so a check written only for the deploy path
+would be a check nobody has ever executed — the same standing as the alert
+rules no Prometheus loads and the charts nothing installs, except worse,
+because those at least have gates over their text. Running the deciding half
+against the Compose realm on every change to it is what keeps the instrument
+honest until an environment exists, and it is why `realm.yml` is not
+redundant with `RealmImportTests`.
+
+**The two instruments are not duplicates and the sharpest proof is that they
+disagree.** `RealmImportTests` asserts `directAccessGrantsEnabled` **true**,
+because §14.1's documented login is a password grant and a local realm without
+one makes the README's `curl` a lie. The deploy-time check asserts it
+**false**, because §11.2 says a deployed realm turns it off. Both are right
+about their own realm. That is the whole reason `--kind` is a required argument
+with no default: a check that guessed which realm it had would pass a
+production realm on the local realm's terms, which is this failure wearing the
+costume of its own fix.
+
+### The number is read, and the check meant to prove it was matching nothing
+
+**ADR-040 had just made `AccessTokenLifetime` the one place the 300 lives**, on
+the argument that a composition nothing pins can be recomposed wrongly and
+still look composed. A literal `300` in a Python gate would have been that
+defect again in a second language, so `read_access_token_lifetime` matches the
+declaration out of `AuthenticationExtensions.cs` and raises rather than
+defaulting when it finds zero or two of them — substituting the number it
+failed to read is what would make the read decorative.
+
+**The cost of that is a third reader depending on the declaration's textual
+shape**, and it is stated rather than hidden: a refactor of that line is now a
+change to what every realm owes. The mitigating test is the one whose subject
+is the read — it asserts against the real file that the parser still finds a
+declaration, so the way this gate stops covering its newest surface is a loud
+failure rather than a silent one.
+
+**The reads-direction self-check shipped broken in its first form here, and
+only its own test found it.** The pattern is the Helm tree's — declare
+`SOURCE_INPUTS` beside the reads — and the reads direction on top of it is what
+every copy was found to owe after `canary.py` declared two paths and opened
+three. This gate is the fifth copy. The path
+literal pattern allowed a dot only at the *start* of a segment, so
+`Common.Web/` never matched, so the one read this gate most depends on was
+invisible to the check that exists to declare it, **and the check reported a
+pass**. Nothing about reading the code says so; what said so was
+`test_an_undeclared_read_is_caught`, which empties `SOURCE_INPUTS` and demands
+a failure naming the lifetime source. A check that cannot be made to fail is
+not passing.
+
+### What the gate refuses to judge, and why each refusal is a decision
+
+**A realm document with no `clients` array is refused rather than passed.**
+Every per-client obligation — no lifespan override, no implicit flow, the
+browser's refresh-token attribute — is vacuously true of an empty realm, and a
+truncated or wrong-shaped document is exactly what a misconfigured fetch
+produces. **An absent `use.refresh.tokens` is a violation, not a silence**,
+because Keycloak's default is to issue refresh tokens on the standard flow: a
+missing attribute means ADR-034 is violated, and reading it as unspecified
+would make the one setting that record rests on optional. **`standardFlowEnabled`
+is asserted beside it**, because a client that mints no token issues no refresh
+token either and would satisfy the check for the wrong reason. **A non-`https`
+admin URL stops the run**, because the bearer token that fetch carries can read
+every client secret in the realm. **A missing environment variable names every
+missing one**, not the first, so an operator wiring this up learns what it
+needs in one run.
+
+**`ClockSkew` is excluded and the exclusion is written down.** It is the other
+half of ADR-033's 330 and it is not a realm setting at all — it is
+`Common.Web`'s, pinned by `JwtAuthenticationTests` — so an operator told to
+configure a realm `ClockSkew` would go looking for something that does not
+exist. #157's own table says this in its last row; the gate says it too,
+because the table is not what a reader of the gate has open.
+
+### What is owed
+
+- **The window between rollouts, and it is filed.** A realm is read when a
+  deployment reads it, so an edit made after a rollout is unobserved until the
+  next one — on a stabilised service, indefinitely
+  ([#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)).
+  Closing it needs a `schedule:` trigger, an environment to point it at, and a
+  decision about what a red scheduled run *does*, which is an operating
+  decision rather than a build one.
+- **The deploy half has never run, and neither has anything else in that job.**
+  `deploy.yml` has no cluster, no kubeconfig and no registry, and its header
+  says so. What this PR adds inherits that exactly. It is not the fiction that
+  header refuses — that one declines to write a cluster login for a provider
+  nobody has chosen, where Keycloak is chosen in §11.1 and its admin API is not
+  a guess — but "the local half is what has been executed" is the honest
+  sentence and it is in ADR-042's consequences.
+- **The credential is the first in this repository that no pod ever reads**, so
+  it is in `docs/secrets.md` and not in §15.4's table. That table is the
+  inventory `ValidateOnStart` enforces and a key joins it when a host's code
+  reads it; a workflow credential is a new category and had to be argued rather
+  than slipped in. A second unattended consumer — #176's scheduled run — is a
+  second grant to argue when it arrives.
+- **`BROWSER_CLIENT = "web-app"` is a name restated from §11.2 and from
+  `RealmImportTests`.** The alternative is inferring which client is the
+  browser from its flags, and every flag that would identify it is one of the
+  settings under test — a subject derived from the predicate passes vacuously
+  the moment the predicate is what has gone wrong. Admitted rather than
+  avoided, and the non-vacuity check beside it (exactly one `web-app`) is what
+  makes the restatement safe.
+
 ## PR-35 — the identity that was a stand-in, and the constraint that replaced it
 
 **PR-34 filed the issue this PR closes, in its own "What is owed" section,

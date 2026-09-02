@@ -280,6 +280,7 @@ decision rather than a gap.**
 | **33** | `fix(common): the marker and its claim are ordered by construction` | — | — | — |
 | **34** | `fix(common): the marker's purge asks the claim rather than out-counting it` | — | — | — |
 | **35** | `fix(common): the marker purge identifies a row by a rowversion` | — | — | — |
+| **36** | `feat(ci): the deployed realm is checked at deploy time` | — | — | — |
 
 **Nothing in this file would produce a number for them.** Every estimate above
 was quoted before any code existed, against a specification that was already

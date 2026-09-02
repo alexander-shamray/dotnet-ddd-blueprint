@@ -170,7 +170,7 @@ public static class AuthenticationExtensions
                 // over an injected principal can see.
                 options.MapInboundClaims = true;
 
-                // ADR-033's bound, enforced rather than stated (#157, ADR-040).
+                // ADR-033's bound, enforced rather than stated (ADR-040).
                 // Every sentence in §11.2, §11.3, ADR-033 and ADR-034 reads as
                 // a platform guarantee, and the settings behind it live in a
                 // realm: `accessTokenLifespan`, and a client-level
@@ -182,9 +182,12 @@ public static class AuthenticationExtensions
                 // untrue everywhere it mattered.
                 //
                 // A token is the one place the realm's answer is observable
-                // without credentials this repository does not have, so the
-                // check is here: whatever the realm was configured to do, a
-                // token that reaches a host carries how long it has left.
+                // WITHOUT A CREDENTIAL AT A HOST, so the check is here:
+                // whatever the realm was configured to do, a token that
+                // reaches a host carries how long it has left. Since ADR-042
+                // the realm is also asked directly, by a deploy-time gate with
+                // a credential — a different question at a different moment,
+                // and this one is what holds continuously.
                 //
                 // REMAINING life against this host's clock, not `exp - iat`.
                 // The exact form is sharper and was not taken: it needs `iat`,
@@ -204,13 +207,15 @@ public static class AuthenticationExtensions
                 // does not.
                 //
                 // GATING REMAINING LIFE IS NOT ENFORCING THE ISSUED LIFETIME,
-                // and the difference decides what #157 may claim. That
+                // and the difference is why this is not the whole answer. That
                 // five-hour token is refused for four hours and fifty-four
                 // minutes and then admitted for its last 330 seconds — so a
-                // non-conforming realm is CONTAINED rather than detected, and
-                // the issue stays open for the deploy-time check it actually
-                // asks for. What this buys is that no token from any realm is
-                // ever accepted for more than the window below.
+                // non-conforming realm is CONTAINED rather than detected. What
+                // detects it is ADR-042's gate, which reads the realm at a
+                // rollout; a realm edited between rollouts is unobserved until
+                // the next one (#176), and this is what bounds that window.
+                // What this buys is that no token from any realm is ever
+                // accepted for more than the window below.
                 //
                 // THE SKEW IS THEREFORE SPENT TWICE, and that is a real cost
                 // rather than an oversight. A token admitted at the ceiling has

@@ -115,7 +115,13 @@ The platform holds **one** client secret — `Identity__Client__ClientSecret`, f
 the BFF, the only host that calls a peer synchronously
 ([§9.7](backend-architecture/09-messaging.md),
 [§11.5](backend-architecture/11-identity-authorization.md), ADR-017). Everything
-else is a datastore credential.
+else a *host* holds is a datastore credential.
+
+**The fourth subsection below is not a host's, and that is why the sentence
+above says host.** Since ADR-042 this repository also holds a Keycloak client
+secret that no pod ever reads — a rule about who holds a credential is falsified
+by the next thing that holds one, which is the premise
+`No_client_secret_is_committed` states at the foot of this file.
 
 ### A client secret
 
@@ -162,6 +168,66 @@ before rotating rather than during. **The permissions are not the vault's to
 rotate**: they are declared in `deploy/compose/rabbitmq/definitions.json` for
 the local broker, and are an obligation on whoever provisions a deployed one.
 
+### A realm-check credential
+
+`KEYCLOAK_CHECK_CLIENT_SECRET`, and it is the first credential in this
+repository that **no pod ever reads**. It belongs to a workflow rather than to a
+workload: `deploy.yml`'s rollout job authenticates with it, fetches the realm
+that deployment is about to be rolled onto, and hands the document to
+`deploy/keycloak/realm_check.py` before the first step that touches the cluster
+([ADR-042](backend-architecture/appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)).
+
+**It is a service account of the realm being checked, with realm-read rights and
+nothing else.** Explicitly *not* a cross-realm admin account: one of those would
+hold rights over realms this check has no business reading, and what the check
+needs is two reads — the realm representation and its client list. The token it
+obtains can already see every client secret in the realm it does reach, which is
+why `read_admin.py` refuses a base URL that is not `https`, and why widening the
+grant costs more than widening it looks like it costs.
+
+**A credential no pod reads is a new category here, and it is why this one
+reaches no row of §15.4's table.** That table is the inventory `ValidateOnStart`
+enforces, and a key joins it when a *host's* code reads it — the five places
+above are five places a service looks. Nothing binds this value, nothing
+validates it at startup, and a row for it would put a key no host reads into the
+inventory of keys every host must have, where the one mechanism that could
+enforce it never runs. The obligation it does carry is real and sits on the
+other side of the pipeline: without it the rollout refuses to start, which is
+[§15.1](backend-architecture/15-cicd-deployment.md)'s checklist rather than a
+pod's.
+
+**It lives in the `production` GitHub Environment**, which is the mechanism
+§15.4 already relies on to scope a deployment's secrets — three Environment
+*variables*, `KEYCLOAK_BASE_URL` (the server root, not the realm's issuer URL),
+`KEYCLOAK_REALM` and `KEYCLOAK_CHECK_CLIENT_ID`, and one Environment *secret*,
+`KEYCLOAK_CHECK_CLIENT_SECRET`. Only the last is a credential; the other three
+are named here because `read_admin.py` requires all four and stops naming every
+one that is missing, so a rotation that replaces the client rather than its
+secret has more than the secret to move.
+
+Keycloak's two-active-secrets affordance applies here exactly as it does to the
+BFF's client, so the procedure is that one with no vault in it and a different
+proof:
+
+1. Add the new secret on the realm-check client, keeping the old one valid.
+2. Update `KEYCLOAK_CHECK_CLIENT_SECRET` in the `production` Environment. There
+   is no vault hop, no reconcile and no restart — nothing mounts this value, so
+   the next workflow run reads it and no running process is holding the old one.
+3. Run a rollout, or wait for the next one. The *Read the deployed realm* step
+   printing the realm and its client count is the proof: that line is a read the
+   admin API answers only to a working credential.
+4. Retire the old secret in Keycloak.
+
+**Rotating this credential cannot break a running service**, because nothing
+reads it at run time. What a botched rotation produces is a **refused
+rollout** — `read_admin.py` stops rather than reporting a realm nobody read —
+and that is the correct direction for this failure to point in. Fix the
+credential; never "fix" a red deploy by deleting the check. Deleting it converts
+a rollout that could not see its own realm into one that never looked, which is
+the state
+[#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157) was
+filed about.
+
 ## Local development is a deliberate exception
 
 §14.1's Compose file carries real-looking values, and they are **not** a defect
@@ -177,6 +243,19 @@ to be tidied away:
 These defaults are what make `docker compose up` work with no prior setup, and
 **the environment variable in front of each is the seam** that keeps them out of
 anything deployed. `deploy/compose/.env.example` documents the overrides.
+
+**Two of those four rows carry no variable in front of them, and the sentence
+above is about the other two.** RabbitMQ's per-service credentials are imported
+into the image from `deploy/compose/rabbitmq/definitions.json`, so a `${…}`
+would front one half of a pair while the broker still expected the compiled-in
+password (ADR-036) — rotating them locally is an edit to that file and a
+`docker compose down -v`. Keycloak's `admin` / `admin` is the bootstrap admin of
+a container the same command recreates, and **it is not the credential the realm
+check uses**: `read_admin.py` refuses a base URL that is not `https` and has no
+local subject at all, because the local realm is checked from its file rather
+than through a running Keycloak. The two never meet, and a reader who has just
+met the realm-check service account should not have to infer that from a
+silence.
 
 Note how the connection strings nest — `${CATALOG_CONNECTION:-…Password=${SQL_PASSWORD:-…}…}`
 — so overriding the password alone keeps every connection string correct. That
