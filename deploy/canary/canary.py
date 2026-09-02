@@ -773,6 +773,14 @@ def main(argv: list[str]) -> int:
     chart = sub.add_parser("chart", help="the chart directory a workload deploys")
     chart.add_argument("--workload", required=True)
 
+    # One name per line, for a shell loop. `realm.yml`'s scheduled job reads
+    # every release's authority between rollouts (ADR-043), and the set of
+    # releases is this plan's — a list restated in that workflow would agree
+    # with this one until a fifth workload joined here and not there, which is
+    # `deploy.yml`'s `options:` list one artefact over, and that one at least
+    # is a dispatch menu rather than a subject.
+    sub.add_parser("workloads", help="every workload in the plan, one per line")
+
     planner = sub.add_parser("plan", help="canary replicas for one step")
     planner.add_argument("--workload", required=True)
     planner.add_argument("--stable", type=int, required=True)
@@ -820,6 +828,11 @@ def main(argv: list[str]) -> int:
             print(f"canary: no workload {args.workload!r} in the plan", file=sys.stderr)
             return 1
         print(workloads[args.workload]["chart"])
+        return 0
+
+    if args.command == "workloads":
+        for name in entries(document["workloads"]):
+            print(name)
         return 0
 
     if args.command == "required":

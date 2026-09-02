@@ -96,6 +96,14 @@ SOURCE_INPUTS = [LIFETIME_SOURCE, COMPOSE_REALM, CHART_VALUES, DEPLOY_WORKFLOW]
 
 WORKFLOW_PATH = ".github/workflows/realm.yml"
 
+# The repository variable that opts the scheduled job in (ADR-043). Declared
+# here because the workflow's `if:` and the README's provisioning step both
+# spell it, and a name spelled in two places agrees until one is edited — the
+# suite reads this constant out of the workflow rather than trusting either.
+# A REPOSITORY variable rather than an Environment one, because a job-level
+# `if` is evaluated before the job enters its Environment.
+SCHEDULE_OPT_IN = "REALM_CHECK_SCHEDULED"
+
 # This gate's own tree, subtracted from the reads direction. Its own path
 # appears in the docstring's invocation lines, and a gate that demanded a
 # SOURCE_INPUTS entry covering itself would be asking the workflow to name it

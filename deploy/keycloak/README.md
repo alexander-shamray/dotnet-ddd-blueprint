@@ -9,17 +9,22 @@ lists this as the fifth `deploy/**` subtree CI exercises rather than deploys.
 This file is that tree's operational reference, on
 [`deploy/observability/README.md`](../observability/README.md)'s terms.
 
-## The two subjects
+## The two subjects, at three moments
 
 | | |
 |---|---|
-| `realm.yml` | `deploy/compose/keycloak/realm-export.json` — [§14.1](../../docs/backend-architecture/14-local-development.md)'s Compose realm, on every change to it, to `AuthenticationExtensions.cs` or to this tree |
+| `realm.yml`, `check` | `deploy/compose/keycloak/realm-export.json` — [§14.1](../../docs/backend-architecture/14-local-development.md)'s Compose realm, on every change to it, to `AuthenticationExtensions.cs` or to this tree |
 | `deploy.yml` | the realm a deployment is about to be rolled onto — **derived from the chart**, fetched by `read_admin.py`, and judged before the rollout changes anything |
+| `realm.yml`, `deployed` | the realm every deployed release points at, **between rollouts** — the same three calls, hourly and on `workflow_dispatch`, over every workload in `deploy/canary/canary.json` ([ADR-043](../../docs/backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)) |
 
-**One predicate judges both**, because a Keycloak realm export and the admin
-API's `RealmRepresentation` are the same document — the export is that
+**One predicate judges both subjects**, because a Keycloak realm export and the
+admin API's `RealmRepresentation` are the same document — the export is that
 representation serialised, and the client list a full export carries under
-`clients` is what `GET /admin/realms/{realm}/clients` answers.
+`clients` is what `GET /admin/realms/{realm}/clients` answers. **And one
+derivation names the deployed one at both moments**: the scheduled job derives
+the realm out of each release's `identity.authority` exactly as the rollout
+does, pins the origin from the same Environment variable, and the suite asserts
+the three calls are there, in order, in both files.
 
 ```bash
 py -3.12 -m unittest discover -s deploy/keycloak
@@ -79,26 +84,83 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   defines it as a non-composite role granting nothing else, so it carries no
   client visibility. The suite asserts that against §14.1's export rather than
   restating it here.
-- **Whether the realm is reachable outside a rollout.** It is read when a
-  deployment reads it, so a realm edited between rollouts is unobserved until
-  the next one
-  ([#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)).
-  What bounds that window is ADR-040's runtime guard, not this tree.
+- **A realm edited within the hour.** Between rollouts the realm is read on
+  `realm.yml`'s schedule, so what bounds the window a drift is live in is that
+  cadence and ADR-040's runtime guard together — an hour of the first, and for
+  the token lifetime the second gates *remaining* life rather than the issued
+  one. A shorter cron is a one-line change; what it cannot become is
+  continuous, and the section below says what a red hour does.
+- **Whether the schedule is still running.** GitHub suspends a `schedule`
+  trigger in a repository with no commit for sixty days, and it does so
+  without a red run — a stabilised service is exactly the repository with no
+  commits and exactly the one the window is longest on. Nothing in this tree
+  can observe its own absence; what closes it is a monitor outside GitHub
+  asking whether this workflow ran in the last day, and that is an operating
+  decision this file names rather than takes.
 - **Which realm a *future* rollout will install.** The authority is read from
   the release as it stands, so a rollout that also changes `identity.authority`
   checks the realm it is leaving. Nothing here does that — `-f
   stable-values.yaml` carries the value forward — but a change that started
   moving authorities would owe this file a second look.
-- **Anything about a cluster.** The deploy half has never run, because
-  `deploy.yml` has never reached one and says so in its own header. What has
-  been executed is the local half — which is exactly why the local half exists:
-  a deploy-time check nothing has ever run is a check nobody has established is
-  looking at anything.
+- **Anything about a cluster.** Neither deployed moment has ever run, because
+  `deploy.yml` has never reached a cluster and says so in its own header, and
+  the scheduled job's first command is a `helm get values` that needs the same
+  missing login. What has been executed is the local half — which is exactly
+  why the local half exists: a deploy-time check nothing has ever run is a
+  check nobody has established is looking at anything.
+
+## What a red scheduled run means
+
+`realm.yml`'s `deployed` job files an issue when its judgement goes red, or
+comments on the open one — titled *The deployed realm no longer holds section
+11's token obligations, or could not be read*, labelled `security` and
+`critical`, linking the run. It is an issue and not a runbook because
+`docs/runbooks/` is one file per Prometheus alert and its gate fails on a
+runbook with no alert behind it; nothing in §13.6 fires this, so the procedure
+is here.
+
+1. **Read the run log first, and decide which of the two it was.** The job
+   cannot tell a drifted realm from a realm it could not read — an expired
+   credential and a raised lifespan are both red — and it labels for the
+   worse case on the rollout's rule that a realm nobody can see holds no
+   guarantee anybody can state. Each workload is its own log group; the
+   `realm-gate:` lines name the field and the client, and a `read_admin.py`
+   refusal names what it could not do.
+2. **A drift is corrected in the realm, never in the gate.** The obligations
+   are the list above and every one of them is a setting ADR-033 or ADR-034
+   rests on. Deleting or loosening the check to clear the issue converts a
+   realm that was seen to be wrong into one nobody looks at, which is the
+   state #157 was filed about.
+3. **A credential failure is [`docs/secrets.md`](../../docs/secrets.md)'s
+   rotation procedure**, and until it is done the next rollout is refused as
+   well — the same credential, the same refusal.
+4. **Close the issue on a green `workflow_dispatch` of `realm.yml`**, from
+   `main`, and on nothing weaker. A run that goes green because the schedule
+   was disabled is the sixty-day silence above, arranged by hand.
+
+**Nothing deploys onto the drift meanwhile.** `deploy.yml` runs the same
+judgement before any rollout changes anything, so what the issue tracks is the
+window in which the realm is live as it stands — and the token lifetime's half
+of that window is already bounded at every host by ADR-040.
+
+**The job is opted in, and the opt-in is not the skip this repository
+refuses.** `deploy.yml` runs on `workflow_dispatch` alone because a rollout on
+`push` would go red on every merge for want of a cluster; an hourly job would
+do that twenty-four times a day. The skip refused elsewhere reads a *runtime*
+failure as absence; this guard reads a *configuration*: the repository
+variable `REALM_CHECK_SCHEDULED` is set to `enabled` by whoever provisions the
+`production` Environment, and until then there is no realm for the job to be
+silent about. Once it is set nothing below it is optional. A repository
+variable rather than an Environment one, because a job-level `if:` is
+evaluated before the job enters its Environment.
 
 ## The credential
 
 `read_admin.py` needs four values and stops naming every one that is missing,
-and they arrive from two different places on purpose.
+and they arrive from two different places on purpose. **Two callers hold
+them**: the rollout, once per dispatch, and the scheduled job, once an hour —
+the second consumer [`docs/secrets.md`](../../docs/secrets.md) argues as a
+second grant, and it is the same account with the same two reads.
 
 **Two are configured.** `KEYCLOAK_CHECK_CLIENT_ID` and
 `KEYCLOAK_CHECK_CLIENT_SECRET` come from the `production` GitHub Environment;
@@ -108,9 +170,10 @@ row of §15.4's table.
 
 **Two are derived.** `KEYCLOAK_BASE_URL` (the **server root**, not the realm's
 issuer URL) and `KEYCLOAK_REALM` are written into `$GITHUB_ENV` by
-`realm_check.py authority`, out of the `identity.authority` the release being
-rolled is running with. A realm named beside the chart rather than out of it is
-a check that can pass on a realm nobody is deploying to.
+`realm_check.py authority` in the rollout, and exported per release inside the
+scheduled job's loop, out of the `identity.authority` the release is running
+with. A realm named beside the chart rather than out of it is a check that can
+pass on a realm nobody is deploying to.
 
 **And one pins where the credential may be sent.** `KEYCLOAK_TRUSTED_ORIGIN` is
 a third Environment variable, and it is what keeps the derivation above from

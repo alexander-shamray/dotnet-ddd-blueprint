@@ -1,6 +1,8 @@
 name: Realm
 
-# §11.3's token obligations, against the one realm this repository owns.
+# §11.3's token obligations, against the one realm this repository owns -- and,
+# since ADR-043, against the realm every deployed release points at, between
+# rollouts.
 #
 # ADR-033 composes a 330-second revocation bound out of a 300-second realm
 # setting and a 30-second ClockSkew, and ADR-034 states that the browser holds
@@ -9,12 +11,21 @@ name: Realm
 # export -- so the obligations were verified locally and stated everywhere they
 # mattered (#157).
 #
-# THIS WORKFLOW IS HALF OF THE FIX AND THE SMALLER HALF. What closes #157 is
+# THE `check` JOB IS HALF OF THE FIX AND THE SMALLER HALF. What closed #157 is
 # the same predicate running against a *deployed* realm, which happens in
-# `deploy.yml`'s rollout job where a credential exists. What runs here is that
-# predicate against the local realm, which is what establishes the instrument
-# works at all -- a deploy-time check nothing has ever executed is a check
-# nobody has established is looking at anything.
+# `deploy.yml`'s rollout job where a credential exists. What runs here on a
+# pull request is that predicate against the local realm, which is what
+# establishes the instrument works at all -- a deploy-time check nothing has
+# ever executed is a check nobody has established is looking at anything.
+#
+# THE `deployed` JOB IS THE MOMENT THE ROLLOUT CANNOT BE. A rollout reads the
+# realm once, and a realm edited afterwards -- `accessTokenLifespan` raised, a
+# client-level override added, `use.refresh.tokens` flipped, the password grant
+# turned back on -- is unobserved until somebody deploys again, which on a
+# stabilised service is never (#176). The job below runs the rollout's own
+# derive-fetch-judge steps on a schedule, over every release the canary plan
+# names, and what it does when it goes red is stated in its own comment rather
+# than left to whoever notices.
 #
 # A SEPARATE WORKFLOW RATHER THAN A JOB IN `compose.yml`, on
 # `broker-permissions.yml`'s reasoning, which is the closest precedent: path
@@ -24,10 +35,10 @@ name: Realm
 #
 # The filter list below is NOT maintained here. `realm_check.py` declares it as
 # SOURCE_INPUTS beside the reads and `realm_check.py inputs` asserts that both
-# of this workflow's triggers cover every entry -- and, in the other direction,
-# that no path this gate reads is missing from the list. This is the FIFTH
-# workflow to reach outside its own tree, and the pattern arrives owing that
-# reads-direction test rather than only the trigger-direction one.
+# of this workflow's path-filtered triggers cover every entry -- and, in the
+# other direction, that no path this gate reads is missing from the list. This
+# is the FIFTH workflow to reach outside its own tree, and the pattern arrives
+# owing that reads-direction test rather than only the trigger-direction one.
 #
 #   - src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs, because the
 #     300 a realm owes is READ from `AccessTokenLifetime` rather than restated
@@ -62,16 +73,49 @@ on:
       - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
       - '.github/workflows/deploy.yml'
       - '.github/workflows/realm.yml'
+  # HOURLY, AND OFF THE HOUR. The window #176 filed is the time between a
+  # realm edit and the next rollout, and a schedule bounds it to its own
+  # cadence: a run costs two admin-API reads per release and one runner
+  # minute, so an hour is the cheap end of what the guarantee is worth, not
+  # the most this repository could afford. Minute 17 rather than 0 because
+  # GitHub sheds top-of-the-hour schedules under load, and a dropped run is a
+  # silence rather than a red one -- the failure §13.6 spends a callout on.
+  #
+  # A SCHEDULE IS SUSPENDED AFTER SIXTY DAYS WITHOUT A COMMIT, by GitHub and
+  # without a red run, and that is this job's residual rather than a detail:
+  # a repository whose service has stabilised is exactly the one with no
+  # commits, and exactly the one #176 said the window is unbounded on. What
+  # closes it is a monitor outside GitHub asking whether this workflow ran in
+  # the last day, which is an operating decision the README states rather
+  # than a line here.
+  schedule:
+    - cron: '17 * * * *'
+  # A dispatch is how an operator re-runs the judgement after correcting a
+  # realm, so the issue a red run filed can be closed on evidence rather than
+  # on a promise. It runs the same job with the same guard.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: realm-${{ github.ref }}
+  # KEYED BY EVENT AS WELL AS REF. A scheduled run and a pushed gate run both
+  # carry `refs/heads/main`, so under a ref-only key each cancelled the other:
+  # a merge to `main` during the hourly read would have cancelled the read,
+  # and the read would have cancelled the gate over the merge. Neither is a
+  # duplicate of the other -- they have different subjects -- and the thing
+  # `cancel-in-progress` is for is two runs of the SAME subject, which the
+  # event name is what distinguishes.
+  group: realm-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   check:
+    # THE LOCAL HALF, and only on the two triggers that carry a diff. A
+    # schedule has no diff to gate, and the `deployed` job below runs this
+    # suite itself before judging anything, so running it here as well on a
+    # schedule would be the same command twice in one run.
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -105,3 +149,193 @@ jobs:
       # realm's terms.
       - name: The local realm holds section 11's token obligations
         run: python deploy/keycloak/realm_check.py check --kind local
+
+  deployed:
+    # OPTED IN BY A REPOSITORY VARIABLE, AND THAT IS NOT THE SKIP THIS
+    # REPOSITORY REFUSES. `deploy.yml` runs on `workflow_dispatch` alone
+    # because a rollout on `push` would fail on every merge for want of a
+    # cluster and train everyone to ignore a red pipeline; an hourly job that
+    # went red in a repository with no environment would do the same thing
+    # twenty-four times a day. The skip this repository refuses is the one
+    # that reads a RUNTIME failure as absence -- a Docker daemon that did not
+    # answer, a `helm status` that failed for an expired credential. This
+    # guard reads a CONFIGURATION: `REALM_CHECK_SCHEDULED` is set to `enabled`
+    # by whoever provisions the `production` Environment, and until they do
+    # there is no realm for the job to be silent about. Once it is set,
+    # nothing below is optional -- an absent credential, a release this gate
+    # cannot read, a realm that cannot be fetched and a realm that disagrees
+    # are all red, on the rollout's own rule.
+    #
+    # A REPOSITORY variable and not an Environment one, because a job-level
+    # `if` is evaluated before the job's Environment is entered, so a variable
+    # scoped to `production` is not visible to it. The three values the job
+    # actually uses are Environment-scoped, exactly as they are for the
+    # rollout; only the opt-in sits one level up.
+    if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && vars.REALM_CHECK_SCHEDULED == 'enabled' }}
+    runs-on: ubuntu-latest
+    # Ten, where the rollout has 150: this job reads and never waits on a
+    # hook, a rung or a dwell. Four `helm get values`, four token requests and
+    # eight admin reads on a good hour; on a bad one the timeout is what
+    # turns a hung API into a red run rather than a run that never reports.
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      # `issues: write` is what a red run DOES, below. It is job-scoped
+      # because the `check` job has no business filing anything, and it is
+      # the first write permission any workflow in this repository holds --
+      # the closure gate reads a pull request and changes nothing, and this
+      # one changes the tracker and nothing else.
+      issues: write
+    env:
+      NAMESPACE: commerce
+    steps:
+      # JUDGED FROM `main` AND NOTHING ELSE, on `deploy.yml`'s reasoning. A
+      # schedule always runs the default branch's copy of this file, but
+      # `workflow_dispatch` lets the caller choose any ref -- and this job
+      # authenticates to the production realm with the production credential,
+      # running whatever copy of `read_admin.py` and `realm_check.py` that ref
+      # carries. An unmerged branch could therefore read the realm with its
+      # own weakened predicate and report it compliant, or send the credential
+      # somewhere its own copy of the origin check permits. A step rather than
+      # a job-level `if`, so somebody who dispatched this on purpose is told
+      # why it did not run.
+      - name: The realm is judged from main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Refusing to judge the deployed realm from $GITHUB_REF. This job runs the gate and its own credential handling from the dispatched ref, so it is restricted to the protected branch."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # THE STEP THAT AUTHENTICATES TO A CLUSTER IS MISSING, exactly as it is
+      # in `deploy.yml`, and for the same reason: there is no cluster, no
+      # kubeconfig and no provider anybody has chosen, so a login step written
+      # here would be a fiction with credentials in it. `helm get values`
+      # below is the first command that needs one. The realm read and the
+      # judgement after it need no cluster at all -- only the Environment's
+      # three values -- and are the half of this job that has been executed.
+
+      # The suite runs first here as well as in `check`, and the repetition is
+      # the point: this is the copy of the gate that decides against a live
+      # realm, so it is the copy that must have been observed red.
+      - name: The realm gate's negatives
+        run: python -m unittest discover -s deploy/keycloak
+
+      # EVERY RELEASE, NOT ONE. The rollout judges the workload it is rolling;
+      # between rollouts the question is whether ANY deployed workload points
+      # at a realm that has drifted, and the set of workloads is the canary
+      # plan's rather than a list restated here -- `deploy.yml`'s `options:`
+      # is a dispatch menu, and this is a subject.
+      #
+      # THE SAME THREE CALLS THE ROLLOUT MAKES, IN THE SAME ORDER, and the
+      # suite asserts that of both files. The realm is DERIVED from the
+      # release's own `identity.authority` and the ORIGIN is pinned from the
+      # Environment, for the reasons `deploy.yml` argues at length beside its
+      # copy: a realm named beside the chart is a check that passes on a realm
+      # nobody deployed to, and an origin taken from the cluster hands whoever
+      # can edit a release the address this job posts a client secret to.
+      #
+      # ASSIGNED, THEN READ -- never `eval`, and never a process substitution.
+      # `eval "$(cmd)"` swallows a failed cmd, which the rollout's own comment
+      # spells out; and `while read; done < <(cmd)` swallows it the same way.
+      # The derivation is captured into a variable first, so `set -e` sees
+      # the gate refuse, and then each `NAME=value` line is exported as a
+      # literal with `export "$NAME=$VALUE"`, which no shell re-parses. The
+      # gate has already refused whitespace in either value; this is what
+      # keeps that refusal load-bearing rather than the last line of defence.
+      - name: Every release points at a realm this deployment names, and each is read and judged
+        id: judge
+        run: |
+          set -euo pipefail
+          for WORKLOAD in $(python deploy/canary/canary.py workloads); do
+            echo "::group::$WORKLOAD"
+            # `--all`, for the reason the rollout gives: `identity.authority`
+            # has a default in every chart, and without it a release that
+            # never overrode the value answers a document with no `identity`
+            # key at all.
+            helm get values "$WORKLOAD" -n "$NAMESPACE" --all -o json \
+              > "$RUNNER_TEMP/$WORKLOAD.values.json"
+            DERIVED=$(python deploy/keycloak/realm_check.py authority \
+              --values "$RUNNER_TEMP/$WORKLOAD.values.json" \
+              --trusted-origin "$KEYCLOAK_TRUSTED_ORIGIN")
+            while IFS='=' read -r NAME VALUE; do
+              export "$NAME=$VALUE"
+            done <<< "$DERIVED"
+            python deploy/keycloak/read_admin.py --out "$RUNNER_TEMP/$WORKLOAD.realm.json"
+            python deploy/keycloak/realm_check.py check \
+              --realm "$RUNNER_TEMP/$WORKLOAD.realm.json" --kind deployed
+            echo "::endgroup::"
+          done
+        env:
+          KEYCLOAK_TRUSTED_ORIGIN: ${{ vars.KEYCLOAK_TRUSTED_ORIGIN }}
+          # KEYCLOAK_BASE_URL and KEYCLOAK_REALM are NOT here. They are
+          # exported inside the loop from what `authority` derived, and
+          # declaring them here would let an Environment variable name a
+          # realm no release is pointed at.
+          KEYCLOAK_CHECK_CLIENT_ID: ${{ vars.KEYCLOAK_CHECK_CLIENT_ID }}
+          KEYCLOAK_CHECK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CHECK_CLIENT_SECRET }}
+
+      # WHAT A RED RUN DOES, because #176 said a red check nobody rolls on is
+      # a notification, and §13.6's rule is that an alert with no procedure is
+      # a page nobody can act on. It files an issue, or comments on the open
+      # one, and `deploy/keycloak/README.md` is the procedure it points at.
+      #
+      # AN ISSUE AND NOT A RUNBOOK, because `docs/runbooks/` is one file per
+      # Prometheus alert and `deploy/observability/check.py` fails the build
+      # on a runbook with no alert behind it. This is not an alert -- nothing
+      # in §13.6 fires it -- so its procedure lives beside the gate. And an
+      # issue rather than a notification because a notification is read once
+      # and an issue is open until somebody closes it, which is the property a
+      # drift that persists across the hours needs: the next run comments
+      # rather than filing a second one, so the tracker holds one issue per
+      # drift and not one per hour.
+      #
+      # `security` and `critical`, and the second is decided rather than
+      # hedged. This step cannot tell a realm that drifted from a realm that
+      # could not be read -- an expired credential and a raised lifespan are
+      # both red -- and the rule that decides is the rollout's: a realm nobody
+      # can see holds no guarantee anybody can state. The FIRST thing the
+      # procedure asks is which of the two it was, and an issue relabelled
+      # down after a read of the log costs less than a five-hour token
+      # lifetime in production filed as something to look at next week.
+      #
+      # `github.token` and not a personal token, scoped by the job's
+      # `issues: write` above. Only the `judge` step's failure files: a
+      # dispatch refused for coming from a branch is not a drift.
+      - name: A drifted realm is an issue, not a notification
+        if: ${{ failure() && steps.judge.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="The deployed realm no longer holds section 11's token obligations, or could not be read"
+          EXISTING=$(gh issue list --state open --label security --limit 100 \
+            --json number,title --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "Still red on the scheduled check: $RUN_URL"
+          else
+            gh issue create --title "$TITLE" --label security --label critical --body "$(cat <<EOF
+The scheduled realm check (ADR-043) went red: $RUN_URL
+
+Either a deployed release points at a realm that no longer holds section 11's
+token obligations, or the realm could not be read at all. The run log says
+which, per workload. The procedure is in \`deploy/keycloak/README.md\` under
+*What a red scheduled run means*.
+
+The next rollout of every workload is already refused by \`deploy.yml\` until
+the realm is corrected, so nothing deploys onto the drift; what this issue
+tracks is the window in which the realm is live as it stands.
+
+Filed by \`.github/workflows/realm.yml\`. Each further red run comments here
+rather than filing again; close this issue on a green \`workflow_dispatch\` of
+the same workflow.
+EOF
+)"
+          fi
