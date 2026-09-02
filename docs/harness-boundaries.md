@@ -722,9 +722,14 @@ arriving here**: it held `Bash(wc:*)` for a size preflight and `Bash(ls:*)`
 for a link check, and a redirection on either writes what the tree deny
 refuses, so the deny was defence in depth for as long as they stood beside
 it. The size check moved into the adjudicator, which has no `Bash` and
-returns `oversized-review`; the link check became a stated property — the
-repository tracks no symbolic link, measured, and an invocation without
-`Bash` cannot add one. The bare tool name is the documented form of a
+returns `oversized-review`; the link check became a gated premise — the
+helper suite fails on any tracked mode `120000`, so `main` carries no
+symbolic link on any push, and an invocation without `Bash` cannot add one.
+**The premise is `main`'s and not the reviewed branch's, and that is a
+residual with a number**: the branch is what introduces files, the command
+runs over it locally before CI goes red on it, and the edit-time guard that
+would canonicalise a target and refuse a link is a hook behind the
+self-lock (#181). The bare tool name is the documented form of a
 `disallowed-tools` entry; the pattern form is the one the fifth entry
 measured.
 **The sweeps' item 5 (#75) closed by the same shape** — a second read-only

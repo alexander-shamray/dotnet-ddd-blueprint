@@ -3336,6 +3336,29 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
                 with self.subTest(command=name, target=target):
                     self.assertIn(f"Edit({target})", rules)
 
+    def test_the_repository_tracks_no_symbolic_link(self):
+        # `/review-grok`'s site contract holds its path denies by spelling, and
+        # a tracked symbolic link inside an allowed tree is a spelling the deny
+        # never sees while its target can be anywhere. The command states the
+        # premise that no such link is tracked and that an invocation whose
+        # only writers are `Write` and `Edit` cannot add one; this case is what
+        # makes the first half a gate on every push rather than a sentence
+        # about one checkout. The edit-time guard that would close a branch
+        # adding one is a hook behind the self-lock, filed rather than folded
+        # (review round ten).
+        out = subprocess.run(
+            [GIT, "ls-files", "-s"], cwd=str(SCRIPTS.parent.parent),
+            capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            raise AssertionError(f"git ls-files failed: {out.stderr}")
+        entries = out.stdout.splitlines()
+        # The positive control: the parse is over a real listing, so an empty
+        # result would be a broken command rather than a clean tree.
+        self.assertGreater(len(entries), 100, "git ls-files -s returned almost nothing")
+        links = [e for e in entries if e.startswith("120000 ")]
+        self.assertEqual([], links, f"tracked symbolic links: {links}")
+
     def test_the_git_directory_is_not_tracked(self):
         # The positive control, and the reason the case above cannot be folded
         # into the tracked-file test: `git ls-files` never reports `.git`, so
