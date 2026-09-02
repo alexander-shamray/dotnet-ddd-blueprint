@@ -147,7 +147,7 @@ public const string Audience = "commerce-api";
 public const string AuthorityKey = "Identity:Authority";
 
 // §11.3's lifetime and the skew beside it, declared here because something now
-// reads them. RevocationBound is composed and never written down: a literal 330
+// reads them. RevocationBound is composed rather than written down: a literal 330
 // beside a 300 and a 30 is the arithmetic nobody redoes when one of them moves.
 public static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromSeconds(300);
 private static readonly TimeSpan AllowedClockSkew = TimeSpan.FromSeconds(30);
@@ -234,11 +234,18 @@ public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplication
                     if (expires - clock.GetUtcNow() <= RevocationBound)
                         return Task.CompletedTask;
 
+                    // Two causes, and naming only the first sends an operator
+                    // to change a realm that is correct: the comparison reads
+                    // THIS host's clock, so an issuer running more than the
+                    // skew ahead of it makes a conforming token look long-lived.
                     context.Fail(
                         $"The token has more than {RevocationBound.TotalSeconds} seconds of life " +
                         "left, which is longer than the revocation bound this platform states " +
-                        "(ADR-033). The realm that issued it sets an access-token lifetime, or a " +
-                        "client-level override, above what §11.3 requires.");
+                        "(ADR-033). Either the realm that issued it sets an access-token " +
+                        "lifetime, or a client-level override, above what §11.3 requires — or " +
+                        "this host's clock is running behind the issuer's by more than the " +
+                        "skew, which makes a conforming token read as a long-lived one. Check " +
+                        "the clocks before changing the realm.");
 
                     return Task.CompletedTask;
                 }
@@ -295,7 +302,10 @@ which is why shortening the exposure means reading both.
 
 **That window is now held to at every host rather than assumed of the realm.**
 `RevocationBound` is `AccessTokenLifetime + AllowedClockSkew` — composed, and
-never written down as 330 — and every host that composes `AddCommonWebDefaults`
+written down as 330 nowhere in the control itself, though
+`JwtAuthenticationTests` pins the sum at exactly that once, because a
+composition nothing asserts can be recomposed wrongly and still look composed.
+Every host that composes `AddCommonWebDefaults`
 refuses an inbound token carrying more remaining life than that. The
 measurement is remaining life against this host's clock and **not** `exp - iat`:
 `iat` is optional in RFC 7519, so an issuer omitting the claim would switch the

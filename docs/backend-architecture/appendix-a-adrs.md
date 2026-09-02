@@ -2873,10 +2873,15 @@ paragraph above declines for a reason that has not changed.
   once on the ceiling and once by `ValidateLifetime`. Reporting only the
   smaller one would be the overclaim this record exists to remove, so
   `JwtAuthenticationTests` asserts the sum rather than restating the bound.
-- **330 is composed and never written down.** `RevocationBound` is
-  `AccessTokenLifetime + AllowedClockSkew`, and the skew is the same field
-  `TokenValidationParameters.ClockSkew` is set from. A literal 330 beside a 300
-  and a 30 is the arithmetic nobody redoes when one of them moves.
+- **330 is composed in the control and written down in exactly one place.**
+  `RevocationBound` is `AccessTokenLifetime + AllowedClockSkew`, and the skew is
+  the same field `TokenValidationParameters.ClockSkew` is set from: a literal
+  330 beside a 300 and a 30 is the arithmetic nobody redoes when one of them
+  moves. The one place is `JwtAuthenticationTests`, which asserts the sum
+  *equals* 330 — deliberately, because a composition nothing pins can be
+  recomposed wrongly and still look composed. **"A literal nowhere" is the
+  claim to avoid**: the control hard-codes nothing and the suite hard-codes it
+  once, on purpose.
 - **Neither of ADR-033's nor ADR-034's realm obligations is discharged, and
   saying otherwise was this record's first mistake.** A five-hour token is
   admitted in its final window, so the lifetime obligation is contained rather
