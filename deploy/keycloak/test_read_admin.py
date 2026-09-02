@@ -17,6 +17,7 @@ fake wrote.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import json
@@ -110,7 +111,21 @@ class Stubbed(unittest.TestCase):
         # token is a secret-scan finding, and the shorter form is better anyway.
         for name in ("token", "get"):
             self.addCleanup(setattr, read_admin, name, getattr(read_admin, name))
-        read_admin.token = lambda *args: "a-token"
+        # A JWT-SHAPED TOKEN CARRYING THE GRANT, because `clients` reads the
+        # roles out of it before it asks for anything. A stub answering an
+        # opaque string would make every case here exercise the refusal.
+        read_admin.token = lambda *args: self.jwt(["view-clients"])
+
+    def jwt(self, roles: list[str]) -> str:
+        """A token of the shape Keycloak issues, carrying the roles given.
+
+        Unsigned, because `granted_roles` verifies nothing — it reads what the
+        server said it granted, and the server is what enforces it.
+        """
+        claims = {"resource_access": {read_admin.REALM_MANAGEMENT: {"roles": roles}}}
+        payload = base64.urlsafe_b64encode(
+            json.dumps(claims).encode("utf-8")).decode("ascii").rstrip("=")
+        return f"header.{payload}.signature"
 
     def answers(self, representation, clients):
         """One realm document and one client list, served the way Keycloak does.
@@ -204,6 +219,60 @@ class TheCeiling(Stubbed):
         self.answers({"realm": "commerce"}, self.realm_of(read_admin.CLIENT_LIMIT - 1))
         fetched = read_admin.fetch(self.values)["clients"]
         self.assertEqual(len(fetched), read_admin.CLIENT_LIMIT - 1)
+
+
+class TheGrant(Stubbed):
+    """Completeness rests on the account seeing every client, so the grant is read.
+
+    Keycloak applies `max` to the client-model stream and then drops the
+    representations the caller may not see, so a filtered list is not
+    distinguishable from a complete one — no ceiling and no page boundary can
+    establish it. What can be established is the premise, and this is where it
+    is.
+    """
+
+    def test_an_account_with_view_clients_is_accepted(self):
+        self.answers({"realm": "commerce"}, [{"clientId": "web-app"}])
+        self.assertEqual(len(read_admin.fetch(self.values)["clients"]), 1)
+
+    def test_view_realm_is_accepted_because_it_implies_view_clients(self):
+        read_admin.token = lambda *args: self.jwt(["view-realm"])
+        self.answers({"realm": "commerce"}, [{"clientId": "web-app"}])
+        self.assertEqual(len(read_admin.fetch(self.values)["clients"]), 1)
+
+    def test_an_account_without_the_grant_stops_before_it_asks(self):
+        """Not after: a list nobody could have seen in full is not a list to judge."""
+        asked = []
+        read_admin.token = lambda *args: self.jwt(["view-users"])
+        read_admin.get = lambda url, _a: asked.append(url) or {"realm": "commerce"}
+        with self.assertRaises(SystemExit) as stop:
+            read_admin.fetch(self.values)
+        self.assertIn("view-clients", str(stop.exception))
+        self.assertEqual([u for u in asked if "/clients" in u], [])
+
+    def test_a_token_that_is_not_a_jwt_stops(self):
+        """An unestablished premise is the same thing as an unmet one."""
+        self.answers({"realm": "commerce"}, [])
+        read_admin.token = lambda *args: "an-opaque-string"
+        with self.assertRaises(SystemExit) as stop:
+            read_admin.fetch(self.values)
+        self.assertIn("not a JWT", str(stop.exception))
+
+    def test_a_payload_that_does_not_decode_stops(self):
+        self.answers({"realm": "commerce"}, [])
+        read_admin.token = lambda *args: "header.!!!not-base64!!!.signature"
+        with self.assertRaises(SystemExit) as stop:
+            read_admin.fetch(self.values)
+        self.assertIn("does not decode", str(stop.exception))
+
+    def test_a_token_carrying_no_resource_access_stops(self):
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"sub": "x"}).encode("utf-8")).decode("ascii").rstrip("=")
+        read_admin.token = lambda *args: f"header.{payload}.signature"
+        self.answers({"realm": "commerce"}, [])
+        with self.assertRaises(SystemExit) as stop:
+            read_admin.fetch(self.values)
+        self.assertIn("holds none of", str(stop.exception))
 
 
 class TheRedirect(unittest.TestCase):

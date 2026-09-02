@@ -836,8 +836,23 @@ class TheRolloutStillCallsThisGate(unittest.TestCase):
     """
 
     def workflow(self) -> str:
-        return (Path(realm_check.__file__).resolve().parents[2]
+        """The rollout's COMMANDS, with its comment lines removed.
+
+        This file explains each of the three calls in a comment beside it, so a
+        raw search finds `realm_check.py authority` whether or not anything
+        runs it — deleting the command outright would have left every case in
+        this class green. It is the fourth time in this branch that a matcher
+        matched the prose about the matcher, and the third artefact to need
+        stripping: Python comments, Python docstrings, and now YAML.
+
+        Whole lines only. An inline `#` cannot be stripped safely from a shell
+        line — a URL fragment and a `sed` expression both carry one — and no
+        command here has a trailing comment.
+        """
+        text = (Path(realm_check.__file__).resolve().parents[2]
                 / realm_check.DEPLOY_WORKFLOW).read_text(encoding="utf-8")
+        return "\n".join(line for line in text.splitlines()
+                          if not line.lstrip().startswith("#"))
 
     def positions(self) -> list[int]:
         text = self.workflow()

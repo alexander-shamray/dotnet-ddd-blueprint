@@ -181,7 +181,17 @@ that deployment is about to be rolled onto, and hands the document to
 **It is a service account of the realm being checked, with realm-read rights and
 nothing else.** Explicitly *not* a cross-realm admin account: one of those would
 hold rights over realms this check has no business reading, and what the check
-needs is two reads — the realm representation and its client list. The token it
+needs is two reads — the realm representation and its client list.
+
+**`view-clients` on `realm-management` is not optional, and the gate checks it
+rather than assuming it.** Keycloak applies a list request's `max` to the
+client-model stream and then drops the representations the caller may not see,
+so an account short of that role produces a client list that is silently
+incomplete and looks exactly like a complete one. `read_admin.py` reads the
+roles out of its own access token and stops before asking for anything unless
+one of `view-clients`, `view-realm` or `realm-admin` is among them — a
+credential provisioned too narrowly fails the deploy loudly instead of passing
+a realm nobody saw the end of. The token it
 obtains can already see every client secret in the realm it does reach, which is
 why `read_admin.py` refuses a base URL that is not `https`, and why widening the
 grant costs more than widening it looks like it costs.

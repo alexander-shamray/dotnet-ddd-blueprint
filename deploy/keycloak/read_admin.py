@@ -39,6 +39,7 @@ licence-register entry. Two GETs and a form POST is not a client library.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -77,6 +78,24 @@ TIMEOUT_SECONDS = 30
 # list is the one case this stops on. `first` is not sent: there is nothing to
 # skip when the ceiling is the whole realm.
 CLIENT_LIMIT = 10000
+
+# THE ROLE THAT MAKES A COMPLETE ANSWER POSSIBLE, and it is checked rather than
+# assumed. Keycloak applies `max` to the client-model stream and then drops the
+# representations the caller may not see, so a client this account cannot view
+# is absent from a response that is otherwise indistinguishable from a complete
+# one — a short list proves nothing, and neither does a ceiling.
+#
+# There is no clients/count endpoint to compare against, and the export that
+# would be authoritative needs rights this credential deliberately does not
+# hold. What CAN be established is the premise the completeness rests on: with
+# view rights over the realm's clients, nothing is filtered. So the token is
+# read for the grant that was actually issued, and a run whose account cannot
+# see every client stops instead of judging the ones it can.
+#
+# `view-clients` is implied by `view-realm`, and Keycloak grants either through
+# the `realm-management` client, so both are accepted.
+REALM_MANAGEMENT = "realm-management"
+COMPLETENESS_ROLES = ("view-clients", "view-realm", "realm-admin")
 
 
 def environment() -> dict[str, str]:
@@ -167,6 +186,40 @@ def token(base_url: str, realm: str, client_id: str, client_secret: str) -> str:
     return access
 
 
+def granted_roles(access_token: str) -> set[str]:
+    """The realm-management roles this token actually carries.
+
+    The payload is decoded and NOT verified, which is safe because nothing is
+    authorised on it: the server issued this token and the server is what
+    enforces the roles. What it is read for is the opposite of a trust
+    decision — to find out whether this account can see the whole realm, and
+    to stop if it cannot.
+
+    A token that is not a JWT stops the run rather than being waved through:
+    the premise this file's completeness rests on would then be unestablished,
+    which is the same thing as unmet.
+    """
+    parts = access_token.split(".")
+    if len(parts) != 3:
+        raise SystemExit(
+            "read_admin: the token endpoint answered something that is not a "
+            "JWT, so the roles this account holds cannot be read — and the "
+            "client list's completeness rests on them.")
+
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as error:
+        raise SystemExit(
+            f"read_admin: the token's payload does not decode: {error}") from error
+
+    access = claims.get("resource_access", {})
+    management = access.get(REALM_MANAGEMENT, {}) if isinstance(access, dict) else {}
+    roles = management.get("roles", []) if isinstance(management, dict) else []
+    return {role for role in roles if isinstance(role, str)}
+
+
 def get(url: str, access_token: str) -> object:
     request = urllib.request.Request(url, method="GET")
     request.add_header("Authorization", f"Bearer {access_token}")
@@ -188,6 +241,18 @@ def clients(base: str, realm: str, access_token: str) -> list:
     short, and it stops the run; anything below the ceiling is the whole list,
     because the server had room to answer more and did not.
     """
+    # THE GRANT FIRST, BECAUSE THE ANSWER'S COMPLETENESS DEPENDS ON IT. A
+    # filtered client list is not distinguishable from a complete one, so the
+    # only thing that can be checked is the premise.
+    held = granted_roles(access_token)
+    if not held & set(COMPLETENESS_ROLES):
+        raise SystemExit(
+            "read_admin: this account holds none of "
+            f"{', '.join(COMPLETENESS_ROLES)} on {REALM_MANAGEMENT}, so "
+            "Keycloak will silently drop the clients it may not view and a "
+            "short list would look exactly like a complete one. "
+            "docs/secrets.md specifies realm-read for this reason.")
+
     query = urllib.parse.urlencode({"max": CLIENT_LIMIT})
     answer = get(f"{base}/admin/realms/{realm}/clients?{query}", access_token)
     if not isinstance(answer, list):
@@ -227,13 +292,20 @@ def fetch(values: dict[str, str]) -> dict:
             "take on its own.")
     representation["clients"] = every_client
 
-    # REDACTED BEFORE IT IS WRITTEN, not only before it is judged. The admin
-    # API answers a `secret` for every confidential client, and this file's
-    # output is a file on a CI runner that a later step reads and an operator
-    # may print. `realm_check.load_realm` redacts again on the way in, and the
-    # repetition is deliberate: neither file may be the only one that does it,
-    # because either can be handed a document the other never touched.
-    return realm_check.redact(representation)
+    # PROJECTED BEFORE IT IS WRITTEN, not only before it is judged. Redacting
+    # here was the first answer and it was the weaker one: it still wrote the
+    # whole admin representation to a file on a CI runner, so any
+    # secret-bearing field Keycloak adds that `CREDENTIAL_KEYS` does not list
+    # would land in `$RUNNER_TEMP` for a later step to read or an operator to
+    # print. The narrowing has to happen on the way OUT of the fetch, not on
+    # the way in to the judgement.
+    #
+    # Redaction still runs first, and the order is deliberate: a credential
+    # under one of the six projected keys — a realm that put a secret in a
+    # client attribute — is removed before the projection can carry it through.
+    # `load_realm` does both again, because either file can be handed a
+    # document the other never touched.
+    return realm_check.judged(realm_check.redact(representation))
 
 
 def main(argv: list[str]) -> int:

@@ -65,10 +65,16 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   credential: there is none to leak.
 - **A realm with more clients than the ceiling.** The client list is read in
   one request asking for far more than any realm this platform will have, and a
-  response *at* that ceiling stops the run rather than being truncated —
-  completeness is refused rather than inferred, because Keycloak pages client
-  models and filters representations afterwards, so no page boundary proves
-  anything.
+  response *at* that ceiling stops the run rather than being truncated.
+- **Whether the answer was filtered — directly.** Keycloak applies `max` to the
+  client-model stream and then drops the representations the caller may not
+  see, so a filtered list and a complete one look the same and no ceiling or
+  page boundary can tell them apart. What is checked instead is the premise:
+  `read_admin.py` reads the roles out of its own token and stops before asking
+  unless the account holds `view-clients`, `view-realm` or `realm-admin`. The
+  token is decoded and **not verified**, which is safe because nothing is
+  authorised on it — the server issued it and the server enforces the roles;
+  it is read to find out whether this account could see the whole realm.
 - **Whether the realm is reachable outside a rollout.** It is read when a
   deployment reads it, so a realm edited between rollouts is unobserved until
   the next one

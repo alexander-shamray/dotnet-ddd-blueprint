@@ -3238,11 +3238,18 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   than followed**, because `urllib` copies a request's headers onto the
   redirected one and strips only the content ones, so an `Authorization` header
   would travel to any host a 302 named; **the client list is read in one
-  request with a ceiling and a response *at* the ceiling is refused**, because
-  completeness cannot be inferred from a page — Keycloak pages client models
-  and filters representations it cannot render afterwards, so neither a short
-  page nor an empty one proves there is nothing behind it, and every per-client
-  obligation is satisfied by the clients nobody fetched;
+  request with a ceiling, a response *at* the ceiling is refused, and the
+  account's grant is read out of its own token before the request is made** —
+  Keycloak applies `max` to the client-model stream and then drops the
+  representations the caller may not see, so a filtered list and a complete one
+  are indistinguishable and every per-client obligation is satisfied by the
+  clients nobody fetched. No ceiling can establish that; what can be
+  established is the premise it rests on, so a run whose account holds none of
+  `view-clients`, `view-realm` or `realm-admin` stops before it asks;
+  **whatever Helm's `strvals` parser reads as structure is refused in an
+  authority**, because the derived value is passed to `--set-string` and a
+  comma there makes one assignment into two — the tag preflight's lesson, one
+  value over;
   **whitespace in an authority is refused**, because the two values derived
   from it become `NAME=value` lines in `$GITHUB_ENV` and a newline there starts
   a second assignment; an authority this gate cannot split stops it; a realm

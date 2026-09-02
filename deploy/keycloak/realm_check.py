@@ -171,6 +171,20 @@ KINDS = (LOCAL, DEPLOYED)
 AUTHORITY_VALUE = ("identity", "authority")
 REALMS_SEGMENT = "/realms/"
 
+# What Helm's `strvals` parser reads as structure rather than as text. The
+# deploy step passes the derived authority as `--set-string
+# identity.authority=<value>`, and `strvals` splits that on a COMMA whatever
+# the shell quoting is — so an `identity.authority` of
+# `https://host/realms/x,image.registry=attacker.example` is two assignments,
+# one of which nobody checked. The backslash escapes, and the brackets and
+# braces open list and map syntax.
+#
+# Refusing them in the authority is what makes the deploy step's `--set-string`
+# safe, and the step says so rather than assuming it. It is the tag preflight's
+# lesson one value over: `canary.py validate-tag` exists because exactly this
+# parser turned one assignment into two.
+STRVALS_METACHARACTERS = ",\\{}[]="
+
 # The environment `read_admin.py` reads, declared HERE and imported there —
 # `deploy/canary`'s direction, where `read_prometheus.py` imports from
 # `canary.py` and never the reverse. Two of these four are what `authority`
@@ -356,6 +370,15 @@ def split_authority(authority: str) -> tuple[str, str]:
         raise SystemExit(
             f"realm-gate: identity.authority is {authority!r}. An admin path "
             "appended to a URL carrying a query or a fragment lands inside it.")
+
+    found = sorted(set(authority) & set(STRVALS_METACHARACTERS))
+    if found:
+        raise SystemExit(
+            f"realm-gate: identity.authority is {authority!r}, which contains "
+            f"{''.join(found)!r}. Helm's strvals parser reads those as "
+            "structure, and this value is passed to `--set-string` — a comma "
+            "would make one assignment into two, and the second would be an "
+            "override nobody checked.")
 
     root, separator, realm = authority.rstrip("/").partition(REALMS_SEGMENT)
     if not separator or not realm:
