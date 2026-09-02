@@ -1822,13 +1822,14 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         self.assertEqual(2, result.returncode, result.stderr)
         self.assertEqual([], self.calls())
 
-    STDIN = "a title\n\nthe body\n"
+    TRAILER = "Filed by an authorised sweep and verified at filing by a second read-only auditor."
+    STDIN = f"a title\n\nthe body\n\n{TRAILER}\n"
 
     def test_no_arguments_prints_the_usage_line(self):
         result = self.run_helper()
         self.assert_refused_before_gh(result)
         self.assertIn(
-            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body",
+            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body ending in the trailer",
             result.stderr,
         )
 
@@ -1861,6 +1862,50 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         # own first sentence, with the second sentence lost into the title.
         self.assert_refused_before_gh(self.run_helper("bug", "low", body="the body\nand more\n"))
 
+    def test_a_stdin_that_ends_before_the_separator_is_refused(self):
+        # The sixth review round's case: `read` fails at EOF and leaves the
+        # separator unset, which an `|| true` read as blank and filed with an
+        # empty body.
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title"))
+
+    def test_a_body_without_the_trailer_is_refused(self):
+        # The detector for an early heredoc close: a body cut short by a
+        # repository line equal to the delimiter has lost its last line.
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n\nthe body\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n\n"))
+        self.assert_refused_before_gh(
+            self.run_helper("bug", "low", body=f"a title\n\n{self.TRAILER}\n\nmore after it\n")
+        )
+
+    def test_a_repository_line_equal_to_a_naive_delimiter_is_the_hazard_and_the_token_is_the_rule(self):
+        # The real composition again, with the payload the sweeps' rule is
+        # written for: a quoted repository line that reads `EOF`, followed by
+        # a substitution that would run in the parent if the heredoc closed
+        # there. Under the token delimiter the rule prescribes, the whole
+        # payload reaches the stub and the marker is never created. The naive
+        # delimiter is not run here on purpose — its failure mode is the
+        # parent's shell executing the tail — and the helper's part of it is
+        # the trailer case above.
+        d = Path(self.dir)
+        marker = (d / "pwned").as_posix()
+        body = f"the affected lines:\n\n    EOF\n    $(touch {marker})\n\n{self.TRAILER}\n"
+        env = dict(os.environ)
+        env["PATH"] = self.dir + os.pathsep + env["PATH"]
+        script = (
+            'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
+            f"bash {str(self.HELPER)!r} bug high <<'ISSUE_BODY_END'\n"
+            "a title\n"
+            "\n"
+            f"{body}"
+            "ISSUE_BODY_END\n"
+        )
+        result = subprocess.run([BASH, "-c", script], capture_output=True, text=True, env=env)
+        self.assertNotEqual(97, result.returncode, "the stub gh was not first on PATH")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse((d / "pwned").exists())
+        self.assertEqual(body, (d / "body").read_text(encoding="utf-8"))
+
     def test_the_title_never_crosses_the_parents_command_line(self):
         # The real boundary: the parent is a shell composing a command string
         # around a quoted heredoc, and the title carries every expansion a
@@ -1880,11 +1925,13 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         env["PATH"] = self.dir + os.pathsep + env["PATH"]
         script = (
             'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
-            f"bash {str(self.HELPER)!r} security high <<'EOF'\n"
+            f"bash {str(self.HELPER)!r} security high <<'ISSUE_BODY_END'\n"
             f"{title}\n"
             "\n"
             "the body\n"
-            "EOF\n"
+            "\n"
+            f"{self.TRAILER}\n"
+            "ISSUE_BODY_END\n"
         )
         result = subprocess.run([BASH, "-c", script], capture_output=True, text=True, env=env)
         self.assertNotEqual(97, result.returncode, "the stub gh was not first on PATH")
@@ -1893,13 +1940,13 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         create = [c for c in self.calls() if c.startswith("issue create ")]
         self.assertEqual(1, len(create), self.calls())
         self.assertIn(f"--title {title}", create[0])
-        self.assertEqual("the body\n", (d / "body").read_text(encoding="utf-8"))
+        self.assertEqual(f"the body\n\n{self.TRAILER}\n", (d / "body").read_text(encoding="utf-8"))
 
     def test_a_valid_filing_reaches_gh_with_every_parameter_pinned(self):
         # The positive control the negatives need: a helper that refused
         # everything would pass every case above.
         title = "`/security-sweep` files a title that begins with a slash"
-        body = "the body\n\nverified at filing by a second read-only auditor\n"
+        body = f"the body\n\n{self.TRAILER}\n"
         result = self.run_helper("security", "high", body=f"{title}\n\n{body}")
         self.assertEqual(0, result.returncode, result.stderr)
         create = [c for c in self.calls() if c.startswith("issue create ")]

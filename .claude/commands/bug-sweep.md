@@ -761,11 +761,30 @@ Each round is the review done once, end to end:
    this command withholds. The helper resolves the repository from the
    checkout, refuses a kind or severity outside the six labels, refuses a
    stdin whose second line is not blank, and ensures both labels through
-   `gh-label-ensure.sh` itself. End the body noting it came from an
-   authorised sweep, was verified at filing **by a second read-only auditor
-   reading rather than executing**, and naming the commit pinned — a defect
-   claim that never ran the code should say so where whoever picks it up will
-   read it.
+   `gh-label-ensure.sh` itself. Say in the body that the verifier **read
+   rather than executed**, and name the commit pinned — a defect claim that
+   never ran the code should say so where whoever picks it up will read it —
+   and then end the body with this line, exactly, as its last non-blank line,
+   because the helper refuses a body without it:
+
+   ```
+   Filed by an authorised sweep and verified at filing by a second read-only auditor.
+   ```
+
+   **The delimiter is the one thing a quoted heredoc leaves the payload to
+   steer, and the rule for it is yours to keep, not the helper's.** The body
+   quotes repository lines, and a repository line equal to the delimiter
+   closes the heredoc there: everything after it is no longer inert text but
+   the parent's own shell input, `$(…)` included. Nothing downstream can
+   undo that, because it happens before the helper runs. So the delimiter is
+   never `EOF` or any word a file could plausibly hold; it is a token of the
+   form `ISSUE_BODY_END`, and **before the command is composed, every line
+   of the payload — title, body, quoted lines — is checked against it**, and
+   a payload that contains the token gets a different one. The trailer line
+   above is the detector for the case the rule missed: a body cut short has
+   lost its last line, and the helper exits 2 instead of filing half an
+   issue — after the tail has run, which is why the rule and not the trailer
+   is the guard.
 
    **A title must never begin with `/`, and this is a defect that already
    shipped four times.** MSYS argument conversion rewrites an argument that
@@ -774,9 +793,9 @@ Each round is the review done once, end to end:
    `"C:/Program Files/Git/health/ready returns 200 …"`. Issues #55, #56 and #68
    carried it for two weeks and nobody reading the tracker could tell what the
    subject was. The body is safe — it arrives on stdin, which is bytes rather
-   than an argument — so **only `--title` is exposed**, and only at position
-   one: measured here, a leading backtick or a leading space both suppress the
-   conversion and a bare `/` does not.
+   than an argument — so **only `--title` is exposed** inside the helper, and
+   only at position one: measured here, a leading backtick or a leading space
+   both suppress the conversion and a bare `/` does not.
 
    **The helper closes it, and it is the one thing a helper can do that the
    grant could not.** `gh-issue-create.sh` sets `MSYS2_ARG_CONV_EXCL` for its

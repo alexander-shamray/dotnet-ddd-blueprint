@@ -31,6 +31,18 @@
 # body and arrives as the bytes the parent wrote. The first line of stdin is
 # the title, the second is blank, and the rest is the body.
 #
+# THE LAST LINE IS FIXED, AND IT IS A DETECTOR RATHER THAN A GUARD. A quoted
+# heredoc has one thing the payload can still steer: its terminator. The body
+# quotes repository lines, so a repository line equal to the delimiter closes
+# the heredoc early and hands the rest of the payload to the parent's shell as
+# commands. Nothing in this script can stop that — it runs after the parent
+# has parsed — so the guard is the sweeps' rule that the delimiter is a token
+# checked against every line of the payload before the command is composed.
+# What this script can do is refuse to file what an early close leaves behind:
+# the body must end with the trailer line below, exactly, and a body cut short
+# has lost it. A truncated filing is then a loud exit 2 rather than a
+# half-issue with its second half executed.
+#
 # THE MSYS TITLE HAZARD CLOSES HERE TOO, and this is the one thing a helper
 # can do that a grant could not. MSYS argument conversion rewrites an argument
 # that looks like an absolute POSIX path before a native `gh.exe` sees it, so a
@@ -41,8 +53,10 @@
 # script is unchanged.
 set -euo pipefail
 
+trailer='Filed by an authorised sweep and verified at filing by a second read-only auditor.'
+
 [ "$#" -eq 2 ] ||
-  { echo "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body" >&2; exit 2; }
+  { echo "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body ending in the trailer" >&2; exit 2; }
 kind="$1"; severity="$2"
 
 # The whole vocabulary a sweep files under. A word outside it is refused rather
@@ -60,14 +74,24 @@ esac
 # The title is the first line of stdin and the second line must be blank, so a
 # body that arrives without its title line is refused rather than filed under
 # its own first sentence. An empty title files an issue nobody can find in the
-# tracker; a title cannot contain a newline, because a line is what it is.
+# tracker; a title cannot contain a newline, because a line is what it is. A
+# stdin that ends before the second line is refused too: `read` fails at EOF,
+# and an unset separator is not a blank one.
 IFS= read -r title || true
 title="${title%$'\r'}"
 [ -n "$title" ] || { echo "the title is empty" >&2; exit 2; }
-IFS= read -r separator || true
+IFS= read -r separator ||
+  { echo "stdin ended before the blank line: title, blank line, body" >&2; exit 2; }
 separator="${separator%$'\r'}"
 [ -z "$separator" ] ||
   { echo "the second line of stdin must be blank: title, blank line, body" >&2; exit 2; }
+
+# The body is what is left of stdin, and it is read whole here rather than
+# streamed, because its last line is checked before anything is filed.
+body=$(cat; printf x); body="${body%x}"
+last=$(printf '%s' "$body" | sed -e 's/\r$//' -e '/^[[:space:]]*$/d' | tail -n 1)
+[ "$last" = "$trailer" ] ||
+  { echo "the body does not end with the trailer line; a heredoc closed early or the line was left off" >&2; exit 2; }
 
 # The repository is resolved, never accepted. `gh repo view` reads the checkout
 # this process is standing in, so the answer is a property of the filesystem
@@ -81,10 +105,10 @@ here=$(dirname "$0")
 bash "$here/gh-label-ensure.sh" "$kind" >/dev/null
 bash "$here/gh-label-ensure.sh" "$severity" >/dev/null
 
-# The body is what is left of stdin: `--body-file -` reads bytes from where the
-# two `read`s stopped. The title is the one argument the conversion below could
-# ever have touched, and it is excluded for this child.
-MSYS2_ARG_CONV_EXCL='*' gh issue create \
+# `--body-file -` reads bytes, so the body goes back out on stdin unchanged.
+# The title is the one argument the conversion below could ever have touched,
+# and it is excluded for this child.
+printf '%s' "$body" | MSYS2_ARG_CONV_EXCL='*' gh issue create \
   --repo "$repo" \
   --title "$title" \
   --label "$kind" \
