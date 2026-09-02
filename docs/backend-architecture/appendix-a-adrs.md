@@ -2652,13 +2652,17 @@ This decision keeps the TTL and moves the question instead.
   should have asked about. That matches how the store is registered — "a
   service that has Redis has the store, and one that does not cannot
   half-have it" — and §4.5's scaffold ships both together.
-- **An unreachable claim store purges nothing, and that is the safe
+- **An unreachable claim store purges no markers, and that is the safe
   direction.** `UnheldAsync` answers for every key or throws; there is no
   partial answer, because a key reported unheld because its lookup failed is
   the deleted marker this record exists to prevent. The throw reaches
   `ExecuteAsync`'s existing catch, which logs and retries next interval, so a
-  Redis outage costs a purge rather than a guarantee. Markers accumulate while
-  it lasts, which is the outbox's failure mode and not this one's.
+  Redis outage costs the **marker** pass rather than a guarantee. It costs no
+  more than that, and the scope is worth stating precisely: `PurgeAsync` runs
+  the outbox and the inbox first, so those deletions are already committed when
+  `UnheldAsync` throws — nothing rolls back and nothing else is skipped. Markers
+  accumulate while it lasts, which is the outbox's failure mode and not this
+  one's.
 - **The marker's pass is two statements where the other two are one, and the
   window between them holds one race this record does not close and one it
   had to.** A retry can re-claim a key between the `SELECT` and the `DELETE`,
@@ -2696,10 +2700,10 @@ This decision keeps the TTL and moves the question instead.
 - **So the `DELETE` names the row rather than describing it.** It joins the
   `(Key, CommittedAt)` pairs the `SELECT` returned: the key names the command
   and the timestamp names the write, so a replacement — a different write —
-  cannot be matched however the clock behaves. That is the property the single
-  statement had for free, and buying it back is what the split owed. Rows are
-  chunked at 900 rather than 1,000 because each now costs two parameters
-  against SQL Server's 2,100.
+  cannot be matched — **by construction, and the next consequence is the limit
+  of that**. It is the property the single statement had for free, and buying
+  it back is what the split owed. Rows are chunked at 900 rather than 1,000
+  because each now costs two parameters against SQL Server's 2,100.
 - **`(Key, CommittedAt)` is an identity by construction rather than by
   constraint, and the difference is this decision's last residual.** The key is
   the primary key and the timestamp is written once by a column default, so two

@@ -1223,10 +1223,15 @@ ORDER BY CommittedAt;
 -- correction, which puts the replacement below the bound and past a re-read
 -- cutoff at once. An arbitrary clock cannot be out-predicated.
 --
--- (Key, CommittedAt) is the row's identity: the key names the command, the
--- timestamp names the write. A replacement is a different write, so this
--- statement cannot reach it however the clock behaves — the property the
--- single statement had for free and the split had to buy back.
+-- (Key, CommittedAt) is the row's identity BY CONSTRUCTION: the key names the
+-- command, the timestamp names the write, and a replacement is a different
+-- write stamped at a different instant. That is the property the single
+-- statement had for free and the split had to buy back.
+--
+-- By construction and not by constraint. Nothing enforces uniqueness on a
+-- datetimeoffset(7), so a replacement stamped at the selected row's exact tick
+-- would match — #173, which a rowversion closes, and which needs a clock set
+-- to an exact historical instant rather than drifted by a magnitude.
 --
 -- Chunked at 900 rows by the caller, because each costs TWO parameters — its
 -- key and its version — and SQL Server refuses more than 2,100 of them, where
@@ -1270,6 +1275,14 @@ INNER JOIN (VALUES (@k0, @v0), (@k1, @v1), ...) AS selected([Key], CommittedAt)
 > property the single statement had for free, bought back rather than
 > approximated, and it is why the statement joins the pairs the `SELECT`
 > returned rather than carrying a predicate at all.
+>
+> **It is an identity by construction and not by constraint, and that is the
+> one thing left.** Nothing enforces uniqueness on a `datetimeoffset(7)`, so a
+> replacement stamped at the selected row's exact tick would match. What that
+> needs is a clock set to an exact historical instant rather than drifted by a
+> magnitude — a different fault from the four above, which is why it is
+> [#173](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173)
+> and a `rowversion` rather than a fifth attempt here.
 
 > **The floor is the claim's window exactly, and it was the claim's window
 > *plus* an allowance until both of the things that reordered the two expiries

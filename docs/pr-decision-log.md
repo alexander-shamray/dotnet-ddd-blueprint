@@ -133,7 +133,9 @@ considered per batch instead of being quietly capped by a number nobody set.
 **The purge now depends on Redis, and the failure directions differ.** A
 service with markers and no claim store fails to resolve at startup, which is
 loud. An unreachable store mid-pass throws, reaches the existing catch, and
-leaves every marker in place — markers accumulate, which is the outbox's
+leaves every marker in place — and only markers, since the outbox and the
+inbox are deleted before that call and those deletions stand. Markers
+accumulate, which is the outbox's
 failure mode and not a lost guarantee.
 
 ### The floor survives and makes a smaller claim
@@ -253,15 +255,22 @@ constant without saying which would read as the reverse.
   attempt would have been the guess ADR-037 and ADR-038 exist to refuse. The
   statement now joins the `(Key, CommittedAt)` pairs the `SELECT` returned: the
   key names the command, the timestamp names the write, and a replacement is a
-  different write.
+  different write — **by construction rather than by constraint**, which is the
+  qualification the twelfth round added and the ninth had already filed as
+  [#173](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173).
+  Nothing enforces uniqueness on a `datetimeoffset(7)`, so a replacement
+  stamped at the selected row's exact tick would match; that needs a clock set
+  to an exact historical instant rather than drifted by a magnitude, and a
+  `rowversion` is what closes it.
 - **Three rounds spent on one defect is the entry's own lesson.** Each fix was
   a smaller predicate over the same moving quantity, and each review found the
   movement it did not cover. The shape that ended it was giving up on
   describing the row and identifying it — which is what the atomic statement
-  had been doing implicitly all along. **A `rowversion` says the same thing and
-  was declined**: a column, a migration per service, a scaffold change and an
-  Appendix D row, to identify a row that its primary key and a
-  write-once timestamp already identify.
+  had been doing implicitly all along. **A `rowversion` says the same thing and is owed rather than
+  declined** — #173. It costs a column, a migration per service, a scaffold
+  change and an Appendix D row; what it buys is the uniqueness the pair has by
+  construction and not by constraint. The first draft of this entry called it
+  declined, which was the reading before the residual was named.
 - **Two review rounds were needed to reach that**, and neither the defect nor
   the wrong fix could have been caught by the suite: the interleaving needs
   three purgers, a retry and a clock step, and nothing here stages one. What

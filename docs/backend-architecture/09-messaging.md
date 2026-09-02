@@ -2103,7 +2103,9 @@ the reason it is a constructor argument.** `RetentionPurgeService` takes
 resolve at startup rather than running a pass that deletes what it should have
 asked about. An unreachable store then throws out of `UnheldAsync` into the
 same `catch`, which logs, deletes nothing and retries next interval — so a
-Redis outage costs a purge rather than a guarantee, and markers accumulate
+Redis outage costs the marker pass rather than a guarantee — and no more than
+that, since the outbox and the inbox are deleted before `UnheldAsync` is called
+and those deletions stand — and markers accumulate
 while it lasts. That is the outbox's failure mode borrowed for an hour, and it
 is the safe direction to fail in for a table whose window is a correctness
 property.

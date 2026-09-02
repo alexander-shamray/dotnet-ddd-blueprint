@@ -217,11 +217,18 @@ public sealed class RetentionPurgeService : BackgroundService
         // because the replacement is then both below the bound and past a
         // re-read cutoff. An arbitrary clock cannot be out-predicated.
         //
-        // (Key, CommittedAt) is the row's identity here: the key names the
-        // command and the timestamp names the write. A replacement is a
-        // different write, so it carries a different version and this statement
-        // cannot reach it however the clock behaves — which is the property the
-        // single statement had for free and the split had to buy back.
+        // (Key, CommittedAt) is the row's identity here BY CONSTRUCTION: the
+        // key names the command and the timestamp names the write, and a
+        // replacement is a different write stamped at a different instant. That
+        // is the property the single statement had for free and the split had
+        // to buy back.
+        //
+        // By construction and not by constraint, which is the limit worth
+        // knowing. CommittedAt is a datetimeoffset(7) with no uniqueness on it,
+        // so a replacement stamped at the very tick the selected row carries
+        // would be matched. That needs the clock set to an exact historical
+        // instant rather than drifted by a magnitude, which is why it is
+        // #173 and a rowversion rather than a fourth predicate here.
         //
         // Composed per chunk because the VALUES list is as long as the chunk.
         // The only interpolation is the table name, whose shape
@@ -406,9 +413,9 @@ public sealed class RetentionPurgeService : BackgroundService
     }
 
     /// <summary>
-    /// Deletes exactly the rows given — each matched on key <em>and</em>
-    /// version — chunked to stay inside SQL Server's parameter limit. Returns
-    /// the rows actually removed.
+    /// Deletes the rows matching the given (key, version) pairs, chunked to
+    /// stay inside SQL Server's parameter limit. Returns the rows actually
+    /// removed.
     /// </summary>
     /// <remarks>
     /// <b>Identity rather than a predicate, because an arbitrary clock cannot
@@ -417,6 +424,13 @@ public sealed class RetentionPurgeService : BackgroundService
     /// the statement's own comment records the three predicates that were tried
     /// and which clock movement defeated each. A count lower than the number of
     /// rows handed in means another replica got there first, which is ordinary.
+    /// <para>
+    /// <b>The pair identifies a write by construction rather than by
+    /// constraint</b>, so a replacement stamped at the selected row's exact
+    /// tick would still match — the residual
+    /// <see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173">#173</see>
+    /// carries, and what a <c>rowversion</c> would close.
+    /// </para>
     /// </remarks>
     private async Task<int> DeleteRowsAsync(
         IDbConnection connection,

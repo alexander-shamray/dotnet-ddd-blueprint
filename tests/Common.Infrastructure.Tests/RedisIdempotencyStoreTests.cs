@@ -524,20 +524,38 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
 
         // Polled rather than slept, on WaitForClaimAsync's terms: a fixed wait
         // is either slower than it needs to be or short on a loaded runner.
-        DateTimeOffset deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(15);
-        IReadOnlyCollection<string> unheld = [];
+        //
+        // AND IT THROWS ON THE DEADLINE RATHER THAN ASSERTING PAST IT, which is
+        // that helper's other half and the part the first draft of this test
+        // dropped. Falling out of the loop left `unheld` holding the last
+        // answer — empty — so a runner too loaded to expire a one-second key in
+        // fifteen seconds failed with "expected [unheld-expiring], was []",
+        // which reads as a broken store rather than as a slow machine. This
+        // suite shares four containers with twelve other projects; the
+        // difference decides whether the next red run is diagnosed or retried.
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
 
-        while (DateTimeOffset.UtcNow < deadline)
+        while (true)
         {
-            unheld = await store.UnheldAsync(["unheld-expiring"], TestContext.Current.CancellationToken);
+            IReadOnlyCollection<string> unheld =
+                await store.UnheldAsync(["unheld-expiring"], TestContext.Current.CancellationToken);
 
             if (unheld.Count == 1)
-                break;
+            {
+                unheld.ShouldBe(["unheld-expiring"], "the claim's own TTL is what frees the key");
+                return;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException(
+                    "'unheld-expiring' was still held 30 seconds after a one-second claim. The " +
+                    "store answered, so this is the machine rather than the contract — a Redis " +
+                    "container starved of CPU expires keys late.");
+            }
 
             await Task.Delay(TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
         }
-
-        unheld.ShouldBe(["unheld-expiring"], "the claim's own TTL is what frees the key");
     }
 
     [Fact]
