@@ -17,7 +17,10 @@ another, and drive a client socket at the proxy. The allow-list and the
 upstream port are module globals read at request time, so each case sets them
 for its own scenario and restores them after; nothing here reaches past
 127.0.0.1, which keeps the `review-helpers` job's argument — no Docker, no
-network — true of this module too.
+network — true of this module too. Because every socket case patches those
+two values, a class of its own pins what they are when nothing patches them:
+the shipped allow-list, the upstream port and the listening port the reviewer
+is pointed at, read with the environment cleared of both variables.
 
 Every negative is paired with the positive it refuses beside: the same fake
 upstream that relays for a listed host counts zero connections for an unlisted
@@ -26,6 +29,7 @@ would fail the positive first.
 """
 
 import importlib.util
+import os
 import socket
 import socketserver
 import threading
@@ -118,8 +122,44 @@ class ProxyCase(unittest.TestCase):
         )
 
 
+class TheShippedDefaultsAreWhatTheReviewerIsConfinedTo(unittest.TestCase):
+    """The socket cases below patch the allow-list and the upstream port to reach
+    loopback, so none of them would notice the production defaults widening.
+    This class reads the module as the image runs it — with neither variable in
+    the environment — and pins what it answers, so a fourth host or a second
+    port is a red case here before it is a wider hole in the sandbox.
+    """
+
+    @staticmethod
+    def shipped():
+        with mock.patch.dict(os.environ):
+            os.environ.pop("EGRESS_ALLOW", None)
+            os.environ.pop("EGRESS_PORT", None)
+            return load_proxy()
+
+    def test_the_default_allow_list_is_the_two_x_ai_hosts_and_the_port_is_443(self):
+        shipped = self.shipped()
+        self.assertEqual(frozenset({"api.x.ai", "auth.x.ai"}), shipped.ALLOWED)
+        self.assertEqual(443, shipped.UPSTREAM_PORT)
+
+    def test_the_listening_port_is_the_one_the_reviewer_is_pointed_at(self):
+        script = (HERE / "grok-review.sh").read_text(encoding="utf-8")
+        self.assertIn("HTTPS_PROXY=http://proxy:8888", script)
+        self.assertEqual(8888, self.shipped().PORT)
+
+    def test_the_environment_is_what_widens_it_and_nothing_else(self):
+        # The positive control for the pin: the same loader answers differently
+        # only when the variable is set, so the pin is reading the default
+        # rather than a value the host happened to export.
+        with mock.patch.dict(os.environ, {"EGRESS_ALLOW": "one.test, Two.TEST,", "EGRESS_PORT": "9"}):
+            widened = load_proxy()
+        self.assertEqual(frozenset({"one.test", "two.test"}), widened.ALLOWED)
+        self.assertEqual(9, widened.PORT)
+        self.assertEqual(443, widened.UPSTREAM_PORT)
+
+
 class AnAllowedTunnelRelays(ProxyCase):
-    def test_a_listed_host_on_443_is_established_and_relayed_both_ways(self):
+    def test_a_listed_host_on_the_upstream_port_is_established_and_relayed_both_ways(self):
         sock, head = self.connect_request(f"127.0.0.1:{self.upstream_port}")
         self.assertTrue(head.startswith(b"HTTP/1.1 200 Connection established\r\n"), head)
         sock.sendall(b"hello through the tunnel")
