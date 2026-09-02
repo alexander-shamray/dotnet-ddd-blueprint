@@ -278,6 +278,53 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_held_key_costs_its_own_batch_and_not_the_rest_of_the_pass()
+    {
+        // The pass stops on NO PROGRESS, not on an incomplete batch, and the
+        // difference is most of a pass's capacity. `deleted < candidates.Length`
+        // was the earlier rule, on the premise that a batch the store would not
+        // release entirely comes back unchanged — which is false: TOP refills
+        // the deleted slots with the next-oldest rows, so one held key at the
+        // head ended the pass after roughly one batch.
+        //
+        // Five rows, batches of two, and the middle one held. Under the old
+        // rule the pass deletes the first two, meets a partial second batch and
+        // stops at three. Under this one it keeps going while it is making
+        // progress and stops when a batch deletes nothing — four, every row but
+        // the held one. The two numbers differ, which is what makes this a test
+        // rather than a restatement.
+        string held = Key();
+
+        await fixture.StageIdempotencyMarkersAsync(
+            new IdempotencyMarker(Key(), LongAgo.AddMinutes(-5)),
+            new IdempotencyMarker(Key(), LongAgo.AddMinutes(-4)),
+            new IdempotencyMarker(held, LongAgo.AddMinutes(-3)),
+            new IdempotencyMarker(Key(), LongAgo.AddMinutes(-2)),
+            new IdempotencyMarker(Key(), LongAgo.AddMinutes(-1)));
+
+        (await fixture.IdempotencyClaims.TryClaimAsync(
+            held,
+            IdempotencyRetention.Window,
+            TestContext.Current.CancellationToken)).ShouldNotBeNull();
+
+        // The floor is read rather than restated, so this stays correct if
+        // IdempotencyRetention.Window is retuned.
+        RetentionPolicy twoAtATime = new()
+        {
+            BatchSize = 2,
+            MaxBatchesPerPass = 5,
+            IdempotencyWindow = IdempotencyRetention.MarkerFloor
+        };
+
+        (await fixture.PurgeWithAsync(twoAtATime)).Idempotency.ShouldBe(
+            4,
+            "stopping on a partial batch would have ended the pass at three");
+
+        IdempotencyMarker survivor = (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
+        survivor.Key.ShouldBe(held, "the row whose claim is still live is the one that stays");
+    }
+
+    [Fact]
     public async Task A_batch_spanning_more_than_one_delete_chunk_is_deleted_whole()
     {
         // The chunked delete, which nothing else here reaches. `BatchSize`

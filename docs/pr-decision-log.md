@@ -111,11 +111,13 @@ go.
 
 ### Three things the shape cost, each stated rather than absorbed
 
-**The pass is two statements, so it can be blocked at the head.** A batch the
-store still holds keys from would be returned unchanged by the next `SELECT`,
-so the pass stops there rather than re-reading and re-asking for no deletions.
-Candidates come back oldest first, which puts the rows likeliest to hold a live
-claim — the newest — at the tail where the stop costs least.
+**The pass is two statements, so it can be blocked at the head — and the first
+rule for that was wrong.** It stopped on any batch it could not delete
+*entirely*, on the premise that such a batch comes back unchanged. It does not:
+`TOP` refills the deleted slots with the next-oldest candidates, so one held key
+at the head ended a pass after roughly one batch and left the rest of the table
+for an hour later. The rule is progress now — stop when a batch deletes nothing
+— and a test stages a held key mid-backlog and asserts the pass gets past it.
 
 **The delete is by key, which meets a limit belonging to another layer.**
 Dapper expands `IN @Keys` into one parameter per element and SQL Server refuses
@@ -237,9 +239,16 @@ constant without saying which would read as the reverse.
   the stale delete takes it regardless. **An age against a moving clock cannot
   guard an ABA**, in a pull request whose entire subject is that the clock
   moves: the fix assumed away the fault the change exists to survive. The
-  delete bounds on `@SelectedThrough` instead — the newest `CommittedAt` the
-  `SELECT` returned, captured from the rows in hand — which nothing the clock
-  does afterwards can move.
+  delete bounds on `@SelectedThrough` — the newest `CommittedAt` the `SELECT`
+  returned, captured from the rows in hand — **and keeps the age cutoff beside
+  it**, because neither is sufficient alone. A forward step defeats the cutoff
+  and cannot touch the bound; a backward step can stamp a replacement at or
+  below the bound and is caught by the cutoff, which moves back with the same
+  clock. A row cannot be older than the window at the instant that clock stamps
+  it, so the pair leaves a replacement no way through. It took two review rounds
+  after the first fix to arrive there, and a `rowversion` was considered and
+  declined: a column, a migration per service, a scaffold change and an
+  Appendix D row to close what the pair closes.
 - **Two review rounds were needed to reach that**, and neither the defect nor
   the wrong fix could have been caught by the suite: the interleaving needs
   three purgers, a retry and a clock step, and nothing here stages one. What

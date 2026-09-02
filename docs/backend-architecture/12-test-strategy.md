@@ -1109,8 +1109,8 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > twenty-six/97, then twenty-six/98, then twenty-seven/99, and every retake up
 > to the last three was the suite growing while the callout did not. **The
 > count of retakes is not written here either**, for the reason the figures
-> keep demonstrating: it has been wrong at each of them. What a reader can check is whether this pair matches
-> `docs/testing.md` and a run.
+> keep demonstrating: it has been wrong at each of them. What a reader can
+> check is whether this pair matches `docs/testing.md` and a run.
 >
 > **One retake was the first to go *down*, and the direction is worth
 > naming.** ADR-033 withdrew the token-denylist claim, so

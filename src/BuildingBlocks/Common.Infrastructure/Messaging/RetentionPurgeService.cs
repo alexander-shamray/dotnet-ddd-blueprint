@@ -367,14 +367,28 @@ public sealed class RetentionPurgeService : BackgroundService
                 await DeleteKeysAsync(connection, unheld, selectedThrough, windowSeconds, ct);
             total += deleted;
 
-            // Two ways to stop and both are needed. A short SELECT means the
-            // table is drained of candidates. A batch the store would not let
-            // go of entirely means the next SELECT returns those same rows —
-            // they are ordered oldest first and nothing about them has changed
-            // — so continuing would re-read and re-ask for no deletions. The
-            // ceiling above bounds the pass either way, and an hour later the
-            // claim these rows are waiting on has usually gone.
-            if (candidates.Length < _policy.BatchSize || deleted < candidates.Length)
+            // Two ways to stop, and the second is PROGRESS rather than
+            // completeness. A short SELECT means the table holds no further
+            // candidates. A batch that deleted nothing means every row it
+            // returned is still held, and the next SELECT would return those
+            // same rows — ordered oldest first, with nothing about them
+            // changed — so continuing would re-read and re-ask for no
+            // deletions.
+            //
+            // `deleted < candidates.Length` was the earlier spelling and it was
+            // wrong, on a premise that reads as obvious and is false: a
+            // PARTIALLY deleted batch is not returned unchanged. TOP refills
+            // the deleted slots with the next-oldest candidates, so one held
+            // key at the head ended a pass after about one batch — 4,999 rows
+            // where the ceiling allows 100,000 — and the rest of the table
+            // waited an hour for no reason.
+            //
+            // What is left is bounded rather than absent: at BatchSize 1, a
+            // held oldest key stops every pass until its claim expires, which
+            // is a day at IdempotencyRetention.Window. Nothing starves for
+            // longer than a claim lives, and a batch of one is not a
+            // configuration this platform ships.
+            if (candidates.Length < _policy.BatchSize || deleted == 0)
                 break;
         }
 

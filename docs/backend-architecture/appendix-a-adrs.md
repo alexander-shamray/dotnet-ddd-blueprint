@@ -2700,13 +2700,19 @@ This decision keeps the TTL and moves the question instead.
   successive wrong fixes were all found by review rather than by a test — the
   interleaving needs three purgers, a retry and a clock step, and nothing here
   stages one.
-- **The candidates are ordered oldest first, and the pass stops on a batch it
-  could not fully delete.** A batch the store still holds keys from would be
-  returned unchanged by the next `SELECT` — nothing about those rows has moved
-  — so continuing would re-read and re-ask for no deletions. Stopping there
-  leaves them for the next pass, an hour later, by which time the claim they
-  are waiting on has ordinarily gone. The per-pass ceiling bounds it either
-  way.
+- **The candidates are ordered oldest first, and the pass stops when it stops
+  making progress.** A batch that deletes nothing has every row still held, and
+  the next `SELECT` would return those same rows — nothing about them has
+  moved — so continuing costs a round trip for no deletions. **Stopping on a
+  merely *partial* batch was the first spelling and was wrong**, on a premise
+  that reads as obvious: a partially deleted batch is not returned unchanged,
+  because `TOP` refills the deleted slots with the next-oldest candidates. One
+  held key at the head therefore ended a pass after about one batch — 4,999
+  rows where the ceiling allows 100,000 — and left the rest of the table for an
+  hour later. What remains is bounded rather than absent: at a batch size of
+  one, a held oldest key stops every pass until its claim expires, which is a
+  day at `IdempotencyRetention.Window`, and a batch of one is not a
+  configuration this platform ships.
 - **The floor survives and its job changes, which is a smaller claim than it
   used to make.** `RetentionPolicy.IdempotencyWindow` may still not be shorter
   than `IdempotencyRetention.MarkerFloor`, and the refusal message no longer
