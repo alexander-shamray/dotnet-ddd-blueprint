@@ -554,7 +554,10 @@ def check(plan_document: dict, root: Path = ROOT) -> list[str]:
         #     glob character or a slash would be two releases, an expansion
         #     against the checkout, or a path — so the key is held to the
         #     alphabet Helm holds a release to, here, before either job sees it.
-        if not RELEASE_NAME.match(name):
+        #     `fullmatch`, as `validate_tag` already uses: `match` with a `$`
+        #     anchor accepts a key ending in a newline, which the line-oriented
+        #     `workloads` output would emit as an extra, empty release.
+        if not RELEASE_NAME.fullmatch(name):
             failures.append(
                 f"workloads.{name!r} is not a Helm release name: lower-case "
                 "letters, digits and hyphens, starting and ending with a letter "

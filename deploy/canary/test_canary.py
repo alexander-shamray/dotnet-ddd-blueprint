@@ -327,7 +327,9 @@ class PlanDocumentTests(unittest.TestCase):
         two releases, a glob expands against the checkout, a slash is a path
         (review round eleven). Held here, before either job sees it; the
         shipped keys are the positive control."""
-        for bad in ("two words", "cat*", "../etc", "Catalog", "-lead", "a" * 54, ""):
+        # The trailing newline is the case `match` plus `$` lets through and
+        # `fullmatch` does not (review round twelve).
+        for bad in ("two words", "cat*", "../etc", "Catalog", "-lead", "a" * 54, "", "catalog-api\n"):
             with self.subTest(key=bad):
                 document = json.loads(json.dumps(self.document))
                 document["workloads"][bad] = dict(document["workloads"]["catalog-api"])
@@ -338,7 +340,7 @@ class PlanDocumentTests(unittest.TestCase):
                 )
         for good in ("catalog-api", "a", "x" * 53, "a-1"):
             with self.subTest(key=good):
-                self.assertIsNotNone(canary.RELEASE_NAME.match(good))
+                self.assertIsNotNone(canary.RELEASE_NAME.fullmatch(good))
 
     def test_workloads_lists_the_plan_and_not_its_comments(self) -> None:
         """`realm.yml`'s scheduled job loops over this output (ADR-043).
