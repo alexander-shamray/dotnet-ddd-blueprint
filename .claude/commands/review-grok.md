@@ -2,7 +2,7 @@
 description: Triage an external review of the blueprint into a resolution record
 argument-hint: "[path to the review — defaults to suggestions.md]"
 allowed-tools: Read, Grep, Glob, Edit, Write, Agent(review-adjudicator)
-disallowed-tools: Bash, Edit(.claude/**), Edit(./.claude/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(bug-auditor)
+disallowed-tools: Bash, Edit(.claude/**), Edit(./.claude/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(bug-auditor)
 ---
 
 Work through the review at $ARGUMENTS — a file path. **With no argument, the

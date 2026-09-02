@@ -3324,7 +3324,13 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
         #
         # Denied as a tree AND as a file, because in a worktree `.git` is a
         # file pointing at the real directory rather than the directory itself.
-        for name in self.SUBJECTS:
+        #
+        # `/review-grok` is covered here and not in SUBJECTS: it holds `Edit`
+        # for `src/`, `tests/` and `docs/` by design, so the tracked-tree
+        # cases above are not its shape, but a site under `.git/` is a
+        # regular file a crafted review can quote a real line from, and both
+        # invocations would verify it (review round eight).
+        for name in (*self.SUBJECTS, "review-grok.md"):
             rules = self.disallowed(name)
             for target in (".git/**", "./.git/**", ".git", "./.git"):
                 with self.subTest(command=name, target=target):

@@ -1094,6 +1094,18 @@ class TheScheduleStillCallsThisGate(unittest.TestCase):
         self.assertIn("gh issue comment", job)
         self.assertIn("issues: write", job)
 
+    def test_the_open_issue_is_looked_for_past_the_default_page(self):
+        """One issue per drift is only true while the listing can see the
+        open one. `gh issue list` defaults to 30 and the first form said 100;
+        past either the next hourly red files a duplicate, which is the
+        argument `.claude/scripts/gh-issue-list.sh` already makes for 1000."""
+        job = self.job()
+        match = re.search(r"gh issue list (.*?)\\\n", job)
+        self.assertIsNotNone(match, "the filing step no longer lists issues")
+        self.assertIn("--limit 1000", match.group(1))
+        self.assertIn("--state open", match.group(1))
+        self.assertIn("--label security", match.group(1))
+
     def test_every_line_of_a_run_block_stays_inside_the_block(self):
         """A `run: |` block ends at the first line indented less than its
         body, and a heredoc written the way bash wants it — terminator at
