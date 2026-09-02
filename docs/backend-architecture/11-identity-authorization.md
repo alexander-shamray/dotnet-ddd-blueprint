@@ -99,7 +99,9 @@ Validation is cheap; assume the network is hostile.
 > What was left was the window between rollouts, and since
 > [ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)
 > the same predicate reads the deployed realm on a schedule as well, so a realm
-> edited after a rollout is seen within the hour rather than at the next deploy
+> edited after a rollout is seen at the next scheduled run — nominally within
+> the hour, and only as reliably as GitHub runs a schedule — rather than at
+> the next deploy
 > ([#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176),
 > closed).
 >
@@ -163,8 +165,9 @@ Validation is cheap; assume the network is hostile.
 > next one. Since
 > [ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)
 > the deployed realm is read on a schedule as well — the same three settings,
-> hourly, over every deployed workload — so the window an edit is unobserved in
-> is bounded by the hour rather than by the next rollout, and
+> nominally hourly, over every deployed workload — so the window an edit is
+> unobserved in is bounded by the schedule rather than by the next rollout,
+> and only as far as GitHub runs the schedule, and
 > [#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)
 > is closed rather than carried.
 
@@ -248,11 +251,12 @@ public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplication
             // CREDENTIAL AT A HOST: whatever the realm was configured to do, a
             // token reaching a host carries how long it has left. Since
             // ADR-042 the realm is also asked directly, by a deploy-time gate
-            // with a credential, and since ADR-043 by the same gate hourly
-            // between rollouts — a different question at bounded moments,
-            // where this one is what holds continuously: a realm edited since
-            // the last read is caught here on every request and there within
-            // the hour (#176, closed).
+            // with a credential, and since ADR-043 by the same gate on a
+            // nominally hourly schedule between rollouts — a different
+            // question at bounded moments, where this one is what holds
+            // continuously: a realm edited since the last read is caught here
+            // on every request and there at the next scheduled run, as
+            // reliably as GitHub runs a schedule (#176, closed).
             // REMAINING life against this host's clock, not `exp - iat` —
             // `iat` is optional in RFC 7519, so an issuer omitting it would
             // switch the control off by omission. Refused rather than logged,
@@ -459,12 +463,13 @@ listing of a token denylist among Redis's contents.
 > so no host accepts one with more than the bound remaining. That holds
 > continuously, where the realm check holds at a rollout and, since
 > [ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts),
-> once an hour between them — so the two cover different moments rather than
-> one superseding the other. The gap between rollouts was what
+> nominally once an hour between them — so the two cover different moments
+> rather than one superseding the other. The gap between rollouts was what
 > [#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)
 > carried, and the schedule is what closed it: the window a drift is live in is
-> bounded by the hour rather than by the next deployment, and by this guard for
-> the lifetime's remaining half throughout.
+> bounded by the schedule's cadence rather than by the next deployment — an
+> hour only as reliably as GitHub runs a schedule — and by this guard for the
+> lifetime's remaining half throughout.
 >
 > **Containment is weaker than verification and the difference is worth being
 > exact about, because a first draft of this callout was not.** The control

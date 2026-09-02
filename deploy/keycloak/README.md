@@ -84,19 +84,24 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   defines it as a non-composite role granting nothing else, so it carries no
   client visibility. The suite asserts that against §14.1's export rather than
   restating it here.
-- **A realm edited within the hour.** Between rollouts the realm is read on
-  `realm.yml`'s schedule, so what bounds the window a drift is live in is that
-  cadence and ADR-040's runtime guard together — an hour of the first, and for
+- **A realm edited since the last scheduled run.** Between rollouts the realm
+  is read on `realm.yml`'s schedule, so what bounds the window a drift is live
+  in is that cadence and ADR-040's runtime guard together — nominally an hour
+  of the first, and only as reliably as GitHub runs a schedule, which is best
+  effort: a run can be delayed or dropped under load, without a red one. For
   the token lifetime the second gates *remaining* life rather than the issued
-  one. A shorter cron is a one-line change; what it cannot become is
-  continuous, and the section below says what a red hour does.
-- **Whether the schedule is still running.** GitHub suspends a `schedule`
-  trigger in a repository with no commit for sixty days, and it does so
-  without a red run — a stabilised service is exactly the repository with no
-  commits and exactly the one the window is longest on. Nothing in this tree
-  can observe its own absence; what closes it is a monitor outside GitHub
-  asking whether this workflow ran in the last day, and that is an operating
-  decision this file names rather than takes.
+  one. A shorter cron is a one-line change; what would make the hour a bound
+  is the monitor the next bullet names, and what the job cannot become is
+  continuous — the section below says what a red run does.
+- **Whether the schedule is still running.** A dropped run and the sixty-day
+  suspension are the same silence at two scales: GitHub sheds or delays a
+  scheduled run under load, and suspends the `schedule` trigger outright in a
+  repository with no commit for sixty days, and neither leaves a red run — a
+  stabilised service is exactly the repository with no commits and exactly the
+  one the window is longest on. Nothing in this tree can observe its own
+  absence; what closes both is a monitor outside GitHub asking whether this
+  workflow ran in the last day, and that is an operating decision this file
+  names rather than takes.
 - **Which realm a *future* rollout will install.** The authority is read from
   the release as it stands, so a rollout that also changes `identity.authority`
   checks the realm it is leaving. Nothing here does that — `-f

@@ -87,10 +87,12 @@ only moment a deployed realm is read.** It stands as written, because it was
 true when it was written, and
 [ADR-043](backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)
 amends it rather than rewriting it: `realm.yml` gains a `deployed` job that
-runs the rollout's own three calls, hourly, over every release the canary plan
-names. Nothing about the predicate changed and nothing about either realm
-changed; what changed is how often the question is asked, and of how many
-releases.
+runs the rollout's own three calls, nominally hourly, over every release the
+canary plan names. Nothing about the predicate changed and nothing about
+either realm changed; what changed is how often the question is asked, and of
+how many releases — and *nominally* is load-bearing, because a `schedule` is a
+cadence GitHub runs as best effort and not a bound, which the residual under
+*What is owed* carries.
 
 ### The three things the issue said a fix owed
 
@@ -227,13 +229,17 @@ the concurrency key, and that only the `judge` step's failure files.
 
 ### What is owed
 
-- **The schedule's own silence, and it is stated rather than filed.** GitHub
-  suspends a `schedule` trigger in a repository with no commit for sixty days,
-  without a red run — and a stabilised service is exactly the repository with
-  no commits and exactly the one #176 said the window is longest on. Nothing
-  in this repository can observe its own absence. What closes it is a monitor
-  outside GitHub asking whether `realm.yml` ran in the last day, which is an
-  operating decision the README names and does not take. It is not an issue
+- **The schedule's own silence, and it is stated rather than filed.** A
+  dropped run and the sixty-day suspension are the same silence at two
+  scales: GitHub sheds or delays a scheduled run under load, and suspends the
+  `schedule` trigger outright in a repository with no commit for sixty days,
+  and neither leaves a red run — and a stabilised service is exactly the
+  repository with no commits and exactly the one #176 said the window is
+  longest on. Nothing in this repository can observe its own absence, which
+  is why the hour above is nominal. What closes both, and what would make
+  the hour a bound, is a monitor outside GitHub asking whether `realm.yml`
+  ran in the last day, which is an operating decision the README names and
+  does not take. It is not an issue
   because the platform has no environment to schedule against, which was
   #176's own reason for being filed rather than fixed — and this row does not
   repeat that: the mechanism is built, and the one thing it cannot see is

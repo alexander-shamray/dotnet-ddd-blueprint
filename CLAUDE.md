@@ -329,14 +329,17 @@ stabilised service is never — and PR-37 pays it. **The rule that moved is
 ADR-042's "a rollout is the only moment a deployed realm is read"**, amended
 rather than rewritten by
 [ADR-043](docs/backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts):
-`realm.yml`'s `deployed` job runs the rollout's own three calls hourly, over
-every release the canary plan names, and a red run files an issue rather than
-a notification, because a notification is read once and a drift persists
-across the hours. **The residual is the schedule's own silence, stated rather
-than filed**: GitHub suspends a `schedule` after sixty days without a commit
-and does so without a red run, nothing in this repository can observe its own
-absence, and what closes it is a monitor outside GitHub — an operating
-decision the README names and does not take.
+`realm.yml`'s `deployed` job runs the rollout's own three calls nominally
+hourly, over every release the canary plan names, and a red run files an issue
+rather than a notification, because a notification is read once and a drift
+persists across the hours. **The residual is the schedule's own silence,
+stated rather than filed, and it is why the hour is nominal**: a dropped run
+and the sixty-day suspension are the same silence at two scales, since GitHub
+sheds or delays a run under load and suspends a `schedule` outright after
+sixty days without a commit, neither with a red run; nothing in this
+repository can observe its own absence, and what closes both, and would make
+the hour a bound, is a monitor outside GitHub — an operating decision the
+README names and does not take.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
 and `dotnet test` runs 1,119 tests — so the build rules and the drift rules

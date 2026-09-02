@@ -2099,8 +2099,9 @@ than leaving to a realm-file description.
 > ([#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)).
 > That one is closed in turn by
 > [ADR-043](#adr-043--the-deployed-realm-is-checked-between-rollouts), which
-> reads the deployed realm on a schedule as well, so the edit is seen within
-> the hour rather than at the next rollout.
+> reads the deployed realm on a schedule as well, so the edit is seen at the
+> next scheduled run — nominally within the hour, and only as reliably as
+> GitHub runs a schedule — rather than at the next rollout.
 
 ## ADR-035 — An integration event carries identifiers, not personal data
 
@@ -3304,11 +3305,14 @@ read decorative, which is the shape ADR-033 was written to withdraw.
 
 **Decision.** `realm.yml` gains a second job, `deployed`, on a `schedule`
 trigger and on `workflow_dispatch`, under the `production` GitHub Environment.
-Every hour it runs the rollout's own three calls — `realm_check.py authority`
-over `helm get values --all` for the release, `read_admin.py` to fetch the
-realm that names, and `realm_check.py check --kind deployed` to judge it — for
-**every workload the canary plan lists**, read out of `canary.py workloads`
-rather than restated. A red judgement **files a tracker issue**, labelled
+Nominally every hour it runs the rollout's own three calls — `realm_check.py
+authority` over `helm get values --all` for the release, `read_admin.py` to
+fetch the realm that names, and `realm_check.py check --kind deployed` to
+judge it — for **every workload the canary plan lists**, read out of
+`canary.py workloads` rather than restated. *Nominally*, because a `schedule`
+is a cadence GitHub runs as best effort and not a bound: a run can be delayed
+or dropped under load, without a red one, and the consequences below say what
+would make the hour a bound. A red judgement **files a tracker issue**, labelled
 `security` and `critical`, or comments on the open one, and
 `deploy/keycloak/README.md` carries the procedure it points at. The job is
 opted in by a repository variable, `REALM_CHECK_SCHEDULED`, set to `enabled` by
@@ -3333,7 +3337,11 @@ was the one nothing here would see.
 **#176 named three things a fix owed and each is a decision rather than a
 line.** A trigger that is not a rollout: `schedule`, on `realm.yml`, because
 the subject is the realm gate's and `deploy.yml`'s concurrency, its inputs and
-its 150-minute budget are all a rollout's. A statement of what a red run
+its 150-minute budget are all a rollout's. What that trigger buys is a
+cadence and not a bound — GitHub runs a `schedule` as best effort, and a run
+it sheds or delays under load leaves no red one — so the window is *nominally*
+an hour, and the consequences below say what a bound would take. A statement
+of what a red run
 *does*: an issue, because §13.6's rule is that an alert with no procedure is a
 page nobody can act on, and a notification is read once where an issue is open
 until somebody closes it — a drift that persists across the hours needs the
@@ -3371,19 +3379,26 @@ is evaluated before the job enters its Environment, so a variable scoped to
 
 **Consequences.**
 
-- **#176 closes, and what closes it is the cadence and not a continuous
-  observation.** The window a drift is live in is now bounded by an hour of
-  the schedule and by ADR-040's runtime guard together; for the token lifetime
-  the second gates *remaining* life, so the first is what bounds the issued
-  one. A shorter cron is a one-line change. What the job cannot become is
-  continuous, and the README says so beside what a red hour does.
+- **#176 closes, and what closes it is the cadence — not a continuous
+  observation, and not a guaranteed one.** The window a drift is live in is
+  now bounded by the schedule and by ADR-040's runtime guard together:
+  nominally an hour of the first, and only as reliably as GitHub runs a
+  schedule, which is best effort and says so in the workflow's own comment.
+  For the token lifetime the second gates *remaining* life, so the first is
+  what bounds the issued one. A shorter cron is a one-line change; what would
+  make the hour a bound is the monitor the next bullet names. What the job
+  cannot become is continuous, and the README says so beside what a red run
+  does.
 - **The residual is the schedule's own silence, and it is stated rather than
-  filed.** GitHub suspends a `schedule` trigger in a repository with no commit
-  for sixty days, without a red run — a stabilised service is exactly the
+  filed.** A dropped run and the sixty-day suspension are the same silence at
+  two scales: GitHub sheds or delays a scheduled run under load, and suspends
+  the `schedule` trigger outright in a repository with no commit for sixty
+  days, and neither leaves a red run — a stabilised service is exactly the
   repository with no commits and exactly the one the window is longest on.
-  Nothing in this repository can observe its own absence; what closes it is a
-  monitor outside GitHub asking whether the workflow ran in the last day,
-  which is an operating decision the README names and does not take. It is
+  Nothing in this repository can observe its own absence; what closes both,
+  and what would turn the nominal hour above into a bound, is a monitor
+  outside GitHub asking whether the workflow ran in the last day, which is an
+  operating decision the README names and does not take. It is
   not an issue because the platform has no environment to schedule against,
   which was #176's own reason for being filed rather than fixed — and this
   record does not repeat that: it builds the mechanism and states the one
