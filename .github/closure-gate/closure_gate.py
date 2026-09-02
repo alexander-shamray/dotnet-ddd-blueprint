@@ -185,6 +185,16 @@ def closing_references(text: str, repository: str) -> tuple[set[int], list[str]]
         reference = REFERENCE.match(token)
         if reference is None:
             # Prose. `Closes the door` is English, not a link.
+            # CodeQL raises py/incomplete-url-substring-sanitization on the
+            # substring test below and it is dismissed as a false positive,
+            # recorded here rather than only in a GitHub field. THE TEST IS NOT
+            # A SANITISER AND GRANTS NOTHING: it runs only after REFERENCE has
+            # already failed to parse the token, and a match adds the token to
+            # `unreadable` — so a token carrying `github.com/` at any position
+            # is treated with MORE suspicion, not less. The trust decision is
+            # the REFERENCE regex and the repository comparison below it, and
+            # both are exact. The query's threat model is a substring check
+            # used to authorise; this one is used to widen a rejection.
             if (token.startswith("#")
                     or ISSUE_SHAPED.search(token)
                     or "github.com/" in token.lower()):

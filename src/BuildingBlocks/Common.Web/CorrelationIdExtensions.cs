@@ -101,6 +101,21 @@ public static class CorrelationIdExtensions
             // Serilog's LogContext. OpenTelemetry is the whole logging stack here
             // (Appendix B), and it reads scopes; §13.3's LoggingBehavior uses the
             // same call for the same reason.
+            //
+            // CodeQL RAISES cs/log-forging HERE AND IT IS DISMISSED AS A FALSE
+            // POSITIVE, recorded beside the code rather than only in a GitHub
+            // field, because an accepted finding is a decision somebody has to
+            // re-read. The value is not user-controlled by this point:
+            // IsAdoptable below admits only [A-Za-z0-9_-] within a length
+            // bound and anything refused is REPLACED rather than echoed, so
+            // what reaches the scope is either a caller value from that
+            // alphabet or one this host minted. The query does not read that
+            // allow-list as a sanitiser. Kestrel refuses CR and LF inside a
+            // request header value besides, so log splitting is not reachable
+            // through this path at all — which the remarks below already say,
+            // and which is why the alphabet check is a bound rather than a
+            // rescue. Narrowing this would mean breaking §10.4's promise that
+            // a caller's own trace ID survives the hop.
             using (logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
                 await next();
         });
