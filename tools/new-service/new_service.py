@@ -1209,31 +1209,34 @@ PATCHES: dict[str, tuple[tuple[str, str], ...]] = {
             "        // apply every migration in sequence, and a count alone would pass on\n"
             "        // a shorter prefix of them applied twice.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(7);\n"
+            "        applied.Length.ShouldBe(8);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddProducts\");\n"
             "        applied[2].ShouldEndWith(\"_AddOutbox\");\n"
             "        applied[3].ShouldEndWith(\"_AddInbox\");\n"
             "        applied[4].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n"
             "        applied[5].ShouldEndWith(\"_AddIdempotencyMarkers\");\n"
-            "        applied[6].ShouldEndWith(\"_IdempotencyMarkerCommittedAtDefault\");\n",
+            "        applied[6].ShouldEndWith(\"_IdempotencyMarkerCommittedAtDefault\");\n"
+            "        applied[7].ShouldEndWith(\"_AddIdempotencyMarkerRowVersion\");\n",
             "        schema.ShouldBe(1, \"InitialCreate's hand-written EnsureSchema is what creates it\");\n"
             "\n"
             "        // Named and ordered, not merely counted: the migrator's job is to\n"
             "        // apply every migration in sequence, and a count alone would pass on\n"
             "        // a shorter prefix of them applied twice. What a scaffolded service\n"
             "        // starts with is the schema, then §9.4's outbox table, §9.5's inbox,\n"
-            "        // the index the retention purge deletes through and §8.5's marker\n"
-            "        // table with the database clock it is aged by — all of them wiring\n"
-            "        // every service has rather than anything this one chose.\n"
+            "        // the index the retention purge deletes through, and §8.5's marker\n"
+            "        // table with the database clock it is aged by and the rowversion the\n"
+            "        // purge identifies one of its rows by — all of them wiring every\n"
+            "        // service has rather than anything this one chose.\n"
             "        string[] applied = await fixture.AppliedMigrationsAsync();\n"
-            "        applied.Length.ShouldBe(6);\n"
+            "        applied.Length.ShouldBe(7);\n"
             "        applied[0].ShouldEndWith(\"_InitialCreate\");\n"
             "        applied[1].ShouldEndWith(\"_AddOutbox\");\n"
             "        applied[2].ShouldEndWith(\"_AddInbox\");\n"
             "        applied[3].ShouldEndWith(\"_AddOutboxRetentionIndex\");\n"
             "        applied[4].ShouldEndWith(\"_AddIdempotencyMarkers\");\n"
-            "        applied[5].ShouldEndWith(\"_IdempotencyMarkerCommittedAtDefault\");\n",
+            "        applied[5].ShouldEndWith(\"_IdempotencyMarkerCommittedAtDefault\");\n"
+            "        applied[6].ShouldEndWith(\"_AddIdempotencyMarkerRowVersion\");\n",
         ),
     ),
 }
@@ -1499,6 +1502,17 @@ IDEMPOTENCY_MIGRATION = re.compile(r"^\d{14}_AddIdempotencyMarkers(\.Designer)?\
 COMMITTED_AT_DEFAULT_MIGRATION = re.compile(
     r"^\d{14}_IdempotencyMarkerCommittedAtDefault(\.Designer)?\.cs$"
 )
+
+# The marker's `rowversion` (#173). It travels for the same reason the default
+# above does, and the failure it prevents is louder: `RetentionPurgeService`
+# names this column in both of its marker statements, so a service scaffolded
+# without the migration does not merely age its markers wrongly — its purge
+# raises `Invalid column name 'RowVersion'` on the first pass and the table
+# grows for ever. The column and the statements that read it are one mechanism,
+# and half of it is not shippable.
+ROW_VERSION_MIGRATION = re.compile(
+    r"^\d{14}_AddIdempotencyMarkerRowVersion(\.Designer)?\.cs$"
+)
 LATER_MIGRATION = re.compile(r"^\d{14}_\w+(\.Designer)?\.cs$")
 
 # The migrations a scaffolded service starts with, in the order they are
@@ -1517,6 +1531,7 @@ TEMPLATE_MIGRATIONS = (
     RETENTION_INDEX_MIGRATION,
     IDEMPOTENCY_MIGRATION,
     COMMITTED_AT_DEFAULT_MIGRATION,
+    ROW_VERSION_MIGRATION,
 )
 
 # The name each shape above is known by in a diagnostic, in the same order and
@@ -1533,6 +1548,7 @@ MIGRATION_LABELS = (
     "AddOutboxRetentionIndex",
     "AddIdempotencyMarkers",
     "IdempotencyMarkerCommittedAtDefault",
+    "AddIdempotencyMarkerRowVersion",
 )
 
 # The two files that accumulate a block per service, and the markers that bound
@@ -2112,6 +2128,7 @@ def render_projects(repo_root: Path, names: Names, migration_id: str) -> dict[st
                 "_AddOutboxRetentionIndex.Designer.cs",
                 "_AddIdempotencyMarkers.Designer.cs",
                 "_IdempotencyMarkerCommittedAtDefault.Designer.cs",
+                "_AddIdempotencyMarkerRowVersion.Designer.cs",
             )):
             text = without_slice_entity(text)
 

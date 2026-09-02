@@ -278,6 +278,62 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_marker_replaced_between_the_select_and_the_delete_is_not_the_row_that_goes()
+    {
+        // #173, and the ABA the split opened, staged at the one instant it is
+        // dangerous. A key names a COMMAND: past §8.5's guarantee a retry can
+        // claim it again, commit, and write a fresh marker under the key this
+        // pass has already selected. The delete that follows must not remove
+        // that replacement — it is inside its window with a live claim behind
+        // it, and deleting it lets the next retry run a committed command a
+        // third time.
+        //
+        // The replacement here keeps the ORIGINAL CommittedAt, which is what
+        // makes this a test of #173 rather than of ADR-039. The old
+        // (Key, CommittedAt) join distinguished the two rows by construction
+        // and nothing enforced it: a timestamp collision is exactly the
+        // coincidence that pair could not survive, and it is the state this
+        // test hands the delete. Against a delete keyed on that pair this
+        // assertion fails; against one keyed on the rowversion it holds,
+        // because SQL Server stamps the replacement with a value the SELECT
+        // never saw (ADR-041).
+        //
+        // Interposed on UnheldAsync rather than on a clock or a second thread,
+        // because that call IS the window: the pass selects, asks, then
+        // deletes, so a store that mutates the table while answering lands the
+        // replacement between the two statements deterministically.
+        string key = Key();
+
+        await fixture.StageIdempotencyMarkersAsync(new IdempotencyMarker(key, LongAgo));
+
+        byte[]? selected = await fixture.IdempotencyMarkerVersionAsync(key);
+        selected.ShouldNotBeNull("the staged row carries the version the pass is about to select");
+
+        ReplacingClaims claims = new(
+            fixture.IdempotencyClaims,
+            () => fixture.ReplaceIdempotencyMarkerAsync(key));
+
+        (int _, int _, int idempotency) = await fixture.PurgeWithAsync(new RetentionPolicy(), claims);
+
+        claims.Asked.ShouldBeTrue("the pass must reach the seam, or this test proves nothing");
+
+        idempotency.ShouldBe(
+            0,
+            "the row the pass selected is gone and the row now under that key is a different write");
+
+        // The table, not just the count — a pass that deleted the replacement
+        // and miscounted is the same data loss with a better report.
+        (await fixture.IdempotencyMarkerCountAsync(key)).ShouldBe(1);
+
+        byte[]? survivor = await fixture.IdempotencyMarkerVersionAsync(key);
+
+        survivor.ShouldNotBeNull();
+        survivor.ShouldNotBe(
+            selected,
+            "the replacement is a different write, and the version is what says so");
+    }
+
+    [Fact]
     public async Task A_held_key_costs_its_own_batch_and_not_the_rest_of_the_pass()
     {
         // The pass stops on NO PROGRESS, not on an incomplete batch, and the
@@ -478,5 +534,44 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
             new IdempotencyMarker(Key(), LongAgo));
 
         (await fixture.PurgeRetentionAsync()).ShouldBe((Outbox: 1, Inbox: 1, Idempotency: 1));
+    }
+
+    /// <summary>
+    /// The registered claim store, with one side effect run at the moment the
+    /// pass asks it which keys are unheld.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every answer is the real store's.</b> The decoration is <em>when</em>,
+    /// not <em>what</em> — <c>UnheldAsync</c> delegates like the other four, and
+    /// substituting the verdict would make the test assert its own idea of the
+    /// claim against a pass that reads Redis. <see cref="Asked"/> exists
+    /// because a seam nothing reached would leave the test green having
+    /// exercised none of it, which is this repository's most-repeated failure.
+    /// </remarks>
+    private sealed class ReplacingClaims(IIdempotencyStore inner, Func<Task> onAsked) : IIdempotencyStore
+    {
+        public bool Asked { get; private set; }
+
+        public Task<string?> TryClaimAsync(string key, TimeSpan retention, CancellationToken ct) =>
+            inner.TryClaimAsync(key, retention, ct);
+
+        public Task<IdempotencyEntry?> GetAsync(string key, CancellationToken ct) =>
+            inner.GetAsync(key, ct);
+
+        public Task CompleteAsync(string key, string claim, string payload, CancellationToken ct) =>
+            inner.CompleteAsync(key, claim, payload, ct);
+
+        public Task ReleaseAsync(string key, string claim, CancellationToken ct) =>
+            inner.ReleaseAsync(key, claim, ct);
+
+        public async Task<IReadOnlyCollection<string>> UnheldAsync(
+            IReadOnlyCollection<string> keys,
+            CancellationToken ct)
+        {
+            Asked = true;
+            await onAsked();
+
+            return await inner.UnheldAsync(keys, ct);
+        }
     }
 }

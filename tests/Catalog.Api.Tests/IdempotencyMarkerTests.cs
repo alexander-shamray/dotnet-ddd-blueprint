@@ -5,6 +5,7 @@ using Catalog.TestSupport;
 using Common.Application;
 using Common.Infrastructure.Idempotency;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -196,6 +197,61 @@ public class IdempotencyMarkerTests(ServiceFixture fixture)
                 "SYSDATETIMEOFFSET(), so the two sides are only guaranteed comparable when the " +
                 "column is written by the same expression; this asserts the contract rather than " +
                 "merely that some default exists");
+    }
+
+    [Fact]
+    public async Task The_row_the_purge_deletes_is_identified_by_a_database_generated_rowversion()
+    {
+        // The subject is WHAT THE DELETE IS LOOKING AT, not what a purge pass
+        // found — RetentionPurgeTests covers the behaviour, and it would go on
+        // passing if this column quietly stopped being a rowversion, because a
+        // plain binary(8) nobody updates still differs between two rows within
+        // a single test. What must be true is that the DATABASE generates it,
+        // since that is the whole of #173: a value the application could write
+        // is a value a replacement could carry.
+        //
+        // Read from the model and from sys.columns rather than restated, for
+        // the reason the width above is: a claim written in a test and a claim
+        // written in a configuration agree until one of them is edited.
+        await using AsyncServiceScope scope = fixture.Factory.Services.CreateAsyncScope();
+        CatalogDbContext db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+
+        IProperty version = db.Model
+            .FindEntityType(typeof(IdempotencyMarker))!
+            .FindProperty(IdempotencyMarker.RowVersionColumn)
+            .ShouldNotBeNull(
+                "RetentionPurgeService selects and joins on this column by name, so a service " +
+                "that maps it under another name — or not at all — fails its own purge at run " +
+                "time with an invalid column name");
+
+        version.IsShadowProperty().ShouldBeTrue(
+            "no CLR property backs it on purpose: the one reader is the purge's SQL, over Dapper");
+
+        version.ValueGenerated.ShouldBe(
+            ValueGenerated.OnAddOrUpdate,
+            "a version the application supplies is a version a replacement could be given, which " +
+            "is the identity-by-construction #173 was filed against");
+
+        version.IsConcurrencyToken.ShouldBeTrue("IsRowVersion() is what sets both, and both matter");
+
+        version.IsNullable.ShouldBeFalse(
+            "SQL Server stamps every row including the ones ALTER TABLE adds the column to, so a " +
+            "nullable mapping models a state the database cannot produce");
+
+        // rowversion and timestamp are one type under two spellings, and
+        // sys.columns reports the older one — so this asserts the engine's
+        // answer rather than the migration's text.
+        (await fixture.ScalarAsync<string>(
+            $"""
+            SELECT Value = TYPE_NAME(c.system_type_id)
+            FROM sys.columns c
+            WHERE c.object_id = OBJECT_ID('catalog.IdempotencyMarkers')
+                AND c.name = '{IdempotencyMarker.RowVersionColumn}'
+            """))
+            .ShouldBe(
+                "timestamp",
+                "a binary(8) with the same name would satisfy every model assertion above and " +
+                "leave the column something an INSERT can choose");
     }
 
     [Fact]
