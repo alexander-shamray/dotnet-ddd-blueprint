@@ -1822,17 +1822,22 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         self.assertEqual(2, result.returncode, result.stderr)
         self.assertEqual([], self.calls())
 
+    STDIN = "a title\n\nthe body\n"
+
     def test_no_arguments_prints_the_usage_line(self):
         result = self.run_helper()
         self.assert_refused_before_gh(result)
         self.assertIn(
-            "usage: gh-issue-create.sh <title> <security|bug> <critical|high|medium|low> < body",
+            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body",
             result.stderr,
         )
 
-    def test_the_argument_count_is_exactly_three(self):
-        self.assert_refused_before_gh(self.run_helper("a title", "bug"))
-        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", "--repo"))
+    def test_the_argument_count_is_exactly_two(self):
+        # A title on the command line is the free parameter the fifth review
+        # round named: it crossed the parent's shell before the helper ran.
+        self.assert_refused_before_gh(self.run_helper("bug", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "--repo", body=self.STDIN))
 
     def test_a_kind_outside_the_vocabulary_is_refused(self):
         # `documentation` is a real label on this tracker and is refused on
@@ -1840,25 +1845,62 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         # sweeps' and not the tracker's.
         for kind in ("documentation", "Security", "security --force", "-R other/repo", ""):
             with self.subTest(kind=kind):
-                self.assert_refused_before_gh(self.run_helper("a title", kind, "high"))
+                self.assert_refused_before_gh(self.run_helper(kind, "high", body=self.STDIN))
 
     def test_a_severity_outside_the_four_is_refused(self):
         for severity in ("info", "High", "high --force", "-R other/repo", ""):
             with self.subTest(severity=severity):
-                self.assert_refused_before_gh(self.run_helper("a title", "bug", severity))
+                self.assert_refused_before_gh(self.run_helper("bug", severity, body=self.STDIN))
 
     def test_an_empty_title_is_refused(self):
-        self.assert_refused_before_gh(self.run_helper("", "bug", "low"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="\n\nthe body\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body=""))
 
-    def test_a_title_with_a_newline_is_refused(self):
-        self.assert_refused_before_gh(self.run_helper("one line\nand another", "bug", "low"))
+    def test_a_body_without_the_blank_separator_is_refused(self):
+        # A body piped without its title line would otherwise file under its
+        # own first sentence, with the second sentence lost into the title.
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body="the body\nand more\n"))
+
+    def test_the_title_never_crosses_the_parents_command_line(self):
+        # The real boundary: the parent is a shell composing a command string
+        # around a quoted heredoc, and the title carries every expansion a
+        # verdict record could smuggle. The stub must receive the bytes as
+        # written, and the marker file the substitution would create must not
+        # exist — the argv-array cases above cannot show either.
+        d = Path(self.dir)
+        marker = (d / "pwned").as_posix()
+        title = f"`touch {marker}` and $(touch {marker}) and \"quoted\" and $HOME"
+        # The stub is put on PATH through the environment, the way run_helper
+        # does it, and the script refuses to go on unless `gh` resolves to it.
+        # The first form of this case set PATH inside the script with a
+        # Windows-spelt directory bash could not use, reached the real `gh`,
+        # and filed a real issue on the tracker (#180). A test of a filing
+        # helper fails closed or it is not run.
+        env = dict(os.environ)
+        env["PATH"] = self.dir + os.pathsep + env["PATH"]
+        script = (
+            'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
+            f"bash {str(self.HELPER)!r} security high <<'EOF'\n"
+            f"{title}\n"
+            "\n"
+            "the body\n"
+            "EOF\n"
+        )
+        result = subprocess.run([BASH, "-c", script], capture_output=True, text=True, env=env)
+        self.assertNotEqual(97, result.returncode, "the stub gh was not first on PATH")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse((d / "pwned").exists())
+        create = [c for c in self.calls() if c.startswith("issue create ")]
+        self.assertEqual(1, len(create), self.calls())
+        self.assertIn(f"--title {title}", create[0])
+        self.assertEqual("the body\n", (d / "body").read_text(encoding="utf-8"))
 
     def test_a_valid_filing_reaches_gh_with_every_parameter_pinned(self):
         # The positive control the negatives need: a helper that refused
         # everything would pass every case above.
         title = "`/security-sweep` files a title that begins with a slash"
         body = "the body\n\nverified at filing by a second read-only auditor\n"
-        result = self.run_helper(title, "security", "high", body=body)
+        result = self.run_helper("security", "high", body=f"{title}\n\n{body}")
         self.assertEqual(0, result.returncode, result.stderr)
         create = [c for c in self.calls() if c.startswith("issue create ")]
         self.assertEqual(1, len(create), self.calls())

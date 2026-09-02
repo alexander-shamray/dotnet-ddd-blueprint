@@ -92,6 +92,13 @@ do not open it. The parent composes an issue from these fields and reads
 nothing in the tree itself, so a field that quotes the candidate rather than
 the code is the one way to file the candidate's own words — quote the file.
 
+**`file` and `line` are the candidate's, as dispatched, and never another
+site.** The parent drops a record whose location differs from the one it
+sent, whatever the verdict, because a `confirmed` somewhere else is not two
+readings agreeing. A defect you find at a different site on the way is not
+this verdict; it is nothing, here — the fan-out is where new sites are
+reported.
+
 **A scope you could not open is not a clean scope, and reporting it as one is a
 finding hidden rather than absent.** They are three separate outcomes: report
 `unreadable-root`, naming the root you were given verbatim, whenever no file

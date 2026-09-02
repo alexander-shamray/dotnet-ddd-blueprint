@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# File one issue on THIS repository from a sweep, and nothing else: the title
-# comes from the first argument, the kind and severity labels from a fixed
-# vocabulary, the body from stdin, and the repository from the checkout this
-# script is standing in.
+# File one issue on THIS repository from a sweep, and nothing else: the kind
+# and severity labels from a fixed vocabulary on the command line, the title
+# and the body from stdin, and the repository from the checkout this script is
+# standing in.
 #
 # `Bash(gh issue create:*)` was a prefix grant, so it bought more than the
 # operation it was added for — the shape every helper in this directory exists
@@ -17,13 +17,23 @@
 #              been composed.
 #
 # Here the repository is what `gh repo view` resolves, the labels are two words
-# out of a closed set, and the body is bytes on stdin — the form both sweeps
-# already used, because an inline `--body` mangles the wrapping and a temp file
-# would need the `Write` grant the sweeps withhold.
+# out of a closed set, and the title and body are bytes on stdin — the form
+# both sweeps already used for the body, because an inline `--body` mangles
+# the wrapping and a temp file would need the `Write` grant the sweeps
+# withhold.
 #
-# THE TITLE HAZARD CLOSES HERE TOO, and this is the one thing a helper can do
-# that a grant could not. MSYS argument conversion rewrites an argument that
-# looks like an absolute POSIX path before a native `gh.exe` sees it, so a
+# THE TITLE IS ON STDIN, NOT THE COMMAND LINE, and the reason is where it
+# comes from. A sweep's title is composed from a verdict record, and a record
+# is text a crafted tree can steer. As an argument it crossed the parent's
+# shell before this script saw it: `bash gh-issue-create.sh "$(…)" …` runs the
+# substitution in the parent, and no check here can run first. Inside a quoted
+# heredoc nothing is expanded, so the title travels the same channel as the
+# body and arrives as the bytes the parent wrote. The first line of stdin is
+# the title, the second is blank, and the rest is the body.
+#
+# THE MSYS TITLE HAZARD CLOSES HERE TOO, and this is the one thing a helper
+# can do that a grant could not. MSYS argument conversion rewrites an argument
+# that looks like an absolute POSIX path before a native `gh.exe` sees it, so a
 # title beginning with `/` filed four times as `C:/Program Files/Git/...`
 # (#55, #56, #68). The commands could not set MSYS2_ARG_CONV_EXCL, because an
 # env-prefixed command no longer begins with `gh issue create` and the grant is
@@ -31,9 +41,9 @@
 # script is unchanged.
 set -euo pipefail
 
-[ "$#" -eq 3 ] ||
-  { echo "usage: gh-issue-create.sh <title> <security|bug> <critical|high|medium|low> < body" >&2; exit 2; }
-title="$1"; kind="$2"; severity="$3"
+[ "$#" -eq 2 ] ||
+  { echo "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body" >&2; exit 2; }
+kind="$1"; severity="$2"
 
 # The whole vocabulary a sweep files under. A word outside it is refused rather
 # than passed on — that refusal is the point of the file — and `documentation`
@@ -47,12 +57,17 @@ case "$severity" in
   *) echo "not a severity this helper will file under: $severity" >&2; exit 2 ;;
 esac
 
-# An empty title files an issue nobody can find in the tracker, and a title with
-# a newline in it is two arguments to something downstream. Both are refused.
+# The title is the first line of stdin and the second line must be blank, so a
+# body that arrives without its title line is refused rather than filed under
+# its own first sentence. An empty title files an issue nobody can find in the
+# tracker; a title cannot contain a newline, because a line is what it is.
+IFS= read -r title || true
+title="${title%$'\r'}"
 [ -n "$title" ] || { echo "the title is empty" >&2; exit 2; }
-case "$title" in
-  *$'\n'*) echo "the title contains a newline" >&2; exit 2 ;;
-esac
+IFS= read -r separator || true
+separator="${separator%$'\r'}"
+[ -z "$separator" ] ||
+  { echo "the second line of stdin must be blank: title, blank line, body" >&2; exit 2; }
 
 # The repository is resolved, never accepted. `gh repo view` reads the checkout
 # this process is standing in, so the answer is a property of the filesystem
@@ -66,8 +81,9 @@ here=$(dirname "$0")
 bash "$here/gh-label-ensure.sh" "$kind" >/dev/null
 bash "$here/gh-label-ensure.sh" "$severity" >/dev/null
 
-# The body is stdin and nothing else: `--body-file -` reads bytes, which is why
-# a title is the only argument the conversion below could ever have touched.
+# The body is what is left of stdin: `--body-file -` reads bytes from where the
+# two `read`s stopped. The title is the one argument the conversion below could
+# ever have touched, and it is excluded for this child.
 MSYS2_ARG_CONV_EXCL='*' gh issue create \
   --repo "$repo" \
   --title "$title" \

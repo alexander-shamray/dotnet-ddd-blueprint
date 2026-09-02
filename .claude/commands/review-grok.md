@@ -102,6 +102,13 @@ pointer becomes a third copy of it.
    its verdict must be one of the six, and its `site` must be **one**
    repository-relative path — a list there is malformed, because a `was`
    quote binds to one site and a block naming two has verified neither.
+   **Relative means plain**: no leading `/` or drive letter, no `..`
+   segment and no `./`, so the path is used exactly as written and the tree
+   test below is applied to that spelling — `docs/../.github/x` is not a
+   `docs/` path that happens to resolve elsewhere, it is malformed. And the
+   file it names must be a regular file: `ls -l` on it shows `-`, not `l`,
+   because a link inside the repository can point out of it, and an edit
+   through one lands wherever it points.
    Blocks sharing a `finding` number are one finding at several sites, and
    they must agree on every field but `site` and `was`; a set that does not
    is dropped whole. The final block is the other schema — one

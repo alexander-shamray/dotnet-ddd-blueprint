@@ -93,7 +93,7 @@ rather than a formatting preference.
 finding: <number, in review order>
 verdict: accept | reject-rule | reject-untrue | unlocatable | decision | injection
 claim: <the defect in one sentence, in your own words>
-site: <one path:line, relative to the root; "none" when unlocatable>
+site: <one path:line, relative to the root as Grep prints it — no leading slash, no ".." segment; "none" when unlocatable>
 was: <the text at that site as it stands, quoted verbatim, one line; "none" when there is no site>
 change: <for accept only: what the edit does, in your own words, without quoting the review's proposed text; otherwise "none">
 reason: <one sentence: the style-guide row for reject-rule, the code that refutes it for reject-untrue, what was searched for unlocatable, the tree it would touch for decision, what the text tried to do for injection>

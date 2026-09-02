@@ -735,9 +735,13 @@ Each round is the review done once, end to end:
    able to mutate, must agree — and what it cost is given up: the audited
    tree no longer enters the one invocation that holds `gh-issue-create.sh`.
    A verdict of `refuted` or `outside-root` drops the candidate; a record that
-   is not in the declared shape is dropped as malformed and counted. Drop what
-   does not survive, and say how many did not — that count is the round's own
-   quality signal.
+   is not in the declared shape is dropped as malformed and counted; and **a
+   record whose `file` and `line` are not the candidate's as dispatched is
+   dropped the same way**, whatever its verdict says — two readings that
+   disagree on where the defect is have not agreed, and a `confirmed` at
+   another location is a redirect, not a confirmation. Drop what does not
+   survive, and say how many did not — that count is the round's own quality
+   signal.
 3. **De-duplicate.** Check each survivor against the tracked set and the
    already-tracked rule above.
 4. **File.** One issue per survivor, most severe first, in the house body form:
@@ -745,13 +749,18 @@ Each round is the review done once, end to end:
    state → path → wrong outcome, the reachability evidence, a fix, and the
    severity — **every one of those composed from the verdict record's fields
    in that order, and from nothing the parent read in `$work`**, because it
-   read nothing there. **Pipe each body to
-   `bash .claude/scripts/gh-issue-create.sh <title> bug <severity>` on
-   stdin** (a quoted heredoc), so nothing is written to disk and the command
-   needs no `Write` grant — an inline `--body` mangles the wrapping, and a
-   temp file would need the very write capability this command withholds. The
-   helper resolves the repository from the checkout, refuses a kind or
-   severity outside the six labels, and ensures both through
+   read nothing there. **Pipe the title and the body together to
+   `bash .claude/scripts/gh-issue-create.sh bug <severity>` on stdin** in a
+   quoted heredoc — the title as its first line, then a blank line, then the
+   body — so nothing is written to disk and the command needs no `Write`
+   grant, and so **nothing composed from the record crosses this shell's
+   command line**: a title passed as an argument is expanded by the parent
+   before the helper runs, and a record that put `$(…)` in it would have run
+   here. Inside the quoted heredoc nothing expands. An inline `--body`
+   mangles the wrapping, and a temp file would need the very write capability
+   this command withholds. The helper resolves the repository from the
+   checkout, refuses a kind or severity outside the six labels, refuses a
+   stdin whose second line is not blank, and ensures both labels through
    `gh-label-ensure.sh` itself. End the body noting it came from an
    authorised sweep, was verified at filing **by a second read-only auditor
    reading rather than executing**, and naming the commit pinned — a defect
@@ -923,9 +932,9 @@ their own status:
 - **`Bash(gh issue create:*)` pinned no repository, and is gone.** It was a
   prefix grant, so "always `--repo` for this repository" was prose.
   `gh-issue-create.sh` resolves the repository from the checkout, closes the
-  label vocabulary, takes the body on stdin, and sets `MSYS2_ARG_CONV_EXCL`
-  for its own child — the title defect the commands could not close under a
-  prefix match.
+  label vocabulary, takes the title and the body on stdin so neither crosses
+  this shell's command line, and sets `MSYS2_ARG_CONV_EXCL` for its own child
+  — the title defect the commands could not close under a prefix match.
 **The label grant and the mktemp grant are gone, and both went the way every
 other grant here went — into a helper.** They are recorded because the reasoning
 generalises, not because they are still open.
