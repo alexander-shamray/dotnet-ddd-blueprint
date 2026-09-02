@@ -1009,3 +1009,23 @@ own line rather than sending a reader to a file that does not hold it.
   the failure the check exists to prevent, arriving inside the fix. Make the
   discriminator a required argument, and write the test that runs the *same*
   document under both values and asserts it passes exactly one.
+- **A taint alert names a source, and the sink is the part you recognise.**
+  Three CodeQL findings on one pull request survived two rounds of fixing,
+  because both fixes were aimed at the printing end: first the credential keys
+  in the document were redacted, then the messages stopped echoing attribute
+  values, and the count did not move either time. The source was a *test
+  helper's parameter named* `trusted`, which the query classifies as a secret
+  by name and then follows through an argv list into the code under test. No
+  realm and no credential were anywhere in that flow. **The tell is a fix that
+  changes nothing**: an alert that survives a plausible remedy is one whose
+  cause has not been read yet, and the SARIF carries the whole path —
+  `gh api -H "Accept: application/sarif+json" .../code-scanning/analyses/<id>`
+  prints every step with its file and line, including the steps in files you
+  were not looking at. Read the flow before the second attempt, not after the
+  third.
+- **A name-based classifier that is wrong about a value is answered by
+  renaming the value, not by suppressing the rule.** The query was right about
+  its own mechanism and wrong only about what this variable held; writing the
+  name that says what it holds corrects the input rather than silencing the
+  output, and leaves the rule catching the next real one. Reach for a
+  dismissal when the *flow* is impossible, not when the *name* is unlucky.

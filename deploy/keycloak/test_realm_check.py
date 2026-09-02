@@ -549,7 +549,16 @@ class TheTrustedOrigin(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.values = Path(self.directory.name) / "values.json"
 
-    def run_authority(self, authority: str, trusted: str) -> int:
+    # `origin` AND NOT `trusted`, and the name is the whole of the fix for
+    # three CodeQL alerts. `py/clear-text-logging-sensitive-data` classifies a
+    # value by the NAME that holds it, reads `trusted` as a secret, and then
+    # follows this list into `realm_check.main` and out through the prints at
+    # the end of it — three high-severity findings whose entire flow began in
+    # a test helper's parameter and touched no realm and no credential.
+    #
+    # Renaming rather than suppressing, because the classifier was wrong about
+    # what this holds and the correction is to say what it holds: an origin.
+    def run_authority(self, authority: str, origin: str) -> int:
         self.values.write_text(
             json.dumps({"identity": {"authority": authority}}), encoding="utf-8")
         # The two `NAME=value` lines are the point of the command and noise in
@@ -557,7 +566,7 @@ class TheTrustedOrigin(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return realm_check.main([
                 "realm_check.py", "authority",
-                "--values", str(self.values), "--trusted-origin", trusted])
+                "--values", str(self.values), "--trusted-origin", origin])
 
     def test_a_release_on_the_trusted_origin_is_accepted(self):
         self.assertEqual(

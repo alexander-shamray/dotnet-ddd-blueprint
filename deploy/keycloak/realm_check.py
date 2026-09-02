@@ -815,15 +815,20 @@ def main(argv: list[str]) -> int:
         # and the two are required to agree: a release pointed at an identity
         # provider this deployment does not trust stops the rollout rather than
         # authenticating to it.
-        # BOTH SIDES ARE TRIMMED THE SAME WAY. Only the trusted value was,
-        # so an authority of `https://host//realms/x` produced a root ending
-        # in a slash and matched nothing an operator would ever type — a
-        # rollout refused with a message that did not say why.
-        trusted = args.trusted_origin.strip().rstrip("/")
-        if root.rstrip("/") != trusted:
+        # BOTH SIDES ARE TRIMMED THE SAME WAY. Only one of them was, so an
+        # authority of `https://host//realms/x` produced a root ending in a
+        # slash and matched nothing an operator would ever type — a rollout
+        # refused with a message that did not say why.
+        #
+        # `expected` and not `trusted`, for the reason the suite's own helper
+        # gives: `py/clear-text-logging-sensitive-data` classifies by the name
+        # holding a value and reads `trusted` as a secret. This one holds an
+        # origin, and the local says so.
+        expected = args.trusted_origin.strip().rstrip("/")
+        if root.rstrip("/") != expected:
             raise SystemExit(
                 f"realm-gate: the release is running with an authority on "
-                f"{root!r}, and this deployment trusts {trusted!r}. Refusing "
+                f"{root!r}, and this deployment names {expected!r}. Refusing "
                 "to authenticate to an identity provider the deploy "
                 "environment does not name.")
 
