@@ -322,20 +322,20 @@ jobs:
             gh issue comment "$EXISTING" --body "Still red on the scheduled check: $RUN_URL"
           else
             gh issue create --title "$TITLE" --label security --label critical --body "$(cat <<EOF
-The scheduled realm check (ADR-043) went red: $RUN_URL
+          The scheduled realm check (ADR-043) went red: $RUN_URL
 
-Either a deployed release points at a realm that no longer holds section 11's
-token obligations, or the realm could not be read at all. The run log says
-which, per workload. The procedure is in \`deploy/keycloak/README.md\` under
-*What a red scheduled run means*.
+          Either a deployed release points at a realm that no longer holds section 11's
+          token obligations, or the realm could not be read at all. The run log says
+          which, per workload. The procedure is in \`deploy/keycloak/README.md\` under
+          *What a red scheduled run means*.
 
-The next rollout of every workload is already refused by \`deploy.yml\` until
-the realm is corrected, so nothing deploys onto the drift; what this issue
-tracks is the window in which the realm is live as it stands.
+          The next rollout of every workload is already refused by \`deploy.yml\` until
+          the realm is corrected, so nothing deploys onto the drift; what this issue
+          tracks is the window in which the realm is live as it stands.
 
-Filed by \`.github/workflows/realm.yml\`. Each further red run comments here
-rather than filing again; close this issue on a green \`workflow_dispatch\` of
-the same workflow.
-EOF
-)"
+          Filed by \`.github/workflows/realm.yml\`. Each further red run comments here
+          rather than filing again; close this issue on a green \`workflow_dispatch\` of
+          the same workflow.
+          EOF
+          )"
           fi

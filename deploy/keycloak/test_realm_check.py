@@ -1081,7 +1081,33 @@ class TheScheduleStillCallsThisGate(unittest.TestCase):
         self.assertIn("gh issue comment", job)
         self.assertIn("issues: write", job)
 
-    def test_the_concurrency_key_carries_the_event(self):
+    def test_every_line_of_a_run_block_stays_inside_the_block(self):
+        """A `run: |` block ends at the first line indented less than its
+        body, and a heredoc written the way bash wants it — terminator at
+        column 0 — did exactly that on the first push: GitHub refused the
+        file and the run had no jobs. YAML strips the block's indentation, so
+        the terminator sits at column 0 of the SCRIPT when it sits at the
+        block's indentation in the FILE. No YAML parser is in the stdlib, so
+        this asserts the shape rather than the parse."""
+        text = (Path(realm_check.__file__).resolve().parents[2]
+                / realm_check.WORKFLOW_PATH).read_text(encoding="utf-8")
+        lines = text.splitlines()
+        inside = None
+        for number, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if inside is not None:
+                if stripped == "":
+                    continue
+                indent = len(line) - len(line.lstrip())
+                if indent >= inside:
+                    continue
+                inside = None
+            if stripped == "run: |":
+                inside = len(line) - len(line.lstrip()) + 2
+                continue
+            if inside is None and stripped.startswith("EOF"):
+                self.fail(f"{realm_check.WORKFLOW_PATH}:{number} closes a "
+                          "heredoc outside its run block")
         """A scheduled run and a pushed gate run share `refs/heads/main`, and
         under a ref-only key each cancelled the other."""
         self.assertIn("group: realm-${{ github.event_name }}-${{ github.ref }}",
