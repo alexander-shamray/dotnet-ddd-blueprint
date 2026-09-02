@@ -174,6 +174,119 @@ jobs:
           TAG: ${{ inputs.tag }}
           WORKLOAD: ${{ inputs.workload }}
 
+      # THE REALM IS CHECKED BEFORE THE ROLLOUT CHANGES ANYTHING, and this is
+      # the step #157 asked for. ADR-033's 330-second revocation bound and
+      # ADR-034's no-refresh-token rule are realm settings, and until ADR-042
+      # the only realm anything read was the Compose export -- so both were
+      # verified locally and merely stated for the realm every chart actually
+      # points at.
+      #
+      # "Before the rollout changes anything" and not "before the cluster is
+      # touched", because the first of these three steps READS the cluster.
+      # The first step that CHANGES it is the HPA patch below, and the
+      # difference is worth the extra words: a read is what makes the check
+      # honest, and a claim that nothing has been contacted would be false.
+      #
+      # ADR-040 declined a pipeline check on the grounds that one "needs admin
+      # credentials in CI", and that objection is answered by WHERE this sits
+      # rather than by having found credentials. CI holds none and still holds
+      # none; this job runs under the `production` GitHub Environment, which is
+      # what scopes a deploy-time credential to the deploy. The realm-check
+      # client is a service account of the realm being checked, with realm-read
+      # rights and nothing else -- docs/secrets.md carries how it is
+      # provisioned and rotated.
+      #
+      # THE REALM IS DERIVED AND THE ORIGIN IS PINNED, and mixing those up is a
+      # hole either way. Two environment variables naming a realm, beside a
+      # chart value naming another, is a gate that passes on a compliant
+      # unrelated realm while every host it deploys is pointed at the
+      # non-compliant one -- which would have closed #157 in the description
+      # and nowhere else. So the realm comes out of `helm get values`, which
+      # answers what the release is running with and what `-f
+      # stable-values.yaml` below reinstalls.
+      #
+      # DERIVING THE ORIGIN TOO WOULD BE WORSE THAN THE HOLE IT CLOSED. The
+      # next step posts this deployment's client secret to that host's token
+      # endpoint, so an `identity.authority` of `https://attacker.example/...`
+      # -- a value held in the cluster, editable by anyone who can edit a
+      # release -- would exfiltrate the credential. `KEYCLOAK_TRUSTED_ORIGIN`
+      # is the identity provider this deployment is willing to authenticate to,
+      # it comes from the Environment and not from the cluster, and
+      # `realm_check.py authority` refuses a release whose authority names
+      # anything else. A rollout onto an untrusted identity provider stops.
+      #
+      # It fails closed in every direction: an absent variable, an authority
+      # this gate cannot split, a realm that cannot be read, a realm that
+      # disagrees. A rollout that cannot see its own realm stops, on the same
+      # rule the Prometheus read below follows.
+      #
+      # The suite runs first here as well as in `realm.yml`, and the repetition
+      # is the point: this job runs the gate from the dispatched ref, so the
+      # copy that decides is the copy that must have been observed red.
+      - name: The realm gate's negatives
+        run: python -m unittest discover -s deploy/keycloak
+
+      # `-o json`, because stdlib parses that and no YAML. The same read
+      # happens again below for the rollout's own `-f` file; it is cheap, and
+      # sharing one file across forty lines of unrelated steps would couple
+      # this check to the order of everything between them.
+      - name: The realm to read is the realm this rollout installs
+        run: |
+          set -euo pipefail
+          # `--all`, and its absence would have stopped every rollout. Without
+          # it `helm get values` emits only the overrides the caller supplied
+          # and omits the chart's own defaults -- and `identity.authority` HAS
+          # a default in all four charts, so a release that never overrode it
+          # answers a document with no `identity` key at all. `--all` is the
+          # computed values, which is what the release is running with and what
+          # the question is. The sibling `helm get values ... -o yaml` below
+          # deliberately does NOT take it: that one produces the `-f` file for
+          # the upgrade, where re-supplying defaults as explicit overrides is
+          # exactly what must not happen.
+          helm get values "$WORKLOAD" -n "$NAMESPACE" --all -o json \
+            > "$RUNNER_TEMP/installed.json"
+          python deploy/keycloak/realm_check.py authority \
+            --values "$RUNNER_TEMP/installed.json" \
+            --trusted-origin "$KEYCLOAK_TRUSTED_ORIGIN" >> "$GITHUB_ENV"
+        env:
+          WORKLOAD: ${{ inputs.workload }}
+          KEYCLOAK_TRUSTED_ORIGIN: ${{ vars.KEYCLOAK_TRUSTED_ORIGIN }}
+
+      - name: Read the deployed realm
+        run: python deploy/keycloak/read_admin.py --out "$RUNNER_TEMP/realm.json"
+        env:
+          # KEYCLOAK_BASE_URL and KEYCLOAK_REALM are NOT here. They arrive
+          # through GITHUB_ENV from the step above, derived from the chart
+          # value, and declaring them here would let an Environment variable
+          # override the realm this rollout is actually installing.
+          KEYCLOAK_CHECK_CLIENT_ID: ${{ vars.KEYCLOAK_CHECK_CLIENT_ID }}
+          KEYCLOAK_CHECK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CHECK_CLIENT_SECRET }}
+
+      - name: The deployed realm holds section 11's token obligations
+        run: >
+          python deploy/keycloak/realm_check.py check
+          --realm "$RUNNER_TEMP/realm.json" --kind deployed
+
+      # AND THE AUTHORITY THAT WAS CHECKED IS THE ONE EVERY HELM CALL BELOW
+      # INSTALLS. Reading it from the running release and then upgrading to a
+      # checked-out chart is not the same question: `-f stable-values.yaml`
+      # carries the caller's OVERRIDES, so an authority that came from the old
+      # chart's default is replaced by the new chart's default, and the realm
+      # checked a step ago is not the realm the workload ends up pointed at.
+      #
+      # Pinning it as an explicit override closes that by construction. It is
+      # set once here and every `helm upgrade` in this job takes it, so there
+      # is no invocation that could take a different one -- and `--set-string`
+      # is safe for this value because `realm_check.py authority` has already
+      # refused whitespace, a query, a fragment and a second path segment. The
+      # remaining `strvals` character is a comma, which cannot occur in a URL
+      # that passed those refusals and reached a `/realms/<name>` split.
+      - name: The checked authority is the one that gets installed
+        run: |
+          set -euo pipefail
+          echo "CHECKED_AUTHORITY=${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}" \
+            >> "$GITHUB_ENV"
+
       - name: The first rung has a price, and it is paid before anything rolls
         run: |
           set -euo pipefail
@@ -351,6 +464,7 @@ jobs:
               helm upgrade "$WORKLOAD" "deploy/helm/$CANARY_CHART" \
                 -n "$NAMESPACE" \
                 -f stable-values.yaml --set-string image.tag="$TAG" \
+                --set-string identity.authority="$CHECKED_AUTHORITY" \
                 --atomic --wait --timeout 20m
               helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
               break
@@ -395,6 +509,7 @@ jobs:
             # replica count and the API server defaults it to one, making
             # every rung of the ladder a single pod.
             helm upgrade --install "$WORKLOAD-canary" "deploy/helm/$CANARY_CHART" \
+              --set-string identity.authority="$CHECKED_AUTHORITY" \
               -n "$NAMESPACE" \
               -f stable-values.yaml \
               --set canary.enabled=true \

@@ -14,28 +14,41 @@ namespace Common.Web.Tests;
 /// <para>
 /// <b>The realm this reads is §14.1's Compose realm, and there is no other in
 /// this repository.</b> Every chart points at an externally provisioned
-/// authority, so the security properties asserted below are verified for the
-/// realm the platform provisions itself and stated as obligations for one it
-/// does not. ADR-033 and ADR-034 carry that division; it is the same one
-/// §15.4 draws for every Secret. Read a green run here as "the local realm
-/// holds the shape", never as "the platform does".
+/// authority, which this repository still holds no configuration for — so a
+/// green run here says the local realm holds the shape and never that the
+/// platform does. ADR-033 and ADR-034 carry that division; it is the same one
+/// §15.4 draws for every Secret.
 /// </para>
 /// <para>
-/// <b>One of them is bounded at run time as well as asserted here, and the
-/// split is worth carrying because it is not tidy.</b> Every host refuses a
-/// token with more than
-/// <see cref="AuthenticationExtensions.RevocationBound"/> of life left in it,
-/// whatever realm issued it (#157, ADR-040) — so the lifetime assertions below
+/// <b>Since ADR-042 a second instrument judges a deployed realm, and this one
+/// is not it.</b> <c>deploy/keycloak/realm_check.py</c> asserts the subset of
+/// the properties below that must hold of <em>any</em> realm, and
+/// <c>deploy.yml</c>'s rollout job runs it against the realm a deployment
+/// points at before anything touches the cluster (#157). This file keeps
+/// everything that subset leaves out — the audience mapper, the permission
+/// vocabulary, the two development logins — and it keeps the lifetime
+/// assertions too, because two instruments over one realm is what makes the
+/// local one the gate's proving subject.
+/// <b>One assertion below is deliberately the opposite of that gate's.</b>
+/// <c>directAccessGrantsEnabled</c> is asserted <em>true</em> here, because
+/// §14.1's documented login is a password grant; the deploy-time check asserts
+/// it <em>false</em>, because §11.2 says a deployed realm turns it off. Both
+/// are right about their own realm, which is why that gate takes the realm's
+/// kind as a required argument.
+/// </para>
+/// <para>
+/// <b>One of them is bounded at run time as well, and the split is worth
+/// carrying because it is not tidy.</b> Every host refuses a token with more
+/// than <see cref="AuthenticationExtensions.RevocationBound"/> of life left in
+/// it, whatever realm issued it (ADR-040) — so the lifetime assertions below
 /// restate a number the platform also holds inbound tokens to, which is why
 /// this file reads the constant rather than its own literal.
 /// <b>That is containment and not verification</b>: the guard gates a token's
 /// <em>remaining</em> life, so a realm set to five hours has its tokens
-/// refused for most of each one and admitted in the last window — the issued
-/// lifetime and any client-level override stay obligations on whoever
-/// provisions the realm. The refresh-token attribute and the flow flags are
-/// not even contained, because a refresh token never reaches a host at all.
-/// <b>So read a green run here as "the local realm holds the shape" and
-/// nothing more</b>; #157 stays open in full.
+/// refused for most of each one and admitted in the last window. It is still
+/// load-bearing after ADR-042 and for a reason that is easy to miss — the
+/// realm is read at a rollout, so a realm edited between rollouts is
+/// unobserved until the next one (#176), and this is what bounds that window.
 /// </para>
 /// </summary>
 /// <remarks>

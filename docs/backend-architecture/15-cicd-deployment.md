@@ -191,18 +191,19 @@ series as well as on a breached one — a target with no data is the same silenc
 §13.6 spends a callout on, and reading it as "nothing wrong" would turn this
 stage into the gate configured to pass that the paragraph above rules out.
 
-**Four** `deploy/**` artefacts are exercised by CI directly rather than
+**Five** `deploy/**` artefacts are exercised by CI directly rather than
 deployed, one per subtree, each in its own path-filtered workflow. **None is the
-smoke stage ruled out above**: all four deploy nothing and assert only what a
+smoke stage ruled out above**: all five deploy nothing and assert only what a
 chapter already defines.
 
 > **A count in prose is a claim to reconcile, and this one has now been wrong
-> once.** It read *three* until PR-25 added a fourth subtree, which is the
-> failure `deploy/helm/smoke.sh` spent three findings learning about its own
-> inventory. It stays a number rather than becoming a list because the
-> paragraphs below are the list — each names one subtree and what its gate
-> asserts — so a fifth subtree that reached this section without a paragraph
-> would be visible here in a way a missing row in a table is not.
+> twice.** It read *three* until PR-25 added a fourth subtree, and *four* until
+> ADR-042 added a fifth — the failure `deploy/helm/smoke.sh` spent three
+> findings learning about its own inventory, arriving here a second time. It
+> stays a number rather than becoming a list because the paragraphs below are
+> the list — each names one subtree and what its gate asserts — so a sixth
+> subtree that reached this section without a paragraph would be visible here in
+> a way a missing row in a table is not.
 
 The first is the Compose file. A workflow path-filtered to
 `deploy/compose/**` and to itself runs `docker compose config -q`, then
@@ -246,7 +247,40 @@ reaches no cluster and no Prometheus, and the weight arithmetic and the
 promote/rollback decision have a suite because they are the parts a workflow
 cannot be trusted with.
 
-**Three of the four filters name files outside their own tree**, and none is an
+The fifth is the Keycloak realm gate
+([ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)).
+A workflow path-filtered to `deploy/keycloak/**` runs that tree's own suite,
+`realm_check.py inputs` and `realm_check.py check --kind local`, which asserts
+[§11](11-identity-authorization.md)'s token obligations against
+`deploy/compose/keycloak/realm-export.json`: `accessTokenLifespan` equal to the
+`AccessTokenLifetime` `Common.Web` declares — **read out of that declaration
+rather than restated** — no client-level `access.token.lifespan` override, no
+client enabling the implicit flow, and `use.refresh.tokens` false on §11.2's
+browser client with `standardFlowEnabled` true beside it.
+
+**It is the one of the five whose gate also reads a subject this repository
+holds no copy of.** The same predicate runs in `deploy.yml`'s rollout job, over
+the realm a deployment is about to be rolled onto — fetched through Keycloak's
+admin API by `read_admin.py`, under the `production` GitHub Environment, and
+judged before the rollout changes anything. **Which realm that is comes out of
+the chart rather than out of a variable beside it** — `helm get values` answers
+what the release is running with, and `realm_check.py authority` splits its
+`identity.authority` into the server root and the realm name, so the realm
+checked and the realm installed cannot be two realms. **The origin is pinned
+where the realm is derived**, because the fetch authenticates to it: an
+authority is a value held in the cluster, and deriving *where to send a client
+secret* from one would hand that decision to whoever can edit a release.
+
+**That is also what the CI half is for.** A deploy-time check nothing has ever
+executed is a check nobody has established is looking at anything, and the
+local realm is the one subject available to establish it on.
+
+**The kind is an argument with no default**, because one obligation inverts
+between the two — §11.2's password grant is on in the local realm and off in a
+deployed one — and a check that guessed would pass a production realm on the
+local realm's terms.
+
+**Four of the five filters name files outside their own tree**, and none is an
 oversight — each names an input its gate actually reads. Compose is the one
 that stays inside, because its smoke starts the file and nothing else. The Helm
 one is below; the observability one names `src/**`, because deciding whether an
@@ -256,12 +290,27 @@ behind it; the canary one names `deploy/helm/**`, because its plan asserts each
 workload's chart exists and can render a canary track, `src/**`, because it
 checks each `serviceName` against a real entry assembly, and
 `deploy/observability/**`, because it takes §13.6's thresholds out of the rules
-file rather than restating them. **None of the three keeps that list in its own
-YAML.** `smoke.sh`, `check.py` and `canary.py` each declare `SOURCE_INPUTS`
-beside the reads, and each asserts that both of its workflow's triggers cover
-every entry — a copy of a list drifts exactly as a copy of a number does, which
-the Helm tree established at a cost of three findings and the observability
-tree adopted before paying it once.
+file rather than restating them; the realm one names
+`src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs`, because the
+lifetime every realm owes is read out of `AccessTokenLifetime` rather than
+restated, and `deploy/compose/keycloak/realm-export.json`, because that file is
+its subject in CI. **None of the four keeps that list in its own YAML.**
+`smoke.sh`, `check.py`, `canary.py` and `realm_check.py` each declare
+`SOURCE_INPUTS` beside the reads, and each asserts that both of its workflow's
+triggers cover every entry — a copy of a list drifts exactly as a copy of a
+number does, which the Helm tree established at a cost of three findings and
+the observability tree adopted before paying it once. `realm_check.py` arrives
+carrying the reads direction as well as the trigger one, which is the shape the
+callout below argues for.
+
+> **A fifth copy of that pattern exists and is not one of the four above, which
+> is why ADR-042 calls `realm_check.py` the fifth.**
+> `deploy/compose/rabbitmq/check_permissions.py` declares `SOURCE_INPUTS` too,
+> and it sits *inside* the compose subtree rather than beside it — this section
+> counts subtrees and their filters, so the broker gate is covered by Compose's
+> row and has none of its own. Two counting bases, both correct, and stating
+> which is which here is cheaper than a reader reconciling them from two
+> documents.
 
 > **The canary tree paid for it anyway, and the shape of the failure is worth
 > more than the fix.** Its list shipped naming `src` and `deploy/helm` and

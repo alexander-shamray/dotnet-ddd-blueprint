@@ -340,6 +340,42 @@ the rows above would have no reason to look for a schema change.
 |---|---|---|---|
 | **35** | `fix(common): the marker purge identifies a row by a rowversion` | 34 | A `rowversion` column on `IdempotencyMarkers` in every service, and `RetentionPurgeService`'s marker pass selecting and joining on it where it joined `CommittedAt` — so the delete's identity is `(Key, RowVersion)` and is a **constraint** rather than a construction ([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)). Declared as an EF **shadow property** on each service's own `IEntityTypeConfiguration`, beside the schema and for the same reason, named from `IdempotencyMarker.RowVersionColumn` so the mapping and the two statements that read it cannot drift; **no CLR property backs it, and that is a decision** — nothing in C# reads the column through EF, the one reader being the purge's SQL over Dapper, so a property would be a mutable array on a public type that exists to be ignored. `AddIdempotencyMarkerRowVersion` per service, rendering `ALTER TABLE … ADD [RowVersion] rowversion NOT NULL` with **no backfill**, because SQL Server stamps every existing row as part of the `ALTER` and every insert after it. §4.5's scaffold carries it as a seventh template migration, which matters more here than for the sixth: `RetentionPurgeService` names the column in both marker statements, so a service scaffolded without the migration fails its own purge with `Invalid column name 'RowVersion'` on the first pass rather than deleting the wrong row quietly. `CommittedAt` is **not dropped and its index is untouched** — ADR-038's argument for the column default is about ageing a candidate and is unaffected; what the column loses is the job of saying which row is which. The delete still costs two parameters a row, so the 900-row chunk and its 2,100-parameter ceiling are unchanged, and the parameter is sized to eight bytes because an unsized binary one travels as `varbinary(max)`. **The regression test can be written from this side, where ADR-039's could not**: the coincidence cannot be staged as a clock movement, but it can be staged as its effect — a replacement written under the same key *and the same `CommittedAt`*, landed between the pass's select and its delete by decorating the claim store the pass asks in between, which is where a real replacement lands. The case was **observed red** against the previous identity, deleting the replacement where it must delete nothing. A second test per service reads the EF model and `sys.columns` and asserts the property is present, shadow, store-generated, a concurrency token and not nullable, and reads `sys.columns` for the column’s type — its subject being what the delete is *looking at*, because a plain `binary(8)` nobody updates would satisfy the behavioural test and leave the column something an `INSERT` can choose |
 
+**The ninth row is PR-32's kind — a residual a row above it names as owed — and
+like PR-33 it arrives against a row two rows old rather than the one
+immediately above.** PR-34 said, in its own lead-in, that the gap it carried was
+**narrowed and not closed**: ADR-033 and ADR-034 state platform guarantees whose
+settings live in a realm, every chart points at a realm this repository holds no
+configuration for, and a host can see how much life a token has left but not
+what lifetime issued it, nor which grant minted it, nor whether a refresh token
+was handed out beside it. So the row contained the lifetime half and left
+[#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+open in full, and named it as owed. Nothing was missing from the plan and
+nothing was mis-delivered; a debt was declared and the only thing wanting was a
+row saying who would pay it.
+
+**The rule that moves is the division ADR-033 drew and three other records
+lean on**: verified where the platform provisions its own infrastructure,
+stated as an obligation where it does not.
+[ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+splits that in two, because it was two claims in one clause — a repository can
+**observe** an artefact it does not **own**, and only the second half of
+ADR-033's sentence was ever load-bearing. What made the first half look
+inseparable was where a check would have to sit: ADR-040 refused a pipeline
+check because one "needs admin credentials in CI", which is true of CI and says
+nothing about a rollout job under the `production` environment §15.4 already
+relies on. **The division is untouched everywhere else, and ADR-036's broker is
+the case that proves the rule rather than an oversight** — nothing here reads a
+deployed broker either, and no row claims otherwise, because a broker's
+permissions are not legible in a document a rollout can fetch. A reader of the
+rows above would have no reason to look for a new `deploy/**` subtree, a fifth
+path-filtered workflow of §15.1, or three new steps in a rollout that has
+never reached a cluster.
+
+| PR | Title | Depends | Delivers |
+|---|---|---|---|
+| **36** | `feat(ci): the deployed realm is checked at deploy time` | 34 | `deploy/keycloak/`, a fifth `deploy/**` subtree exercised by CI rather than deployed: `realm_check.py`, which asserts §11's token obligations against a Keycloak **realm representation**, and `read_admin.py`, the one file in the tree that talks to anything. **One predicate, two subjects**, and the second is what closes #157 — a realm export and the admin API's `RealmRepresentation` are the same document, so `.github/workflows/realm.yml` judges §14.1's Compose export on every change to it and `deploy.yml`'s rollout job judges the realm a deployment actually points at, before the first step that touches a cluster. The obligations are #157's own table: `accessTokenLifespan` equal to `Common.Web`'s `AccessTokenLifetime`, no client-level `access.token.lifespan` override, no client enabling the implicit flow, `use.refresh.tokens` `"false"` on `web-app` with `standardFlowEnabled` `true` beside it, and `directAccessGrantsEnabled` **off in a deployed realm and on in the local one** — the one obligation that inverts, which is why `--kind` is required and has no default. `ClockSkew` is excluded and the exclusion is stated: it is not a realm setting, and an operator told to configure one would be looking for something that does not exist. **Five things were found by building it.** The lifetime is **read** out of `AuthenticationExtensions.cs` rather than restated, because ADR-040 had just made that declaration the one place the 300 lives and a literal in Python would be the same defect in a second language — so a third reader now depends on that declaration's textual shape, and the gate stops rather than defaulting when it cannot find it. The reads-direction self-check every copy of the Helm tree's `SOURCE_INPUTS` was found to owe was **silently matching nothing** in its first form here: a path-segment pattern that allowed a dot only at the start of a segment never matched `Common.Web/`, so the gate's most important read was undeclared and the check reported a pass — found by the test whose subject is the check rather than by reading it, which is that test's whole argument. A realm document with no `clients` array satisfies every per-client obligation perfectly, so it is refused rather than passed. A doc comment that quoted the assignment would have satisfied the lifetime read on its own: the first form matched raw text, so a `///` mention plus a *reformatted* declaration leaves exactly one match — in the comment — and the gate would have asserted a number the platform had stopped holding, in the direction that makes a longer lifetime look compliant. It now strips comment lines and anchors on `readonly TimeSpan`. And the credential this needs is the **first in this repository that no pod ever reads**, which is why it is in `docs/secrets.md` and not in §15.4's table — that table is the inventory `ValidateOnStart` enforces. Closes #157; the window between rollouts is filed as [#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176) |
+
+
 ## C.3 Dependency graph
 
 ```mermaid

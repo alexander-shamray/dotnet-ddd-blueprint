@@ -1,0 +1,107 @@
+name: Realm
+
+# §11.3's token obligations, against the one realm this repository owns.
+#
+# ADR-033 composes a 330-second revocation bound out of a 300-second realm
+# setting and a 30-second ClockSkew, and ADR-034 states that the browser holds
+# no refresh token. Both are realm settings. Until ADR-042 the only instrument
+# that read a realm was `RealmImportTests`, a C# suite over §14.1's Compose
+# export -- so the obligations were verified locally and stated everywhere they
+# mattered (#157).
+#
+# THIS WORKFLOW IS HALF OF THE FIX AND THE SMALLER HALF. What closes #157 is
+# the same predicate running against a *deployed* realm, which happens in
+# `deploy.yml`'s rollout job where a credential exists. What runs here is that
+# predicate against the local realm, which is what establishes the instrument
+# works at all -- a deploy-time check nothing has ever executed is a check
+# nobody has established is looking at anything.
+#
+# A SEPARATE WORKFLOW RATHER THAN A JOB IN `compose.yml`, on
+# `broker-permissions.yml`'s reasoning, which is the closest precedent: path
+# filtering is per-workflow and not per-job, so sharing one would either drag
+# that smoke's ~2 GB of pulls onto every identity change or leave this gate
+# blind to the realm it reads.
+#
+# The filter list below is NOT maintained here. `realm_check.py` declares it as
+# SOURCE_INPUTS beside the reads and `realm_check.py inputs` asserts that both
+# of this workflow's triggers cover every entry -- and, in the other direction,
+# that no path this gate reads is missing from the list. This is the FIFTH
+# workflow to reach outside its own tree, and the pattern arrives owing that
+# reads-direction test rather than only the trigger-direction one.
+#
+#   - src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs, because the
+#     300 a realm owes is READ from `AccessTokenLifetime` rather than restated
+#     here. ADR-040 made that declaration the one place the number lives, and a
+#     literal in the gate would be a second statement that agrees until one of
+#     them is edited. An edit there changes what every realm owes, so it has to
+#     run this gate.
+#   - deploy/compose/keycloak/realm-export.json, because it is the subject.
+#   - deploy/helm/**, because the SUITE reads it. One case asserts that every
+#     chart's `identity.authority` still has the shape `realm_check.py
+#     authority` splits at deploy time, and a subject test that does not gate
+#     the files it validates is a subject test in name only.
+#   - .github/workflows/deploy.yml, because it is the only caller that closes
+#     #157 and its rollout job runs on `workflow_dispatch` alone. A change that
+#     deleted or reordered the derive/fetch/check steps would otherwise reach
+#     `main` with this workflow skipped and nothing else looking at them.
+on:
+  pull_request:
+    paths:
+      - 'deploy/keycloak/**'
+      - 'deploy/compose/keycloak/realm-export.json'
+      - 'deploy/helm/**'
+      - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/realm.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/keycloak/**'
+      - 'deploy/compose/keycloak/realm-export.json'
+      - 'deploy/helm/**'
+      - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/realm.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: realm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Stdlib Python over text and JSON, so this job needs no restore, no SDK
+      # and no Keycloak. `read_admin.py` is the file that would need one, and
+      # it does not run here -- there is no realm to read.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The gate's own suite, BEFORE the gate -- `CLAUDE.md`'s "each of them is
+      # tested and then run". Every negative in it is a mutation that must go
+      # red, and each is paired with a positive control, because a negative
+      # that passes when the pattern matches NOTHING is indistinguishable from
+      # one that works -- which is how this gate's own reads-direction check
+      # shipped broken and was caught. A gate observed only green is one nobody
+      # has established is looking at anything, and this one guards a security
+      # guarantee two ADRs state platform-wide.
+      - name: The gate's negatives
+        run: python -m unittest discover -s deploy/keycloak
+
+      - name: This gate reads what its triggers cover
+        run: python deploy/keycloak/realm_check.py inputs
+
+      # `--kind local` names the subject, and the kind has no default on
+      # purpose: §11.2's password grant is on in this realm and must be off in
+      # a deployed one, so one obligation inverts between them. A check that
+      # guessed which realm it had would pass a production realm on the local
+      # realm's terms.
+      - name: The local realm holds section 11's token obligations
+        run: python deploy/keycloak/realm_check.py check --kind local

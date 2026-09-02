@@ -122,7 +122,7 @@ map you have to open in order to find a directory is not a map.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..041),
+                             15-cicd-deployment, appendix A (ADR-001..042),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided
@@ -143,13 +143,15 @@ Platform.slnx                thirty-three projects
 coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
 .editorconfig                house style; a build input, not a hint
 .github/workflows/           ci, compose, helm, observability, deploy,
-                             closure-gate, broker-permissions
+                             closure-gate, broker-permissions, realm
 .github/licence-gate/        Appendix B against every package actually pinned
 .github/secret-scan/         §15.1's twelve rules — and a library since #161
 .github/closure-gate/        what a PR says it closes against what merging will
 .github/pipeline-gate/       PR-25's three inventories over §15.1's stages
 .github/coverage/            the domain-coverage reporter — a report, not a gate
 deploy/canary/               §15.5's ladder, its arithmetic and its verdict
+deploy/keycloak/             §11's realm obligations, over any realm — the one
+                             gate whose subject is not a file this repo holds
 deploy/compose/              §14.1's infrastructure, one pair per service
 deploy/helm/                 §15.3's charts — one library chart, four users
 deploy/observability/        §13.8's dashboards, §13.6's rules, §13.7's k6 run
@@ -235,7 +237,9 @@ reference rather than a schedule. Live today are the blueprint, the foundation,
 all five building blocks, §14.1's Compose infrastructure, Catalog and Ordering
 as the first two services, §4.5's scaffold, §8's Redis with §8.5's idempotency,
 all three of §9's instalments, PR-16's security, the gateway, the BFF, §15.3's
-Helm charts, §13's signals, §15.1's staged pipeline and §15.5's canary.
+Helm charts, §13's signals, §15.1's staged pipeline, §15.5's canary, and §11's
+realm obligations checked against the local realm today and against a deployed
+one at the first rollout.
 
 **What each of those PRs decided is
 [`docs/pr-decision-log.md`](docs/pr-decision-log.md)'s job, and this section no
@@ -260,6 +264,7 @@ correction, but a residual PR-28's own row *names as owed*, so the debt was
 declared in the section and the only thing missing was a row saying who would
 pay it. It passes the same test — ADR-037 retires the exception in §8.5's
 opening guarantee — which is what a row records and a commit body cannot.
+
 **PR-33 is PR-30's kind, arriving against a row two rows old**: PR-32
 delivered what ADR-037 specified and filed two issues against its own margin
 on the way past, and closing them moved the rule ADR-037 had just set —
@@ -268,6 +273,7 @@ the claim's window plus an allowance (ADR-038). A row records that, and the
 size of the diff is not what earned it — which is why no inventory of that diff
 appears here: the sentence's whole point is that the count is irrelevant, and a
 count written beside it is one more figure nothing recomputes.
+
 **PR-34 is PR-33's kind against PR-33's own row, and it also carries a gap**:
 ADR-038 stated the clock term it could not close, filed #171 rather than
 folding the fix into a PR about something else, and closing it moved that rule
@@ -281,6 +287,7 @@ for most of its life and admitted in its last window, and #157 stays open in
 full for the deploy-time check it actually asks for. **Two kinds in one row is
 not a fourth kind** — one pull request is one row, which is the rule PR-32's
 and PR-33's rows already state.
+
 **PR-35 is PR-32's kind and the third consecutive row to close the residual the
 row above it named**: ADR-039 bought back the atomicity its own split cost by
 making the delete name the rows the select returned, and said in the same
@@ -295,6 +302,25 @@ closed at the source, where this one needs an exact coincidence and cannot be
 out-predicated at all. **Three rows have now each closed what the row above
 named, and this is the first with nothing to hand on**: #127 is §8.5's, it is
 unchanged, and it is the only residual left on this mechanism.
+
+**PR-36 is PR-32's kind against a row two rows old, which is PR-33's arrival
+and not PR-35's**: PR-34's row named #157 as a gap it narrowed and did not
+close — a host can see how much life a token has left, but not the lifetime
+that issued it, nor which grant minted it, nor whether a refresh token went out
+beside it. `deploy/keycloak/` reads the realm instead of the token, and the
+same predicate judges §14.1's Compose export in CI and the realm a deployment
+points at from `deploy.yml`'s rollout job
+([ADR-042](docs/backend-architecture/appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)).
+**The rule that moved is ADR-033's division** — verified where the platform
+provisions its own infrastructure, stated as an obligation where it does not —
+which turns out to be two claims in one clause: a repository can **observe**
+what it does not **own**, and only the second half was load-bearing. What made
+them look inseparable was where a check would sit, and ADR-040's refusal of a
+pipeline check is true of CI and says nothing about a rollout job under the
+`production` environment. **ADR-036's broker is the case that proves the rule
+rather than an oversight**: nothing reads a deployed broker either, because a
+broker's permissions are not legible in a document a rollout can fetch. The
+residual is the window between rollouts (#176), and #157 closes.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
 and `dotnet test` runs 1,119 tests — so the build rules and the drift rules
@@ -480,9 +506,9 @@ exactly as Appendix C wins over the roadmap.
 
 **Three runners, and only one of them is `dotnet test`.** The scaffold's tests
 are Python, the chart gate is bash over `helm template`, and the licence gate,
-the secret scan, the observability gate, ADR-036's broker ACL, the pipeline
-gate, the coverage reporter, the canary, the closure gate and the review
-helpers are Python again;
+the secret scan, the observability gate, ADR-036's broker ACL, the realm gate,
+the pipeline gate, the coverage reporter, the canary, the closure gate and the
+review helpers are Python again;
 none is in `Platform.slnx`, so a green solution says nothing about any of them.
 **Each of them is tested and then run**, which is the pattern every gate here
 follows — the licence gate was once left out of this list on the reasoning that
@@ -706,7 +732,7 @@ to reach both, and the guide is the master copy.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-042) and keep the
+  (currently ADR-043) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to
@@ -757,6 +783,30 @@ to reach both, and the guide is the master copy.
   everything else here — if the body's `## Severity` section and the label
   disagree, one of them is a bug report against the other, and the fix is not
   finished until both say it.
+- **A reply is not a resolution, and the thread stays open until you resolve
+  it.** `/review-copilot` carries the mechanics — the helper, the GraphQL
+  mutation, and the rule that an `Ask` is left open on purpose — and what
+  belongs here is that the obligation does not come from the command. It comes
+  from having acted. **Triage by hand skips no step**: a session that reads the
+  comments itself, fixes them and answers each one has done everything except
+  the part a reviewer can see, and a PR whose threads all read "unresolved"
+  looks exactly like a PR nobody answered. Measured, and this is why the bullet
+  exists: seven threads across two review rounds were replied to and fixed, and
+  not one of them was resolved until the repository owner asked. **Resolve in
+  the same act as the reply** — the reply says what you did, the resolution
+  says it is finished, and only the second one is legible from the pull request
+  list.
+- **A CodeQL alert is a defect in the pull request that raised it, and it is
+  fixed there.** Not deferred to an issue, not dismissed as a false positive
+  without reading the flow it reports: the alert names a source, a sink and a
+  path between them, and the answer is either a change that breaks the path or
+  a stated reason the path cannot be taken. **Prefer breaking it structurally
+  over policing the sink** — the alert that produced this rule was a realm
+  document flowing into a `print`, and the fix was to redact the credential at
+  the door rather than to remember, at every future message, not to format a
+  client. A dismissal is a decision like any other here: it goes in the commit
+  body with its argument, and a PR that leaves an alert neither fixed nor
+  argued is not finished.
 - **Uncommitted work in the tree belongs in the PR being worked on.** When a
   change appears that nobody in the current task wrote — an edit made directly
   by the repo owner, most often — it is not stray churn to be reverted or left
