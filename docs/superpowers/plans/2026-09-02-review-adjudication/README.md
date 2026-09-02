@@ -22,7 +22,7 @@ measurements the change owes before the deny goes back.
 Every path below is under a deny in `.claude/settings.json`, so these are a
 human's edits, made with the deny lifted and restored — the way PR #73 and PR
 #134 landed theirs. Two files are complete drop-ins beside this one
-(`review-adjudicator.md`, `review-grok.md.new`), one is a new helper
+(`review-adjudicator.md`, `review-grok.md`), one is a new helper
 (`gh-issue-create.sh`), and the rest are old → new blocks against the text as
 it stands on `main` at d16d3be.
 
@@ -77,8 +77,9 @@ only `$work`; that residual is unchanged and needs the container.
 | Drop-in | Destination |
 |---|---|
 | `review-adjudicator.md` | `.claude/agents/review-adjudicator.md` |
-| `review-grok.md.new` | `.claude/commands/review-grok.md` (replace whole file) |
+| `review-grok.md` | `.claude/commands/review-grok.md` (replace whole file) |
 | `gh-issue-create.sh` | `.claude/scripts/gh-issue-create.sh` (`eol=lf`, executable bit as the siblings) |
+| `IssueHelperHasNoFreeParameter` (section 8) | `.claude/scripts/test_grok_helpers.py` (append, after `LabelHelperHasNoFreeParameter`) |
 
 ## 2. `.claude/commands/security-sweep.md`
 
@@ -404,13 +405,230 @@ creates none), and the *What cuts across them* section forwards to
 `harness-boundaries.md`, which carries the new entry. Verify by grep rather
 than by reading: `grep -n "review-grok\|gh issue create" CLAUDE.md`.
 
+## 8. The helper's regression tests
+
+**`.claude/scripts/test_grok_helpers.py` is CI's persistent coverage of every
+helper contract in that directory, and a helper that arrives with one-off
+probes and no class there is the label helper's lesson unlearnt.** The apply
+procedure's manual negatives are run once, by hand, with the deny lifted; the
+suite runs on every push, and `docs/testing.md` names it as the one thing that
+keeps the label helper's closed grant closed. `gh-issue-create.sh` is the same
+kind of file — a grant closed by moving it into a helper, whose confinement
+never shipped wrong — so its cases are read on the same terms and sit beside
+the label helper's, in the same shape: the script located through `SCRIPTS`,
+run through `BASH`, and a `gh` put first on `PATH` the way `LabelStub` puts
+one there.
+
+**Every negative exits before `gh repo view`, and the stub is what proves
+it.** The label helper's negatives run against no `gh` at all, on the argument
+that the refusal comes first; that is true of this helper too, and a refusing
+`gh` first on `PATH` turns the argument into a measurement — a validation that
+regressed would otherwise reach a real `gh` and file a real issue on whatever
+repository the developer's checkout resolves to. The positive control answers
+the three kinds of call the helper and its label sibling make, and records the
+argv and the environment the `issue create` child received, which is how
+`MSYS2_ARG_CONV_EXCL` is asserted on the child rather than only grepped in the
+source. The title that filed four times as a Windows path is the title that
+control files, and the case that reads the child's environment is the one that
+would have caught it.
+
+Append after `LabelHelperHasNoFreeParameter` and before `CopilotFeedFilter`.
+It was run against the drop-in beside this file before it was written here —
+eleven cases, green under `py -3.12`, the refusing stub reached by none of
+the negatives:
+
+```python
+class IssueHelperHasNoFreeParameter(unittest.TestCase):
+    """#75 item 5 — `gh issue create` was a prefix grant with two free parameters.
+
+    `-R` unpinned put the issue in whichever repository a finding named, and
+    `--label` unpinned reached any label in any spelling; both were held as
+    prose in each sweep, which a finding can talk past. A third defect was the
+    grant's and not the command's: a title beginning with `/` filed four times
+    as a Windows path (#55, #56, #68), because an env-prefixed `gh` no longer
+    begins with `gh issue create` and the grant was a prefix match. Like the
+    label helper's cases these keep a closed grant closed rather than catch a
+    defect that shipped, and they are read on the label helper's terms.
+
+    A refusing `gh` sits first on PATH for every case. The negatives exit
+    before `gh repo view` is reached, so they need no network — and the stub is
+    what proves it, because a validation that regressed would otherwise reach a
+    real `gh` and file a real issue. The positive control answers the calls the
+    helper and its label sibling make, and records the argv and the
+    environment the `issue create` child actually received.
+    """
+
+    HELPER = SCRIPTS / "gh-issue-create.sh"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="issue-stub-")
+        d = Path(self.dir)
+        gh = d / "gh"
+        gh.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/usr/bin/env bash
+                printf '%s\\n' "$*" >> {(d / 'argv').as_posix()!r}
+                case "$*" in
+                  *"repo view"*)
+                    echo 'acme/widgets'; exit 0
+                    ;;
+                  *"label list"*)
+                    printf '%s\\n' security bug critical high medium low; exit 0
+                    ;;
+                  *"issue create"*)
+                    printf '%s\\n' "${{MSYS2_ARG_CONV_EXCL-unset}}" > {(d / 'conv').as_posix()!r}
+                    cat > {(d / 'body').as_posix()!r}
+                    exit 0
+                    ;;
+                esac
+                echo "stub gh: unexpected call: $*" >&2
+                exit 99
+                """
+            ),
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def run_helper(self, *args, body=""):
+        env = dict(os.environ)
+        env["PATH"] = self.dir + os.pathsep + env["PATH"]
+        return subprocess.run(
+            [BASH, str(self.HELPER), *args],
+            capture_output=True, text=True, input=body, env=env,
+        )
+
+    def calls(self):
+        f = Path(self.dir) / "argv"
+        return f.read_text(encoding="utf-8").splitlines() if f.exists() else []
+
+    def assert_refused_before_gh(self, result):
+        # Exit 2 is the validation code, and an empty argv file is the proof
+        # that the refusal happened before `gh repo view` rather than after it.
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertEqual([], self.calls())
+
+    def test_no_arguments_prints_the_usage_line(self):
+        result = self.run_helper()
+        self.assert_refused_before_gh(result)
+        self.assertIn(
+            "usage: gh-issue-create.sh <title> <security|bug> <critical|high|medium|low> < body",
+            result.stderr,
+        )
+
+    def test_the_argument_count_is_exactly_three(self):
+        self.assert_refused_before_gh(self.run_helper("a title", "bug"))
+        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", "--repo"))
+
+    def test_a_kind_outside_the_vocabulary_is_refused(self):
+        # `documentation` is a real label on this tracker and is refused on
+        # purpose: neither sweep files one, so the helper's vocabulary is the
+        # sweeps' and not the tracker's.
+        for kind in ("documentation", "Security", "security --force", "-R other/repo", ""):
+            with self.subTest(kind=kind):
+                self.assert_refused_before_gh(self.run_helper("a title", kind, "high"))
+
+    def test_a_severity_outside_the_four_is_refused(self):
+        for severity in ("info", "High", "high --force", "-R other/repo", ""):
+            with self.subTest(severity=severity):
+                self.assert_refused_before_gh(self.run_helper("a title", "bug", severity))
+
+    def test_an_empty_title_is_refused(self):
+        self.assert_refused_before_gh(self.run_helper("", "bug", "low"))
+
+    def test_a_title_with_a_newline_is_refused(self):
+        self.assert_refused_before_gh(self.run_helper("one line\nand another", "bug", "low"))
+
+    def test_a_valid_filing_reaches_gh_with_every_parameter_pinned(self):
+        # The positive control the negatives need: a helper that refused
+        # everything would pass every case above.
+        title = "`/security-sweep` files a title that begins with a slash"
+        body = "the body\n\nverified at filing by a second read-only auditor\n"
+        result = self.run_helper(title, "security", "high", body=body)
+        self.assertEqual(0, result.returncode, result.stderr)
+        create = [c for c in self.calls() if c.startswith("issue create ")]
+        self.assertEqual(1, len(create), self.calls())
+        self.assertIn("--repo acme/widgets", create[0])
+        self.assertIn(f"--title {title}", create[0])
+        self.assertIn("--label security", create[0])
+        self.assertIn("--label high", create[0])
+        self.assertIn("--body-file -", create[0])
+        self.assertNotIn("--force", create[0])
+        d = Path(self.dir)
+        self.assertEqual(body, (d / "body").read_text(encoding="utf-8"))
+        self.assertEqual("*", (d / "conv").read_text(encoding="utf-8").strip())
+
+    def test_force_is_never_spelled(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        code = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+        self.assertNotIn("--force", code)
+        self.assertNotIn(" -f ", code)
+
+    def test_the_repository_is_resolved_rather_than_accepted(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn("gh repo view --json nameWithOwner", text)
+        self.assertIn('--repo "$repo"', text)
+
+    def test_the_command_shape_is_the_one_the_sweeps_describe(self):
+        # Each of these is a claim a sweep's step 4 makes about the helper, and
+        # a source assertion is what stops the two drifting apart silently.
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn("MSYS2_ARG_CONV_EXCL='*' gh issue create", text)
+        self.assertIn('--repo "$repo"', text)
+        self.assertIn('--label "$kind"', text)
+        self.assertIn('--label "$severity"', text)
+        self.assertIn("--body-file -", text)
+
+    def test_both_labels_go_through_the_sibling_helper(self):
+        text = self.HELPER.read_text(encoding="utf-8")
+        self.assertIn('"$here/gh-label-ensure.sh" "$kind"', text)
+        self.assertIn('"$here/gh-label-ensure.sh" "$severity"', text)
+```
+
+**The module docstring's subject list gains an entry**, after the second `#75`
+entry, because that list, `ci.yml`'s comment above the job and
+`docs/testing.md`'s paragraph are the three enumerations a reader compares —
+the docstring says so of itself. Old:
+
+```
+  #75   `gh label create` is create-or-overwrite, so the grant reached any
+        label in any repository. This one is the odd entry: it never shipped
+        wrong. It is a grant closed by moving it into a helper, and these cases
+        are what keep it closed rather than what caught it.
+```
+
+New:
+
+```
+  #75   `gh label create` is create-or-overwrite, so the grant reached any
+        label in any repository. This one is the odd entry: it never shipped
+        wrong. It is a grant closed by moving it into a helper, and these cases
+        are what keep it closed rather than what caught it.
+  #75   `gh issue create` was the same shape one helper over: `--repo` and
+        `--label` free under a prefix grant, and a `/`-title filed as a path
+        because the grant could not carry an env prefix. Closed the same way,
+        and the confinement never shipped wrong either; the title did, and
+        the case that reads the child's environment is the one for it.
+```
+
+The other two enumerations take the same subject, in their own voice, in the
+commit that lands the class: `ci.yml`'s comment sits under `.github/`, which
+this plan otherwise does not touch, and `docs/testing.md`'s paragraph is under
+no deny at all. Its "needs no network, no `gh`" sentence stays true — the
+`gh` these cases see is the stub.
+
 ## Apply procedure
 
 1. **Lift the deny.** In `.claude/settings.json`, remove the six lines
    denying `.claude/scripts/**`, `.claude/commands/**` and `.claude/agents/**`
    (both spellings each). Do this by hand in an editor, not in a session — a
    session cannot edit that file once it denies itself.
-2. **Copy the drop-ins and apply the blocks.** Sections 1–4 and 6. The
+2. **Copy the drop-ins and apply the blocks.** Sections 1–4, 6 and 8. The
    repository normalises line endings (`.claude/**/*.md` are `w/crlf`,
    `.claude/scripts/*.sh` are `eol=lf`), so paste rather than worrying about
    the scratchpad's LF.
@@ -430,12 +648,20 @@ than by reading: `grep -n "review-grok\|gh issue create" CLAUDE.md`.
    - Optionally, one `/bug-sweep` scoped to a path with a known low, to see
      the verify dispatch and the helper's filing (the helper will file a real
      issue; scope to something that produces none, or close it afterwards).
-4. **Run the helper's own negatives**: `bash .claude/scripts/gh-issue-create.sh`
-   with no arguments (exit 2), with `docs` as the kind (exit 2), with an empty
-   title (exit 2). Its positive control is the sweep filing above.
+4. **Run the helpers' suite**: `py -3.12 -m unittest discover -s
+   .claude/scripts` — 3.12 because it is CI's floor and the default
+   interpreter here is newer. The class in section 8 runs the helper's
+   negatives — no arguments, a kind or a severity outside the vocabulary, an
+   empty title, a title with a newline — against a refusing `gh`, and its
+   positive control against a recording one, so nothing in this step reaches
+   the network. The one-off negatives this step used to list are those cases
+   run once by hand; the suite is what runs them on every push. The positive
+   control against a real `gh` is the sweep filing above.
 5. **Restore the deny** — the six lines back, as the last edit — and verify
    by reading the file, never by trying the thing it forbids.
-6. **Commit in this order**: the agent, the helper, `review-grok.md`, the two
-   sweeps, the two auditor profiles, `harness-boundaries.md`, and the
-   settings restore last. Close #149; comment on #75 that item 5 is closed
-   and the issue can close with it, quoting the residual paragraph.
+6. **Commit in this order**: the agent, the helper with its test class in
+   one commit — tests ship with the code they cover, and a helper is code —
+   `review-grok.md`, the two sweeps, the two auditor profiles,
+   `harness-boundaries.md`, and the settings restore last. Close #149;
+   comment on #75 that item 5 is closed and the issue can close with it,
+   quoting the residual paragraph.
