@@ -21,20 +21,21 @@ namespace Common.Web.Tests;
 /// holds the shape", never as "the platform does".
 /// </para>
 /// <para>
-/// <b>One of them is no longer only an obligation, and the split is worth
-/// carrying because it is not tidy.</b> The access-token lifetime and any
-/// client-level override of it are now enforced at run time — every host
-/// refuses a token with more than
+/// <b>One of them is bounded at run time as well as asserted here, and the
+/// split is worth carrying because it is not tidy.</b> Every host refuses a
+/// token with more than
 /// <see cref="AuthenticationExtensions.RevocationBound"/> of life left in it,
-/// whatever realm issued it (#157, ADR-040) — so the assertions about those
-/// are a second statement of a number the platform holds to anyway, which is
-/// why this file reads the constant rather than its own literal. The
-/// refresh-token attribute and the client flow flags are <em>not</em>
-/// enforceable that way and remain obligations: a refresh token passes between
-/// the browser and Keycloak and never reaches a host, so there is nothing here
-/// to observe it with. Read this paragraph before assuming a green run covers
-/// a deployed realm — half of it now does, and the half that does not is
-/// named.
+/// whatever realm issued it (#157, ADR-040) — so the lifetime assertions below
+/// restate a number the platform also holds inbound tokens to, which is why
+/// this file reads the constant rather than its own literal.
+/// <b>That is containment and not verification</b>: the guard gates a token's
+/// <em>remaining</em> life, so a realm set to five hours has its tokens
+/// refused for most of each one and admitted in the last window — the issued
+/// lifetime and any client-level override stay obligations on whoever
+/// provisions the realm. The refresh-token attribute and the flow flags are
+/// not even contained, because a refresh token never reaches a host at all.
+/// <b>So read a green run here as "the local realm holds the shape" and
+/// nothing more</b>; #157 stays open in full.
 /// </para>
 /// </summary>
 /// <remarks>

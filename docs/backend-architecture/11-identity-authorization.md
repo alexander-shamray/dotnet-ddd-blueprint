@@ -78,18 +78,17 @@ Validation is cheap; assume the network is hostile.
 > nothing here checks that it has it. ADR-034 states the obligation and its
 > limit.
 >
-> **The access-token lifetime beside it was in the same position and is not any
-> more.** Since
+> **The access-token lifetime beside it is in the same position, and what
+> changed is only what an unchecked realm costs.** Since
 > [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
 > every host refuses an inbound token carrying more remaining life than the
-> bound §11.3 derives, so that number is held to wherever the realm was
-> provisioned rather than asserted against the one this repository ships. **A
-> refresh token affords no such check**: it passes between the browser and
-> Keycloak and never reaches a service, so there is nothing at a host to
-> observe it with. The sentence above is unchanged in substance and narrower in
-> scope than it was —
+> bound §11.3 derives — which **bounds** the exposure without reading the realm,
+> since a long-lived token is admitted once it approaches expiry. **A refresh
+> token affords not even that**: it passes between the browser and Keycloak and
+> never reaches a service, so there is nothing at a host to observe it with.
+> Both settings remain obligations on whoever provisions the deployed realm, and
 > [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
-> stays open for this half.
+> stays open for both.
 >
 > **Continuity is a silent renewal against the authorization endpoint**, bounded
 > by the SSO session, so the user sees a login when that session has ended
@@ -121,11 +120,13 @@ Validation is cheap; assume the network is hostile.
 > has.** That is a requirement rather than a description — this repository
 > owns the Compose realm and no other, so the sentence above states an
 > obligation on whoever provisions the deployed one, exactly as the
-> refresh-token attribute does. **The lifetime was the third item on that list
-> and is now the exception to it**:
+> refresh-token attribute does. **The lifetime is the third item on that list
+> and stays on it**:
 > [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
-> holds every inbound token to the bound at every host, so the deployed realm's
-> answer to that one question is checked wherever it was provisioned. A flow
+> holds every inbound token to the bound at every host, which bounds what an
+> unchecked realm can cost rather than checking it — a long-lived token is
+> admitted in its final window, so the realm's answer to that question is still
+> nobody's to read here. A flow
 > flag affords nothing of the kind: `standardFlowEnabled` and
 > `directAccessGrantsEnabled` decide how a token is *obtained*, and a token
 > that arrives at a service does not say which grant minted it. So
@@ -416,10 +417,11 @@ listing of a token denylist among Redis's contents.
 > records that obligation as one this repository states and cannot check — the
 > division §15.4 already draws for every Secret, which
 > [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
-> recorded for the lifetime too until ADR-040 discharged that half. It applies
-> to less of the realm than it did, and
+> records for the lifetime as well. ADR-040 does not discharge that half — it
+> gates *remaining* life rather than the *issued* lifetime, so it contains what
+> an unchecked realm costs without reading one — and
 > [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
-> stays open for the remainder.
+> stays open in full.
 
 **The authority is read eagerly and the throw names the key**, which is the
 posture `AddSqlServer` and `AddMassTransitMessaging` already take: a host that

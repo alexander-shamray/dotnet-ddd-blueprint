@@ -125,11 +125,16 @@ public sealed record RetentionPolicy
     /// </para>
     /// <para>
     /// <b>So what this setting chooses is the length of §8.5's guarantee and
-    /// not its truth.</b> At the floor a marker becomes deletable the moment
-    /// its claim expires; above it the marker outlives the claim by the
-    /// difference and the guarantee runs that much longer. Neither is a gap,
-    /// because the purge will not delete a marker whose claim is live at any
-    /// setting.
+    /// not its truth</b> — and it chooses it as a target rather than a
+    /// duration. The purge deletes only once the claim behind the key is gone,
+    /// so a marker survives <em>at least</em> as long as its claim whatever
+    /// this value says; that part is unconditional and is why no setting here
+    /// opens a gap. **Raising it does not buy the difference outright**: the
+    /// candidate half is still an age against the database's clock, so a
+    /// forward step of that clock makes the row eligible early and it is then
+    /// deleted at claim expiry. The larger value is what an operator gets while
+    /// that clock behaves, and <see cref="IdempotencyRetention.Window"/> is what
+    /// they get when it does not.
     /// </para>
     /// <para>
     /// Read rather than restated, for the reason

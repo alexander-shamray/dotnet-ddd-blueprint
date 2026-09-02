@@ -1974,14 +1974,15 @@ the two with no Redis today, and a fan-out rule across per-service keyspaces.
 > **What moved is where the number is held to.** This record says a deployed
 > realm can issue five-hour access tokens while every sentence here still reads
 > 300, that the realm half is stated rather than closed, and that the bound is
-> therefore half-guaranteed. Every host now refuses a token carrying more than
-> the 330 seconds above, whatever realm issued it, so the realm half is
-> enforced where it is observable rather than assumed. The obligation the
-> callout states — `accessTokenLifespan` 300 and no client-level override — is
-> unchanged as a statement about a correct realm; what changed is that a realm
-> disagreeing with it fails loudly instead of silently. **The `ClockSkew`
-> sentence stands exactly as written**, and is worth keeping where an operator
-> reaching for a realm setting will read it.
+> therefore half-guaranteed. **All three of those remain true**, and ADR-040
+> does not discharge the obligation this callout states: every host now refuses
+> a token carrying more than the 330 seconds above, whatever realm issued it,
+> which bounds what an unchecked realm can cost without checking it. A
+> five-hour token is refused for most of its life and admitted in its last
+> window, so the realm still owes `accessTokenLifespan` 300 and no client-level
+> override, and nothing here reads a deployed realm to find out. **The
+> `ClockSkew` sentence stands exactly as written**, and is worth keeping where
+> an operator reaching for a realm setting will read it.
 
 ## ADR-034 — The browser holds an access token and no refresh token
 

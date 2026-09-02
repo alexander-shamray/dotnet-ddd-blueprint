@@ -297,10 +297,11 @@ else, so both guarantees were verified locally and merely stated everywhere
 they mattered
 ([#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)).
 No row ever claimed to close that, which is what makes it a gap rather than a
-correction — and **it is closed by half, with the row saying which half**: a
-token carries how long it has left, so the lifetime is enforceable at every
-host; a refresh token never reaches one, so ADR-034's rule stays an obligation
-and #157 stays open for it.
+correction — and **the row narrows it without closing it**. A token carries how
+long it has left, so a host can refuse one with too much of it; what a host
+cannot see is the lifetime the realm *issued*, since a long-lived token becomes
+admissible as it approaches expiry. So the gap is contained rather than closed,
+a refresh token is not even contained, and **#157 stays open in full**.
 
 | PR | Title | Depends | Delivers |
 |---|---|---|---|

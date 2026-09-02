@@ -126,17 +126,25 @@ public static class IdempotencyRetention
     /// removed from two, and it bounds a handler's runtime no better.
     /// </para>
     /// <para>
-    /// <b>What the floor bounds now is how long the guarantee lasts, not
-    /// whether it holds.</b> That is a smaller claim than it used to make and a
-    /// checkable one. At this floor exactly, a marker becomes deletable the
-    /// moment its claim expires, so <em>at most one commit per key while the
-    /// marker survives</em> ends where the claim does; above it, the marker
-    /// outlives the claim by the difference and the guarantee runs that much
-    /// longer. Neither is a gap — the purge cannot delete a marker whose claim
-    /// is live at any setting — so what an operator is choosing here is the
-    /// length of the promise rather than its truth, which is the distinction
-    /// this floor could not draw while it was the thing making the ordering
-    /// true.
+    /// <b>What the purge now establishes is a floor under the guarantee's
+    /// duration, and not the duration itself.</b> A marker is deleted when it
+    /// is past its window <em>and</em> the claim behind its key is gone, so it
+    /// survives <em>at least</em> as long as that claim whatever this value
+    /// says. That much holds unconditionally, and it is what makes the floor a
+    /// statement about length rather than about truth.
+    /// </para>
+    /// <para>
+    /// <b>A window above the floor does NOT extend the guarantee by the
+    /// difference, and saying that it did was this section's own overclaim.</b>
+    /// The candidate half is still `CommittedAt` against a cutoff the database
+    /// computes, so a forward step of that clock makes a seven-day marker
+    /// eligible at once; the row then waits only for the claim, and is deleted
+    /// the moment the claim expires. The extra six days never happen. So the
+    /// larger value is what an operator gets while the database's clock behaves
+    /// and the claim's window is what they get when it does not — a target and
+    /// a floor, not one duration. Closing that would mean measuring the excess
+    /// on a clock the step cannot move, which is a change of mechanism rather
+    /// than of number.
     /// </para>
     /// <para>
     /// <b>The floor is still read rather than restated</b>, for the reason

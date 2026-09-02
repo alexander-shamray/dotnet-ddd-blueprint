@@ -274,13 +274,16 @@ folding the fix into a PR about something else, and closing it moved that rule
 again — the floor now bounds how long §8.5's guarantee lasts rather than
 whether it holds (ADR-039). The gap travelling with it is ADR-033's, a control
 the plan never claimed to close: the token lifetime was verified in one realm
-and stated everywhere else, and it is now enforced at every host (ADR-040).
-**Two kinds in one row is not a fourth kind** — one pull request is one row,
-which is the rule PR-32's and PR-33's rows already state — and the row names
-which half of #157 it does *not* close.
+and stated everywhere else, and no host now accepts a token with more than the
+revocation bound left to live (ADR-040). **That contains the gap and does not
+close it** — the guard gates *remaining* life, so a five-hour token is refused
+for most of its life and admitted in its last window, and #157 stays open in
+full for the deploy-time check it actually asks for. **Two kinds in one row is
+not a fourth kind** — one pull request is one row, which is the rule PR-32's
+and PR-33's rows already state.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,111 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,113 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -451,7 +454,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 874 of 1,111, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 874 of 1,113, no daemon
 ```
 
 **[`docs/testing.md`](docs/testing.md) is the operational reference and this is
@@ -503,8 +506,8 @@ defect in the branch.
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
 category runs a smaller suite and says which. `Category!=Integration` is 874 of
-the 1,111 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 237, needing the daemon
+the 1,113 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 239, needing the daemon
 exactly as before.
 
 Adding a migration needs the pinned tool and a startup project:

@@ -73,6 +73,15 @@ public sealed class RetentionPurgeService : BackgroundService
     // than on the configuration. Chunking here keeps BatchSize meaning what it
     // says — rows considered per batch — instead of quietly capping it at a
     // limit belonging to a different layer.
+    //
+    // Private because it is not a knob, and coupled to a test that says so.
+    // `A_batch_spanning_more_than_one_delete_chunk_is_deleted_whole` stages one
+    // more marker than this, in both service suites, and is the only case that
+    // reaches the second chunk at all. RAISING THIS NUMBER ABOVE 1,001 MAKES
+    // THAT TEST PASS WHILE COVERING NOTHING, so move it in the same change —
+    // a gate that silently stops covering its surface is this repository's
+    // most-repeated failure, and this comment is the half of the couple that
+    // lives here.
     private const int KeysPerDelete = 1000;
 
     private readonly IServiceScopeFactory _scopes;

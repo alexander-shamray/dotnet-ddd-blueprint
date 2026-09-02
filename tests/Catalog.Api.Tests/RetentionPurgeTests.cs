@@ -278,6 +278,41 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_batch_spanning_more_than_one_delete_chunk_is_deleted_whole()
+    {
+        // The chunked delete, which nothing else here reaches. `BatchSize`
+        // defaults to 5,000 and the delete is chunked at a thousand keys —
+        // Dapper expands `IN @Keys` to one parameter each and SQL Server
+        // refuses more than 2,100 — so every other marker case in this file
+        // deletes inside a single chunk and the second one never runs. An early
+        // `break`, an off-by-one on the chunk boundary, or a `Take` where a
+        // `Skip` belonged would leave all of them green and surface first
+        // against a production backlog.
+        //
+        // ONE MORE THAN THE CHUNK, because the boundary is the defect: exactly
+        // a thousand fits one chunk and proves nothing. The figure is coupled
+        // to `RetentionPurgeService.KeysPerDelete`, which is private because it
+        // is not a knob — so raising that constant above this number makes this
+        // test pass while covering nothing, and its comment there says to move
+        // this one with it. That is a rule in two places, stated rather than
+        // arrived at.
+        const int candidates = 1_001;
+
+        IdempotencyMarker[] rows =
+            [.. Enumerable.Range(0, candidates).Select(_ => new IdempotencyMarker(Key(), LongAgo))];
+
+        await fixture.StageIdempotencyMarkersAsync(rows);
+
+        // Every key here was staged directly and never claimed, so the store
+        // reports all of them unheld and the pass is about the delete alone.
+        (await fixture.PurgeRetentionAsync()).Idempotency.ShouldBe(
+            candidates,
+            "a second chunk that never ran would report a thousand and leave the remainder");
+
+        (await fixture.IdempotencyMarkersAsync()).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task A_skewed_clock_purges_the_outbox_and_the_inbox_and_leaves_the_marker()
     {
         // The property #167 exists to establish, and the one thing the rest of
