@@ -299,7 +299,15 @@ jobs:
             echo "::error::canary.py workloads named no release, so nothing would be judged."
             exit 1
           fi
-          for WORKLOAD in $WORKLOADS; do
+          # ONE LINE, ONE RELEASE. An unquoted `$WORKLOADS` as the word list
+          # would re-split the answer on whitespace and expand a glob against
+          # the checkout, so a key the plan gate let through could name a
+          # release the plan never did. `mapfile` keeps the line protocol the
+          # subcommand emits, and the loop quotes the array. Not `< <(…)`: a
+          # process substitution loses the exit status the assignment above
+          # was written to keep.
+          mapfile -t WORKLOAD_LIST <<< "$WORKLOADS"
+          for WORKLOAD in "${WORKLOAD_LIST[@]}"; do
             echo "::group::$WORKLOAD"
             # `--all`, for the reason the rollout gives: `identity.authority`
             # has a default in every chart, and without it a release that

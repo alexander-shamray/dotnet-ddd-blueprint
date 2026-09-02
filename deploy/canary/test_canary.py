@@ -321,6 +321,25 @@ class PlanDocumentTests(unittest.TestCase):
     def test_the_shipped_plan_is_consistent(self) -> None:
         self.assertEqual(canary.check(self.document), [])
 
+    def test_a_workload_key_that_is_not_a_release_name_fails_the_plan(self) -> None:
+        """Two shells read the key as one word — `deploy.yml`'s `helm upgrade`
+        and `realm.yml`'s loop, which also makes a file name of it. A space is
+        two releases, a glob expands against the checkout, a slash is a path
+        (review round eleven). Held here, before either job sees it; the
+        shipped keys are the positive control."""
+        for bad in ("two words", "cat*", "../etc", "Catalog", "-lead", "a" * 54, ""):
+            with self.subTest(key=bad):
+                document = json.loads(json.dumps(self.document))
+                document["workloads"][bad] = dict(document["workloads"]["catalog-api"])
+                failures = canary.check(document)
+                self.assertTrue(
+                    any("is not a Helm release name" in f and repr(bad) in f for f in failures),
+                    failures,
+                )
+        for good in ("catalog-api", "a", "x" * 53, "a-1"):
+            with self.subTest(key=good):
+                self.assertIsNotNone(canary.RELEASE_NAME.match(good))
+
     def test_workloads_lists_the_plan_and_not_its_comments(self) -> None:
         """`realm.yml`'s scheduled job loops over this output (ADR-043).
 

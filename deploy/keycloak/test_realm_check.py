@@ -1064,9 +1064,20 @@ class TheScheduleStillCallsThisGate(unittest.TestCase):
         job = self.job()
         self.assertIn("WORKLOADS=$(python deploy/canary/canary.py workloads)", job)
         self.assertIn('if [ -z "$WORKLOADS" ]', job)
-        self.assertIn("for WORKLOAD in $WORKLOADS; do", job)
         self.assertNotIn("for WORKLOAD in $(", job)
         self.assertLess(job.find("WORKLOADS=$("), job.find("for WORKLOAD in"))
+
+    def test_the_workload_list_keeps_its_line_protocol_into_the_loop(self):
+        """An unquoted `$WORKLOADS` as the word list re-splits the answer on
+        whitespace and expands a glob against the checkout (review round
+        eleven). `mapfile` keeps one line as one release, the loop quotes the
+        array, and the array is not filled through a process substitution,
+        which would lose the status the assignment keeps."""
+        job = self.job()
+        self.assertIn('mapfile -t WORKLOAD_LIST <<< "$WORKLOADS"', job)
+        self.assertIn('for WORKLOAD in "${WORKLOAD_LIST[@]}"; do', job)
+        self.assertNotIn("for WORKLOAD in $WORKLOADS", job)
+        self.assertLess(job.find('if [ -z "$WORKLOADS" ]'), job.find("mapfile -t"))
 
     def test_the_derivation_is_assigned_before_it_is_read(self):
         """`eval "$(cmd)"` and `< <(cmd)` both swallow a failed cmd under
