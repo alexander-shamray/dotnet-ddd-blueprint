@@ -256,16 +256,16 @@ A workflow path-filtered to `deploy/keycloak/**` runs that tree's own suite,
 `AccessTokenLifetime` `Common.Web` declares — **read out of that declaration
 rather than restated** — no client-level `access.token.lifespan` override, no
 client enabling the implicit flow, and `use.refresh.tokens` false on §11.2's
-browser client with `standardFlowEnabled` true beside it. **It is the one of
-the five whose gate reads a subject this repository holds no copy of.** The
-same predicate runs in
-`deploy.yml`'s rollout job, over the realm a deployment is about to be rolled
-onto — fetched through Keycloak's admin API by `read_admin.py`, under the
-`production` GitHub Environment, and judged before the first step that touches
-the cluster — so this is the only subtree here whose subject is not a file this
-repository holds. That is also what the CI half is for: a deploy-time check
-nothing has ever executed is a check nobody has established is looking at
-anything, and the local realm is the one subject available to establish it on.
+browser client with `standardFlowEnabled` true beside it.
+
+**It is the one of the five whose gate also reads a subject this repository
+holds no copy of.** The same predicate runs in `deploy.yml`'s rollout job, over
+the realm a deployment is about to be rolled onto — fetched through Keycloak's
+admin API by `read_admin.py`, under the `production` GitHub Environment, and
+judged before the first step that touches the cluster. That is also what the CI
+half is for: a deploy-time check nothing has ever executed is a check nobody
+has established is looking at anything, and the local realm is the one subject
+available to establish it on.
 The kind is an argument with no default because one obligation inverts between
 the two — §11.2's password grant is on in the local realm and off in a deployed
 one — and a check that guessed would pass a production realm on the local
@@ -285,19 +285,23 @@ file rather than restating them; the realm one names
 `src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs`, because the
 lifetime every realm owes is read out of `AccessTokenLifetime` rather than
 restated, and `deploy/compose/keycloak/realm-export.json`, because that file is
-its subject in CI. **None of the four keeps that list in its own YAML**, and a
-fifth copy sits in
-`deploy/compose/rabbitmq/check_permissions.py` — inside the compose subtree
-rather than beside it, which is why it is not one of the five above and why
-ADR-042 can call `realm_check.py` the fifth copy while this paragraph counts
-four.
+its subject in CI. **None of the four keeps that list in its own YAML.**
 `smoke.sh`, `check.py`, `canary.py` and `realm_check.py` each declare
 `SOURCE_INPUTS` beside the reads, and each asserts that both of its workflow's
 triggers cover every entry — a copy of a list drifts exactly as a copy of a
-number does, which the Helm tree established at a cost of three findings and the
-observability tree adopted before paying it once. `realm_check.py` arrives
+number does, which the Helm tree established at a cost of three findings and
+the observability tree adopted before paying it once. `realm_check.py` arrives
 carrying the reads direction as well as the trigger one, which is the shape the
 callout below argues for.
+
+> **A fifth copy of that pattern exists and is not one of the four above, which
+> is why ADR-042 calls `realm_check.py` the fifth.**
+> `deploy/compose/rabbitmq/check_permissions.py` declares `SOURCE_INPUTS` too,
+> and it sits *inside* the compose subtree rather than beside it — this section
+> counts subtrees and their filters, so the broker gate is covered by Compose's
+> row and has none of its own. Two counting bases, both correct, and stating
+> which is which here is cheaper than a reader reconciling them from two
+> documents.
 
 > **The canary tree paid for it anyway, and the shape of the failure is worth
 > more than the fix.** Its list shipped naming `src` and `deploy/helm` and

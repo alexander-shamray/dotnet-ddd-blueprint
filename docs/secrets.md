@@ -111,17 +111,18 @@ holding a secret that must differ per environment.
 
 ## Rotation
 
-The platform holds **one** client secret — `Identity__Client__ClientSecret`, for
-the BFF, the only host that calls a peer synchronously
+**One** client secret reaches a running host — `Identity__Client__ClientSecret`,
+for the BFF, the only host that calls a peer synchronously
 ([§9.7](backend-architecture/09-messaging.md),
 [§11.5](backend-architecture/11-identity-authorization.md), ADR-017). Everything
 else a *host* holds is a datastore credential.
 
 **The fourth subsection below is not a host's, and that is why the sentence
-above says host.** Since ADR-042 this repository also holds a Keycloak client
-secret that no pod ever reads — a rule about who holds a credential is falsified
-by the next thing that holds one, which is the premise
-`No_client_secret_is_committed` states at the foot of this file.
+above counts the ones that reach one.** Since ADR-042 this repository also holds
+a Keycloak client secret that no pod ever reads — and a count of what the
+platform holds is falsified by the next thing that holds one, where a count of
+what reaches a host is a claim about a mechanism. `No_client_secret_is_committed`
+at the foot of this file is the premise either way.
 
 ### A client secret
 
