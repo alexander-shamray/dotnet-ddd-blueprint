@@ -133,7 +133,7 @@ public class JwtAuthenticationTests
         TokenValidatedContext context = Validated(
             AuthenticationExtensions.RevocationBound + TimeSpan.FromSeconds(30));
 
-        await Options().Events.OnTokenValidated(context);
+        await context.Options.Events.OnTokenValidated(context);
 
         context.Result.ShouldNotBeNull();
         context.Result.Failure.ShouldNotBeNull();
@@ -151,7 +151,7 @@ public class JwtAuthenticationTests
         // value below is the shipped case and not a convenient one.
         TokenValidatedContext context = Validated(AuthenticationExtensions.AccessTokenLifetime);
 
-        await Options().Events.OnTokenValidated(context);
+        await context.Options.Events.OnTokenValidated(context);
 
         // Null rather than a success result: nothing in the handler has set one
         // at this point, and Fail is the only thing that would.
@@ -164,14 +164,24 @@ public class JwtAuthenticationTests
         // The boundary, both sides, because a ceiling asserted only from the
         // outside is a ceiling that could be anywhere below the value tested.
         // The comparison is `<=`, so the bound itself is admitted.
+        //
+        // A FROZEN CLOCK IS WHAT MAKES THIS THE BOUNDARY, and without it this
+        // test was decorative. `ValidTo` used to be computed per access from
+        // `DateTime.UtcNow`, and the handler read the clock again afterwards —
+        // so the "at bound" token was already a few ticks under the ceiling and
+        // changing the production comparison from `<=` to `<` passed anyway.
+        // The over-bound case had the mirror defect: a long enough pause
+        // between construction and the read would have flipped it. Both sides
+        // now derive from one instant that does not move.
         TokenValidatedContext atBound = Validated(AuthenticationExtensions.RevocationBound);
-        await Options().Events.OnTokenValidated(atBound);
-        atBound.Result.ShouldBeNull();
+        await atBound.Options.Events.OnTokenValidated(atBound);
+        atBound.Result.ShouldBeNull("the comparison is `<=`, so the bound itself is admitted");
 
         TokenValidatedContext overBound =
             Validated(AuthenticationExtensions.RevocationBound + TimeSpan.FromSeconds(1));
-        await Options().Events.OnTokenValidated(overBound);
-        overBound.Result?.Failure.ShouldNotBeNull();
+        await overBound.Options.Events.OnTokenValidated(overBound);
+        overBound.Result.ShouldNotBeNull();
+        overBound.Result.Failure.ShouldNotBeNull("one second past the bound is past it");
     }
 
     [Fact]
@@ -214,6 +224,15 @@ public class JwtAuthenticationTests
     {
         JwtBearerOptions options = Options();
 
+        // The scheme's own clock, frozen, and the token's expiry derived from
+        // the same instant. The handler reads `context.Options.TimeProvider`,
+        // so this is the seam it actually uses rather than a clock beside it —
+        // and it is why every caller above drives `context.Options.Events`
+        // instead of a fresh host's, which would carry a different options
+        // instance and therefore the system clock.
+        FrozenClock clock = new(DateTimeOffset.UtcNow);
+        options.TimeProvider = clock;
+
         return new TokenValidatedContext(
             new DefaultHttpContext(),
             new AuthenticationScheme(
@@ -222,7 +241,7 @@ public class JwtAuthenticationTests
                 handlerType: typeof(JwtBearerHandler)),
             options)
         {
-            SecurityToken = new TokenExpiringIn(remaining),
+            SecurityToken = new TokenExpiringIn((clock.GetUtcNow() + remaining).UtcDateTime),
             Principal = new ClaimsPrincipal(new ClaimsIdentity())
         };
     }
@@ -232,7 +251,7 @@ public class JwtAuthenticationTests
     /// other, so a check that read anything else would fail loudly here rather
     /// than quietly in a deployment.
     /// </summary>
-    private sealed class TokenExpiringIn(TimeSpan remaining) : SecurityToken
+    private sealed class TokenExpiringIn(DateTime expires) : SecurityToken
     {
         public override string Id => nameof(TokenExpiringIn);
 
@@ -249,9 +268,24 @@ public class JwtAuthenticationTests
         public override DateTime ValidFrom =>
             ValidTo - AuthenticationExtensions.AccessTokenLifetime;
 
-        // Utc, which is what the handler produces and what the check assumes;
-        // the check specifies the kind anyway, for the host whose local time is
-        // not UTC.
-        public override DateTime ValidTo => DateTime.UtcNow + remaining;
+        // A FIXED instant, not `DateTime.UtcNow + remaining` evaluated per
+        // access. A property recomputing the clock puts the expiry a few ticks
+        // nearer on every read, which is what made the boundary case pass
+        // against a `<` the production code does not use.
+        public override DateTime ValidTo { get; } = expires;
+    }
+
+    /// <summary>
+    /// A clock that does not move, so a boundary is a boundary.
+    /// </summary>
+    /// <remarks>
+    /// Hand-written rather than <c>FakeTimeProvider</c>, on the same terms as
+    /// <c>ServiceFixture</c>'s skewed clock: the package is pinned centrally,
+    /// this project does not reference it, and a licence-register entry to
+    /// freeze a clock in four lines is not a trade worth making.
+    /// </remarks>
+    private sealed class FrozenClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }

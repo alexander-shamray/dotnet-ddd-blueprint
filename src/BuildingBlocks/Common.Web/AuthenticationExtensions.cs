@@ -39,9 +39,9 @@ public static class AuthenticationExtensions
     /// for a control, which is the shape ADR-033 was written to withdraw."
     /// That was exactly right while the number was only ever asserted against
     /// the realm this repository ships. <see cref="RevocationBound"/> is what
-    /// changed it — the number is now enforced against every token every host
-    /// accepts, so a single declaration is what keeps the control and the
-    /// realm assertion from disagreeing
+    /// changed it — that ceiling is composed from this value and every host
+    /// holds an inbound token's remaining life to it, so a single declaration
+    /// is what keeps the control and the realm assertion from disagreeing
     /// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157">#157</see>,
     /// ADR-040).
     /// </remarks>
@@ -56,8 +56,10 @@ public static class AuthenticationExtensions
     /// <summary>
     /// ADR-033's revocation bound: <see cref="AccessTokenLifetime"/> plus
     /// <see cref="AllowedClockSkew"/>, 330 seconds — and, since #157, the
-    /// ceiling every host holds an inbound token's remaining life to rather
-    /// than a number two chapters merely state.
+    /// ceiling every host holds an inbound token's <em>remaining</em> life to.
+    /// <b>That bounds what a non-conforming realm costs; it does not check the
+    /// lifetime such a realm issued</b>, because a long-lived token becomes
+    /// admissible as it approaches expiry (ADR-040).
     /// </summary>
     /// <remarks>
     /// <b>Composed rather than written down, because 330 is a sum and a sum

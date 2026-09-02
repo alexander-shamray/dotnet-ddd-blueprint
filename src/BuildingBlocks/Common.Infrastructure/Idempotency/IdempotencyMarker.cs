@@ -15,10 +15,15 @@ namespace Common.Infrastructure.Idempotency;
 /// <para>
 /// <b><c>CommittedAt</c> exists for the purge and for nothing else.</b> Nothing
 /// reads it to decide whether a command ran: presence is the answer, exactly as
-/// it is in the inbox. It is the column
-/// <c>RetentionPurgeService</c> compares against its window, and it is why the
-/// guarantee §8.5 opens with is now bounded by that window rather than by a
-/// Redis TTL.
+/// it is in the inbox. It is the column <c>RetentionPurgeService</c> compares
+/// against its window — <b>to select candidates, and no longer to decide
+/// them</b>. Since ADR-039 a row goes only when that age has passed
+/// <em>and</em> <c>IIdempotencyStore</c> reports the claim behind its key gone,
+/// so what bounds §8.5's guarantee unconditionally is the Redis claim's own
+/// life and the configured window is a target above it. This paragraph said
+/// the window bounded the guarantee "rather than by a Redis TTL", which was
+/// true of the mechanism ADR-037 shipped and is the wrong way round for this
+/// one.
 /// </para>
 /// <para>
 /// <b>It is stamped by the <em>database</em>, and the default parameter is how
