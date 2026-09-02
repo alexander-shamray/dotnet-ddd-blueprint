@@ -1107,10 +1107,9 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > counts them, with no third state and nothing counted twice. Those figures
 > read ten/81, then twenty/91, then twenty-three/94, then twenty-four/95, then
 > twenty-six/97, then twenty-six/98, then twenty-seven/99, and every retake up
-> to the last three was the suite growing while the callout did not. **The count of retakes is not
-> written here either**, for the reason the figures keep demonstrating: it has
-> been wrong
-> at each of them. What a reader can check is whether this pair matches
+> to the last three was the suite growing while the callout did not. **The
+> count of retakes is not written here either**, for the reason the figures
+> keep demonstrating: it has been wrong at each of them. What a reader can check is whether this pair matches
 > `docs/testing.md` and a run.
 >
 > **One retake was the first to go *down*, and the direction is worth

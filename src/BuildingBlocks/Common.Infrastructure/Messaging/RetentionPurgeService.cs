@@ -37,11 +37,12 @@ namespace Common.Infrastructure.Messaging;
 /// compare a column against a cutoff and are done; the marker's compares a
 /// column against a cutoff to find <em>candidates</em>, asks
 /// <see cref="Common.Application.IIdempotencyStore"/> which of them it has
-/// already let go of, and then deletes no row newer than the newest it
-/// selected — a key names a command rather than a row, so a retry can commit a
-/// fresh marker under one this pass already chose, and only a bound taken from
-/// the rows in hand excludes it. Deleting on age alone put the claim's
-/// window and the
+/// already let go of, and then deletes under <em>two</em> predicates that
+/// cover each other — no row newer than the newest it selected, and none
+/// inside its own window. A key names a command rather than a row, so a retry
+/// can commit a fresh marker under one this pass already chose, and no single
+/// predicate excludes that in every direction the clock can move. Deleting on
+/// age alone put the claim's window and the
 /// marker's on two servers' clocks with nothing coupling their rates, so a
 /// forward step of the database's deleted the row while the claim it backs up
 /// was still live
@@ -201,16 +202,35 @@ public sealed class RetentionPurgeService : BackgroundService
         // and it goes anyway. An age against a moving clock is not an ABA
         // guard, and this pull request exists because that clock moves.
         //
+        // SO BOTH PREDICATES ARE HERE, and neither is redundant: each covers
+        // the other's blind spot, and a replacement escapes only if it escapes
+        // both.
+        //
         // @SelectedThrough is the newest CommittedAt the SELECT actually
-        // returned — a value captured from the rows in hand, which no later
-        // clock movement can change. Every row this pass chose is at or below
-        // it by construction, and a replacement committed afterwards is stamped
-        // above it, so the delete cannot reach one however the clock behaves.
+        // returned — captured from the rows in hand, so no later clock movement
+        // changes it. A replacement committed after this pass selected is
+        // stamped above it and is excluded, which is what covers a FORWARD
+        // step: the age cutoff would have re-read a clock that had moved on and
+        // let the row through.
+        //
+        // The age cutoff covers the other direction, and the reason is that a
+        // row cannot be older than the window at the instant the same clock
+        // stamps it. After a BACKWARD step the replacement's CommittedAt can
+        // fall at or below @SelectedThrough — the bound alone would admit it —
+        // but the cutoff moves back with the clock that stamped it, so the row
+        // is never past its own window and survives. Under no step at all the
+        // cutoff excludes it for the same reason.
+        //
+        // What that leaves is nothing this repository can name: a replacement
+        // reaches this statement only by being both newer than every row the
+        // SELECT returned and older than a window measured on the clock that
+        // stamped it, and those cannot hold together for one row.
         _idempotencyDeleteSql =
             $"""
             DELETE FROM {markers.QualifiedName}
             WHERE [Key] IN @Keys
-                AND CommittedAt <= @SelectedThrough;
+                AND CommittedAt <= @SelectedThrough
+                AND CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
             """;
     }
 
@@ -343,7 +363,8 @@ public sealed class RetentionPurgeService : BackgroundService
             // is the failure this call exists to remove.
             IReadOnlyCollection<string> unheld = await _claims.UnheldAsync(keys, ct);
 
-            int deleted = await DeleteKeysAsync(connection, unheld, selectedThrough, ct);
+            int deleted =
+                await DeleteKeysAsync(connection, unheld, selectedThrough, windowSeconds, ct);
             total += deleted;
 
             // Two ways to stop and both are needed. A short SELECT means the
@@ -365,17 +386,18 @@ public sealed class RetentionPurgeService : BackgroundService
     /// inside SQL Server's parameter limit. Returns the rows actually removed.
     /// </summary>
     /// <remarks>
-    /// <b>The selection's own newest timestamp bounds it, rather than a
-    /// re-read clock.</b> A key names a command and not a row, so a retry can
-    /// commit a fresh marker under a key this pass has already selected — and
-    /// neither a key-only delete nor one re-evaluating an age against a moving
-    /// clock excludes it. See the statement's own comment; this is why the
-    /// count returned can be lower than the number of keys handed in.
+    /// <b>Two predicates bound it and each covers the other's blind spot.</b>
+    /// A key names a command and not a row, so a retry can commit a fresh
+    /// marker under a key this pass has already selected — and neither a
+    /// key-only delete, nor the selection's own timestamp bound, nor a re-read
+    /// age cutoff excludes it alone. See the statement's own comment; this is
+    /// why the count returned can be lower than the number of keys handed in.
     /// </remarks>
     private async Task<int> DeleteKeysAsync(
         IDbConnection connection,
         IReadOnlyCollection<string> keys,
         DateTimeOffset selectedThrough,
+        int windowSeconds,
         CancellationToken ct)
     {
         int deleted = 0;
@@ -385,7 +407,12 @@ public sealed class RetentionPurgeService : BackgroundService
             deleted += await connection.ExecuteAsync(
                 new CommandDefinition(
                     _idempotencyDeleteSql,
-                    new { Keys = chunk, SelectedThrough = selectedThrough },
+                    new
+                    {
+                        Keys = chunk,
+                        SelectedThrough = selectedThrough,
+                        WindowSeconds = windowSeconds,
+                    },
                     cancellationToken: ct));
         }
 

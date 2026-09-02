@@ -263,8 +263,12 @@ public sealed record RetentionPolicy
                 "remember the commit, and the next retry ran a committed command a second " +
                 "time. That is what ADR-039 closed. What this floor bounds now is how long " +
                 "the guarantee lasts rather than whether it holds, and matching the claim " +
-                "exactly is the smallest window that means anything. Setting it higher is the " +
-                "supported way to extend the guarantee; see IdempotencyRetention.MarkerFloor.");
+                "exactly is the smallest window that means anything. Setting it higher is a " +
+                "TARGET rather than a guaranteed extension: the candidate half is still an age " +
+                "against the database's clock, so a forward step of that clock makes the row " +
+                "eligible early and it is then deleted as soon as the claim goes. The claim's " +
+                "own life is the floor under the guarantee in every case; see " +
+                "IdempotencyRetention.MarkerFloor.");
 
     private static int Positive(int value, [CallerMemberName] string member = "") =>
         value > 0 ? value

@@ -1215,9 +1215,15 @@ ORDER BY CommittedAt;
 -- moving clock is not an ABA guard, and this section exists because that clock
 -- moves.
 --
--- @SelectedThrough is the newest CommittedAt the SELECT returned — a value
--- taken from the rows in hand, which no later clock movement can change. A
--- replacement committed afterwards is stamped above it and cannot be reached.
+-- SO BOTH PREDICATES ARE HERE, and each covers the other's blind spot.
+-- @SelectedThrough is the newest CommittedAt the SELECT returned — taken from
+-- the rows in hand, so no later clock movement changes it — and a replacement
+-- committed afterwards is stamped above it, which covers a FORWARD step. The
+-- age cutoff covers a BACKWARD one: after a step back the replacement's stamp
+-- can fall at or below the bound, but the cutoff moves back with the clock
+-- that stamped it, so the row is never past its own window. A row cannot be
+-- older than the window at the instant the same clock stamps it, which is why
+-- no single predicate is enough and why the pair leaves nothing.
 --
 -- Chunked at a thousand keys by the caller. Dapper expands `IN @Keys` into one
 -- parameter per element and SQL Server refuses more than 2,100 of them, where
@@ -1226,7 +1232,8 @@ ORDER BY CommittedAt;
 -- to a different layer.
 DELETE FROM ordering.IdempotencyMarkers
 WHERE [Key] IN @Keys
-    AND CommittedAt <= @SelectedThrough;
+    AND CommittedAt <= @SelectedThrough
+    AND CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
 ```
 
 > **Two statements are a window one statement did not have, and one half of it
@@ -1247,9 +1254,14 @@ WHERE [Key] IN @Keys
 > `SYSDATETIMEOFFSET()`, so a forward step of the database's clock before the
 > stale delete makes the replacement satisfy it. An age against a moving clock
 > cannot guard against an ABA, in the one section whose whole subject is that
-> the clock moves. The `DELETE` above therefore bounds on `@SelectedThrough` —
-> the newest `CommittedAt` the `SELECT` actually returned — which is fixed at
-> selection and beyond any clock's reach.
+> the clock moves. **Nor is the version bound sufficient on its own**, which
+> was the round after that: a *backward* step can stamp a replacement at or
+> below the newest row the `SELECT` returned. The `DELETE` above therefore
+> carries **both** — `CommittedAt <= @SelectedThrough`, fixed at selection and
+> beyond any clock's reach, and the age cutoff, which moves back with the clock
+> that stamped the replacement. A row cannot be older than the window at the
+> instant the same clock stamps it, so the pair leaves a replacement no way
+> through in either direction.
 
 > **The floor is the claim's window exactly, and it was the claim's window
 > *plus* an allowance until both of the things that reordered the two expiries

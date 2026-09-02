@@ -2685,11 +2685,21 @@ This decision keeps the TTL and moves the question instead.
   look old enough and the stale delete takes it anyway. **An age against a
   moving clock cannot guard an ABA**, and this record exists because that clock
   moves; a fix that assumes it does not is this decision arguing against
-  itself. The `DELETE` bounds on `@SelectedThrough` instead — the newest
-  `CommittedAt` the `SELECT` returned, captured from the rows in hand and
-  immune to anything the clock does afterwards. Both the defect and the wrong
-  fix were found by review rather than by a test: the interleaving needs three
-  purgers, a retry and a clock step, and nothing here stages one.
+  itself.
+- **The version bound alone is not enough either, and the `DELETE` therefore
+  carries two predicates.** `CommittedAt <= @SelectedThrough` — the newest
+  timestamp the `SELECT` returned, captured from the rows in hand — is immune
+  to a *forward* step, which is what defeats the age cutoff. A *backward* step
+  is the mirror: it can stamp a replacement at or below that bound, and there
+  the age cutoff is what saves the row, because it moves back with the same
+  clock and a row is never past its own window at the instant that clock stamps
+  it. **Neither predicate is redundant and neither is sufficient**, which is
+  the shape worth carrying away: a replacement would have to be both newer than
+  every row the selection returned and older than a window measured on the
+  clock that stamped it, and no single row can be both. The defect and two
+  successive wrong fixes were all found by review rather than by a test — the
+  interleaving needs three purgers, a retry and a clock step, and nothing here
+  stages one.
 - **The candidates are ordered oldest first, and the pass stops on a batch it
   could not fully delete.** A batch the store still holds keys from would be
   returned unchanged by the next `SELECT` — nothing about those rows has moved
