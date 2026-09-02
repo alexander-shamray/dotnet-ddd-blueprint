@@ -1,8 +1,8 @@
 ---
 description: Triage an external review of the blueprint into a resolution record
 argument-hint: "[path to the review — defaults to suggestions.md]"
-allowed-tools: Read, Grep, Glob, Edit, Write, Agent(review-adjudicator), Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
-disallowed-tools: Read(suggestions.md), Read(./suggestions.md), Edit(.claude/**), Edit(./.claude/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(bug-auditor)
+allowed-tools: Read, Grep, Glob, Edit, Write, Agent(review-adjudicator), Bash(wc:*), Bash(ls:*)
+disallowed-tools: Edit(.claude/**), Edit(./.claude/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(bug-auditor)
 ---
 
 Work through the review at $ARGUMENTS — a file path. **With no argument, the
@@ -33,11 +33,16 @@ Save it to a file and name the path.
 > (`.claude/agents/review-adjudicator.md`) has `Read`, `Grep` and `Glob` and
 > nothing else; it reads the review and the code, and returns one structured
 > row per finding — a verdict, the sites, the text as it stands, and the change
-> in its own words. This invocation reads **that record** and never the file:
-> `Read(suggestions.md)` is in `disallowed-tools`, so the default review is
-> refused to the writing step by the harness rather than by this sentence. A
-> review at any other path is refused by discipline only, which is why the
-> unattended loop uses the default and nothing else.
+> in its own words. This invocation reads **that record** and never the file
+> — **by discipline, and the reason it is not by grant was measured rather
+> than assumed.** The first form of this command put `Read(suggestions.md)`
+> in `disallowed-tools`, and a nested session showed what that reaches: a
+> command's deny list propagates to the subagents it spawns, so the
+> adjudicator's `Read`, `Grep` and `Glob` on the review were refused too and
+> it returned `unreadable-review`; and a path deny reaches a `Bash` command
+> naming the path, so the `wc -c` preflight was refused beside it. A deny
+> that blinds the reader it exists to protect is not a boundary, so the entry
+> is gone and this sentence is what stands in its place.
 >
 > **The trees a review has no business in are refused by grant too.**
 > `Edit(.claude/**)`, `Edit(.github/**)` and `Edit(deploy/**)` are denied
@@ -50,10 +55,14 @@ Save it to a file and name the path.
 > one hop from the prose, and a row can still name any site under `src/`,
 > `tests/` or `docs/`; what bounds an accepted row is the `was` check below —
 > a mechanical predicate on the file, not a judgement — and the rule that an
-> edit stays inside the row's own sites. `Grep` over the review's path is not
-> known to be refused by a `Read(...)` deny, and `Bash(wc:*)` reads its size
-> on purpose. Neither has been measured to leak the content, and neither is
-> claimed closed.
+> edit stays inside the row's own sites. **The review is readable to this
+> invocation** — through `Read`, `Grep`, the `wc` the size check needs, and
+> the globally allowed `git diff --no-index` — and the split holds because
+> this step does not read it, not because it cannot. That is the residual,
+> stated as one: the harness offers no deny that reaches the parent and not
+> the child, and every form that was tried reached both. What the harness
+> does hold is the other half — the three machinery trees are refused to
+> `Edit` here whatever this step reads.
 >
 > **Size is part of the check, and it is the one thing read before dispatch.**
 > `Bash(wc:*)` is granted — `wc -c` the path, and if it is implausibly large

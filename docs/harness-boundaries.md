@@ -596,11 +596,16 @@ which reads an *absence* as a control, the exact rule the sentence beside it
 had just retired. `.claude/settings.json` **allows** `Bash(git push origin:*)`
 and `Bash(git push -u origin:*)` globally, so a push of the current branch does
 not prompt at all; only force-pushes and pushes to `main` are denied. Naming
-`git push` in each sweep's `disallowed-tools` is the obvious fix and is
-**unverified**: that key's `Bash(...)` form has never been measured here — the
-`Agent(...)` form is what was — and a nested `claude -p` probe could not
-separate a rejected pattern from a command that failed to load. Both files now
-state the residual instead of claiming the control.
+`git push` in each sweep's `disallowed-tools` was the obvious fix and stayed
+**unverified** for a while: that key's `Bash(...)` form had never been
+measured here — the `Agent(...)` form is what was — and a nested `claude -p`
+probe could not separate a rejected pattern from a command that failed to
+load. **It is measured now**, by a throwaway command in a detached worktree
+carrying `Bash(git diff:*)` in both keys: the diff was refused with the
+harness's own "has been denied" text while a `Bash(wc:*)` in the same session
+ran, which separates the two exactly. Both sweeps deny `git push origin`,
+its `-u` form and the raw `gh issue create` by name, and the deny wins over
+the global allow because precedence is deny first.
 
 The sixth **was** the `--output` deny itself — the inventory's one entry that
 is a *deny* rather than an allow, listed because a deny over a command string
@@ -690,17 +695,21 @@ carries `Read(suggestions.md)` and the three machinery trees in
 harness rather than by a callout. The record is the residual — it is one hop
 from the prose and the parent's context receives it — and what bounds an
 accepted row is a predicate on the file (its quoted text is at its site) and
-the rule that an edit stays inside the row's own sites. `Grep` over the
-review's path under a `Read(...)` deny is unmeasured and stated so in the
-command. **The sweeps' item 5 (#75) closed by the same shape** — a second
-read-only dispatch returns a verdict, the parent opens nothing in `$work`,
-and `gh-issue-create.sh` leaves `gh issue create` with no free parameter —
-so the two residuals #149 named as one class went in one change. The raw
-`Bash(gh issue create:*)` left both sweeps' allow lists and joined neither
-deny list, because the `Bash(...)` form of `disallowed-tools` is the one the
-fifth entry names as unmeasured; the helper is the only spelled form in
-either body, and an omission from an allow list is a prompt rather than a
-refusal, which is the fifth entry's own point restated.
+the rule that an edit stays inside the row's own sites. **The
+`Read(suggestions.md)` deny the first form carried is gone, and why is a
+measurement rather than a preference**: a command's `disallowed-tools`
+propagate to the subagents it spawns, so the adjudicator's `Read`, `Grep` and
+`Glob` on the review were refused too and it returned `unreadable-review`;
+and a path deny reaches a `Bash` command naming the path, so the `wc -c`
+preflight was refused beside it. The harness offers no deny that reaches
+the parent and not the child, so the review is readable to the writing step
+and the split holds by discipline — stated in the command as its residual.
+**The sweeps' item 5 (#75) closed by the same shape** — a second read-only
+dispatch returns a verdict, the parent opens nothing in `$work`, and
+`gh-issue-create.sh` leaves `gh issue create` with no free parameter — so
+the two residuals #149 named as one class went in one change, and the raw
+`Bash(gh issue create:*)` is denied by name in both sweeps now that the
+fifth entry's measurement exists.
 
 **The two sweeps are one shape asking two questions**, split by what makes a
 finding rather than by where they look. `/security-sweep` files what an

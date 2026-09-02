@@ -2,7 +2,7 @@
 description: Loop a defensive security audit up to seven rounds, filing a GitHub issue per confirmed medium-or-above finding, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the compose stack' or a path] — omit to sweep the whole repo"
 allowed-tools: Read, Grep, Glob, Agent(security-auditor), Bash(bash .claude/scripts/gh-issue-list.sh), Bash(bash .claude/scripts/gh-issue-text.sh:*), Bash(bash .claude/scripts/gh-issue-create.sh:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
-disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(bug-auditor), Agent(review-adjudicator)
+disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(bug-auditor), Agent(review-adjudicator), Bash(gh issue create:*), Bash(git push origin:*), Bash(git push -u origin:*)
 ---
 
 Sweep the repository for security findings, file the real ones as GitHub
@@ -517,8 +517,8 @@ wrong record produces a wrong issue in this repository. That is the class a
 container closes and a record narrows. `Write` and `Edit` are **denied**,
 which closes the editing tools and not the class — `Bash` remains granted,
 and a redirection through it writes what `Edit(...)` refuses, argued in full
-below. **The branch is a residual rather than a control** — `git push origin`
-is globally allowed and this command does not deny it, argued in full below.
+below. **The branch is denied by name**, since the `Bash(...)` form of
+`disallowed-tools` was measured — argued in full below.
 
 **Residual — the auditor reads the host, not only `$work`.** `Read`, `Grep` and
 `Glob` are not confined to the pinned worktree; the "root every path under
@@ -634,16 +634,19 @@ even prompt. Force-pushes and pushes to `main` are denied by name; an ordinary
 push is not. So "no branch can move" was false, and it was false in exactly the
 way this section exists to warn about — reading an absence as a control.
 
-**Naming `git push` in `disallowed-tools` is the obvious fix and is not taken
-here, because the form is unverified.** `CLAUDE.md`'s record that
-`disallowed-tools` removes a tool from the pool rests on an `Agent(...)`
-measurement; no command in this repository has ever put a `Bash(...)` pattern
-in that key, and a nested `claude -p` probe could not separate "the harness
-rejects the pattern" from "the probe failed to load". Writing an unverified
-deny and describing it as closing the hole is the precise mistake `CLAUDE.md`
-records against the narrowed `git reset` grant — the git behaviour was
-verified and the *matching* was not. **The residual stands, named, until
-someone measures the Bash form.** A
+**Naming `git push` in `disallowed-tools` is the fix, and it is taken here
+because the form was measured first.** No command in this repository had ever
+put a `Bash(...)` pattern in that key, and an earlier nested `claude -p` probe
+could not separate "the harness rejects the pattern" from "the probe failed to
+load" — so this paragraph refused the deny rather than write one it could not
+distinguish from a no-op, on the `git reset` grant's lesson. The measurement
+that settled it was a throwaway command in a detached worktree carrying
+`Bash(git diff:*)` in both keys: the diff was refused with the harness's own
+"has been denied" text while a `Bash(wc:*)` in the same session ran, so the
+key matches a `Bash(...)` pattern and the refusal is the harness's. Both
+sweeps now deny `git push origin`, its `-u` form and the raw `gh issue
+create` by name. **The global allow still exists and still prompts
+nowhere**; the deny is what wins, because precedence is deny first. A
 `Write` grant for issue bodies was tried and removed precisely because it would
 have re-opened source editing — a read-only claim resting on prose while the
 grant permits writing every undenied path is unenforced, which for a security

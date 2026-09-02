@@ -2,7 +2,7 @@
 description: Loop a defect audit up to seven rounds in a throwaway worktree, filing a GitHub issue per confirmed critical-or-high logic or execution bug, until a round surfaces nothing new
 argument-hint: "[scope hint, e.g. 'the outbox' or a path] — omit to sweep the whole repo"
 allowed-tools: Read, Grep, Glob, Agent(bug-auditor), Bash(bash .claude/scripts/gh-issue-list.sh), Bash(bash .claude/scripts/gh-issue-text.sh:*), Bash(bash .claude/scripts/gh-issue-create.sh:*), Bash(bash .claude/scripts/gh-label-ensure.sh:*), Bash(bash .claude/scripts/gh-issue-suppresses.sh:*), Bash(git rev-parse:*), Bash(bash .claude/scripts/git-worktree-detach.sh:*), Bash(git worktree list:*), Bash(bash .claude/scripts/git-worktree-drop.sh:*)
-disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(review-adjudicator)
+disallowed-tools: Edit, Write, NotebookEdit, Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(review-adjudicator), Bash(gh issue create:*), Bash(git push origin:*), Bash(git push -u origin:*)
 ---
 
 Sweep the repository for defects — code that does something other than what it
@@ -795,8 +795,8 @@ closes and a record narrows, and the verifier reads and does not execute
 either, so the by-inspection limit stands. `Write` and `Edit` are **denied**,
 which closes the editing tools and not the class: `Bash` remains granted, and
 a redirection through it writes what `Edit(...)` refuses — argued in full
-below. **The branch is a residual rather than a control**: `git push origin`
-is globally allowed and this command does not deny it, argued in full below.
+below. **The branch is denied by name**, since the `Bash(...)` form of
+`disallowed-tools` was measured — argued in full below.
 
 **Residual — the auditor reads the host, not only `$work`.** `Read`, `Grep` and
 `Glob` are not confined to the pinned worktree; the "root every path under
@@ -901,10 +901,12 @@ see `/security-sweep`'s copy for the whole argument, which is the same one
 twice. It is not in `disallowed-tools`, omitting it withholds nothing, and
 `.claude/settings.json` **allows** `Bash(git push origin:*)` globally, so a
 push of the current branch does not even prompt. Naming it in
-`disallowed-tools` is the obvious fix and is not taken here: the `Bash(...)`
-form in that key is unverified, and an unverified deny described as a closed
-hole is the mistake `CLAUDE.md` records against the narrowed `git reset` grant.
-**The residual stands, named.** A `Write` grant for issue bodies was
+`disallowed-tools` is the fix, and it is taken here because the `Bash(...)`
+form in that key was measured first — a throwaway command in a detached
+worktree had its `git diff` refused with the harness's own text while its
+`wc` ran — so both sweeps deny `git push origin`, its `-u` form and the raw
+`gh issue create` by name, and the deny wins over the global allow because
+precedence is deny first. A `Write` grant for issue bodies was
 refused here for the reason `/security-sweep` records after trying one: it would
 re-open source editing, and a read-only claim resting on prose while the grant
 permits writing every undenied path is unenforced. Bodies go through
