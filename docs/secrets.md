@@ -198,21 +198,29 @@ other side of the pipeline: without it the rollout refuses to start, which is
 pod's.
 
 **It lives in the `production` GitHub Environment**, which is the mechanism
-§15.4 already relies on to scope a deployment's secrets — one Environment
-*variable*, `KEYCLOAK_CHECK_CLIENT_ID`, and one Environment *secret*,
-`KEYCLOAK_CHECK_CLIENT_SECRET`. A rotation that replaces the client rather
-than its secret has both to move.
+§15.4 already relies on to scope a deployment's secrets — two Environment
+*variables*, `KEYCLOAK_CHECK_CLIENT_ID` and `KEYCLOAK_TRUSTED_ORIGIN`, and one
+Environment *secret*, `KEYCLOAK_CHECK_CLIENT_SECRET`. A rotation that replaces
+the client rather than its secret has the first and the last to move.
 
-**The other two values `read_admin.py` requires are not configured at all, and
-that is the point.** `KEYCLOAK_BASE_URL` and `KEYCLOAK_REALM` are *derived*, by
-`realm_check.py authority`, from the `identity.authority` the release being
-rolled is running with — `helm get values` answers it and `-f
-stable-values.yaml` reinstalls it. **A realm named beside the chart rather than
-out of it is a check that can pass on the wrong realm**: a compliant unrelated
-realm satisfies every obligation while every host the rollout installs stays
-pointed at the non-compliant one. Configuring them would re-open exactly that,
-which is why the workflow does not pass them even though the code would accept
-them.
+**`KEYCLOAK_TRUSTED_ORIGIN` is not a convenience, it is where this credential
+may be sent.** The realm to check is *derived* from the release —
+`realm_check.py authority` takes it out of the `identity.authority` that `helm
+get values` answers and `-f stable-values.yaml` reinstalls — because a realm
+named beside the chart rather than out of it is a check that can pass on a
+realm nobody is deploying to. **Deriving the *origin* the same way would be
+worse than the hole that closed**: the next step posts this client secret to
+that host's token endpoint, and `identity.authority` lives in the cluster, so
+an authority of `https://attacker.example/realms/x` would exfiltrate the
+credential to whoever can edit a release. So the realm comes from the chart,
+the origin comes from here, and the two are required to agree — a rollout onto
+an identity provider this deployment does not name stops rather than
+authenticating to it.
+
+**`KEYCLOAK_BASE_URL` and `KEYCLOAK_REALM` are therefore not configured at
+all.** `realm_check.py authority` writes both into `$GITHUB_ENV` once it has
+checked the origin, so the value `read_admin.py` authenticates to is the one
+this repository verified rather than one it was handed.
 
 Keycloak's two-active-secrets affordance applies here exactly as it does to the
 BFF's client, so the procedure is that one with no vault in it and a different

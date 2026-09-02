@@ -196,16 +196,24 @@ jobs:
       # rights and nothing else -- docs/secrets.md carries how it is
       # provisioned and rotated.
       #
-      # THE REALM READ IS DERIVED FROM THE AUTHORITY THIS ROLLOUT INSTALLS, and
-      # that is not a detail. Two environment variables naming a realm, beside
-      # a chart value naming another, is a gate that passes on a compliant
+      # THE REALM IS DERIVED AND THE ORIGIN IS PINNED, and mixing those up is a
+      # hole either way. Two environment variables naming a realm, beside a
+      # chart value naming another, is a gate that passes on a compliant
       # unrelated realm while every host it deploys is pointed at the
       # non-compliant one -- which would have closed #157 in the description
-      # and nowhere else. `helm get values` answers what the release is running
-      # with, `-f stable-values.yaml` below reinstalls exactly that, and
-      # `realm_check.py authority` splits its `identity.authority` into the
-      # server root and the realm name. There is no second place to keep in
-      # step, so there is nothing to keep in step.
+      # and nowhere else. So the realm comes out of `helm get values`, which
+      # answers what the release is running with and what `-f
+      # stable-values.yaml` below reinstalls.
+      #
+      # DERIVING THE ORIGIN TOO WOULD BE WORSE THAN THE HOLE IT CLOSED. The
+      # next step posts this deployment's client secret to that host's token
+      # endpoint, so an `identity.authority` of `https://attacker.example/...`
+      # -- a value held in the cluster, editable by anyone who can edit a
+      # release -- would exfiltrate the credential. `KEYCLOAK_TRUSTED_ORIGIN`
+      # is the identity provider this deployment is willing to authenticate to,
+      # it comes from the Environment and not from the cluster, and
+      # `realm_check.py authority` refuses a release whose authority names
+      # anything else. A rollout onto an untrusted identity provider stops.
       #
       # It fails closed in every direction: an absent variable, an authority
       # this gate cannot split, a realm that cannot be read, a realm that
@@ -227,9 +235,11 @@ jobs:
           set -euo pipefail
           helm get values "$WORKLOAD" -n "$NAMESPACE" -o json > "$RUNNER_TEMP/installed.json"
           python deploy/keycloak/realm_check.py authority \
-            --values "$RUNNER_TEMP/installed.json" >> "$GITHUB_ENV"
+            --values "$RUNNER_TEMP/installed.json" \
+            --trusted-origin "$KEYCLOAK_TRUSTED_ORIGIN" >> "$GITHUB_ENV"
         env:
           WORKLOAD: ${{ inputs.workload }}
+          KEYCLOAK_TRUSTED_ORIGIN: ${{ vars.KEYCLOAK_TRUSTED_ORIGIN }}
 
       - name: Read the deployed realm
         run: python deploy/keycloak/read_admin.py --out "$RUNNER_TEMP/realm.json"

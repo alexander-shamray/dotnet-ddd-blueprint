@@ -188,17 +188,20 @@ def clients(base: str, realm: str, access_token: str) -> list:
         if not isinstance(answer, list):
             raise SystemExit("read_admin: the admin API did not answer a client list.")
         collected += answer
-        # A short page is the last page. An exactly-full one is not, even when
-        # it is: one more request answering nothing costs a round trip and
-        # removes the guess.
-        if len(answer) < PAGE_SIZE:
+        # AN EMPTY PAGE IS THE LAST PAGE, AND A SHORT ONE IS NOT. Keycloak
+        # pages client *models* and then drops representations it cannot
+        # render, so a page of 100 models can answer 99 entries with more
+        # clients behind it — and stopping there is a realm whose tail is
+        # unjudged, which is the vacuous read this tree refuses. One extra
+        # request answering nothing is what the certainty costs.
+        if not answer:
             return collected
 
     raise SystemExit(
-        f"read_admin: the realm answered {MAX_PAGES} full pages of clients. "
-        "That is not a realm this gate can judge, and reporting the first "
-        f"{MAX_PAGES * PAGE_SIZE} as though they were all of them is the "
-        "truncated read it exists to refuse.")
+        f"read_admin: the realm answered {MAX_PAGES} pages of clients without "
+        "an empty one. That is not a realm this gate can judge, and reporting "
+        f"the first {MAX_PAGES * PAGE_SIZE} as though they were all of them is "
+        "the truncated read it exists to refuse.")
 
 
 def fetch(values: dict[str, str]) -> dict:

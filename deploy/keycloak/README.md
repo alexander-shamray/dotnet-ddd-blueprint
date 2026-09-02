@@ -88,12 +88,19 @@ and they arrive from two different places on purpose.
 provisioned and rotated, and why it is the one credential here that reaches no
 row of §15.4's table.
 
-**Two are derived, and configuring them would re-open the hole.**
-`KEYCLOAK_BASE_URL` (the **server root**, not the realm's issuer URL) and
-`KEYCLOAK_REALM` are written into `$GITHUB_ENV` by `realm_check.py authority`,
-out of the `identity.authority` the release being rolled is running with. A
-realm named beside the chart rather than out of it is a check that can pass on
-a compliant realm nobody is deploying to.
+**Two are derived.** `KEYCLOAK_BASE_URL` (the **server root**, not the realm's
+issuer URL) and `KEYCLOAK_REALM` are written into `$GITHUB_ENV` by
+`realm_check.py authority`, out of the `identity.authority` the release being
+rolled is running with. A realm named beside the chart rather than out of it is
+a check that can pass on a realm nobody is deploying to.
+
+**And one pins where the credential may be sent.** `KEYCLOAK_TRUSTED_ORIGIN` is
+a third Environment variable, and it is what keeps the derivation above from
+being worse than the hole it closed: `identity.authority` lives in the cluster,
+so deriving the *origin* from it would let whoever can edit a release have this
+job post its client secret to a host of their choosing. The origin is pinned
+here, the realm is derived there, and `authority` refuses a release whose
+authority names any other origin.
 
 A base URL that is not `https` is refused: the bearer token that fetch obtains
 can read every client secret in the realm. So is a redirect — `urllib` carries

@@ -3192,17 +3192,24 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   18000, an issued refresh token, and the local realm judged as a deployed one.
   Every row of the issue's table is asserted except `ClockSkew`, which the issue
   itself excludes.
-- **The realm checked is the realm installed, by construction rather than by
-  two values kept in step.** Naming the realm in the deploy environment beside
-  a chart value naming another is a gate that passes on a compliant unrelated
-  realm while every host it installs stays pointed at the non-compliant one —
-  #157 closed in a description and nowhere else. The pair `read_admin.py` reads
-  is written by `realm_check.py authority` out of `identity.authority`, which
-  `-f stable-values.yaml` reinstalls two steps later, and the workflow passes
-  neither of them from the environment even though the code would take them.
-  **The names are declared once too**: `read_admin.py` imports them from
-  `realm_check.py`, on `deploy/canary`'s import direction, because a writer and
-  a reader spelling a variable separately agree until one is edited.
+- **The realm checked is the realm installed, and the origin authenticated to
+  is the one this deployment names. Those are two different decisions and
+  taking either one the other way is a hole.** Naming the realm in the deploy
+  environment beside a chart value naming another is a gate that passes on a
+  compliant unrelated realm while every host it installs stays pointed at the
+  non-compliant one — #157 closed in a description and nowhere else. So the
+  realm is derived, by `realm_check.py authority`, out of the
+  `identity.authority` that `-f stable-values.yaml` reinstalls two steps later.
+  **Deriving the origin from the same value would be worse than that hole**:
+  the fetch posts this deployment's client secret to the token endpoint under
+  it, and `identity.authority` is held in the cluster, so a release edited to
+  `https://attacker.example/realms/x` would send the credential there.
+  `KEYCLOAK_TRUSTED_ORIGIN` comes from the deploy environment, the two are
+  required to agree, and a rollout onto an identity provider this deployment
+  does not name stops rather than authenticating to it. **The names are
+  declared once too**: `read_admin.py` imports them from `realm_check.py`, on
+  `deploy/canary`'s import direction, because a writer and a reader spelling a
+  variable separately agree until one is edited.
 - **A rollout is the only moment a deployed realm is read, and a realm edited
   between rollouts is unobserved until the next one.** That is a narrower gap
   than the one this record closes and it is a real one:
@@ -3224,10 +3231,14 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   can read every client secret in the realm; **a redirect is refused rather
   than followed**, because `urllib` copies a request's headers onto the
   redirected one and strips only the content ones, so an `Authorization` header
-  would travel to any host a 302 named; **the client list is paged to the end**,
-  because one page of a realm is not a realm and every per-client obligation is
-  satisfied by the clients nobody fetched; an authority this gate cannot split
-  stops it; a realm that cannot be read stops
+  would travel to any host a 302 named; **the client list is paged until an
+  empty page**, because one page of a realm is not a realm, a *short* page is
+  not the last one either — Keycloak drops representations it cannot render —
+  and every per-client obligation is satisfied by the clients nobody fetched;
+  **whitespace in an authority is refused**, because the two values derived
+  from it become `NAME=value` lines in `$GITHUB_ENV` and a newline there starts
+  a second assignment; an authority this gate cannot split stops it; a realm
+  that cannot be read stops
   the rollout on the rule the Prometheus read beside it already follows; a realm
   document with no `clients` array is refused rather than passed, because every
   per-client obligation is vacuously true of an empty one; a flag that is not a

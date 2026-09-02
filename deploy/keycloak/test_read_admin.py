@@ -179,19 +179,47 @@ class ThePaging(Stubbed):
         self.assertEqual(fetched[-1]["clientId"], f"client-{read_admin.PAGE_SIZE + 6}")
 
     def test_an_exactly_full_page_is_not_assumed_to_be_the_last(self):
-        """The boundary that a `len(page) == max` shortcut gets wrong."""
+        """The boundary a `len(page) == max` shortcut gets wrong."""
         every = self.realm_of(read_admin.PAGE_SIZE)
         self.answers({"realm": "commerce"}, every)
         self.assertEqual(len(read_admin.fetch(self.values)["clients"]), read_admin.PAGE_SIZE)
 
-    def test_a_realm_that_never_returns_a_short_page_stops(self):
+    def test_a_short_page_is_not_the_last_page_either(self):
+        """Keycloak drops representations it cannot render, mid-list.
+
+        A page of 100 client models can answer 99 entries with more clients
+        behind it, so a `len(page) < max` shortcut stops on a realm whose tail
+        is unjudged — and the tail is exactly where a violating client sits
+        when `web-app` is on page one.
+        """
+        served = []
+
+        def get(url: str, _access: str):
+            if "/clients" not in url:
+                return {"realm": "commerce"}
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            first = int(query.get("first", ["0"])[0])
+            served.append(first)
+            if first == 0:
+                # A filtered page: one model short of full, and not the last.
+                return self.realm_of(read_admin.PAGE_SIZE - 1)
+            if first == read_admin.PAGE_SIZE:
+                return [{"clientId": "implicit-flow-client", "implicitFlowEnabled": True}]
+            return []
+
+        read_admin.get = get
+        fetched = read_admin.fetch(self.values)["clients"]
+        self.assertIn("implicit-flow-client", [c["clientId"] for c in fetched])
+        self.assertEqual(served, [0, read_admin.PAGE_SIZE, read_admin.PAGE_SIZE * 2])
+
+    def test_a_realm_that_never_returns_an_empty_page_stops(self):
         """A server paging forever is not a realm to report the start of."""
         read_admin.get = lambda url, _a: (
             [{"clientId": "x"}] * read_admin.PAGE_SIZE if "/clients" in url
             else {"realm": "commerce"})
         with self.assertRaises(SystemExit) as stop:
             read_admin.fetch(self.values)
-        self.assertIn("full pages", str(stop.exception))
+        self.assertIn("without an empty one", str(stop.exception))
 
 
 class TheRedirect(unittest.TestCase):

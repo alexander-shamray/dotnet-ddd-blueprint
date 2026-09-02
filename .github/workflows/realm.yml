@@ -36,11 +36,16 @@ name: Realm
 #     them is edited. An edit there changes what every realm owes, so it has to
 #     run this gate.
 #   - deploy/compose/keycloak/realm-export.json, because it is the subject.
+#   - deploy/helm/**, because the SUITE reads it. One case asserts that every
+#     chart's `identity.authority` still has the shape `realm_check.py
+#     authority` splits at deploy time, and a subject test that does not gate
+#     the files it validates is a subject test in name only.
 on:
   pull_request:
     paths:
       - 'deploy/keycloak/**'
       - 'deploy/compose/keycloak/realm-export.json'
+      - 'deploy/helm/**'
       - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
       - '.github/workflows/realm.yml'
   push:
@@ -48,6 +53,7 @@ on:
     paths:
       - 'deploy/keycloak/**'
       - 'deploy/compose/keycloak/realm-export.json'
+      - 'deploy/helm/**'
       - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
       - '.github/workflows/realm.yml'
 

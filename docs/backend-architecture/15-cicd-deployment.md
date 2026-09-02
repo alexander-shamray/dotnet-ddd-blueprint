@@ -266,14 +266,19 @@ judged before the rollout changes anything. **Which realm that is comes out of
 the chart rather than out of a variable beside it** — `helm get values` answers
 what the release is running with, and `realm_check.py authority` splits its
 `identity.authority` into the server root and the realm name, so the realm
-checked and the realm installed cannot be two realms. That is also what the CI
-half is for: a deploy-time check nothing has ever executed is a check nobody
-has established is looking at anything, and the local realm is the one subject
-available to establish it on.
-The kind is an argument with no default because one obligation inverts between
-the two — §11.2's password grant is on in the local realm and off in a deployed
-one — and a check that guessed would pass a production realm on the local
-realm's terms.
+checked and the realm installed cannot be two realms. **The origin is pinned
+where the realm is derived**, because the fetch authenticates to it: an
+authority is a value held in the cluster, and deriving *where to send a client
+secret* from one would hand that decision to whoever can edit a release.
+
+**That is also what the CI half is for.** A deploy-time check nothing has ever
+executed is a check nobody has established is looking at anything, and the
+local realm is the one subject available to establish it on.
+
+**The kind is an argument with no default**, because one obligation inverts
+between the two — §11.2's password grant is on in the local realm and off in a
+deployed one — and a check that guessed would pass a production realm on the
+local realm's terms.
 
 **Four of the five filters name files outside their own tree**, and none is an
 oversight — each names an input its gate actually reads. Compose is the one

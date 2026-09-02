@@ -72,7 +72,14 @@ COMPOSE_REALM = "deploy/compose/keycloak/realm-export.json"
 # subject is its own copy. What it looks for instead is a path literal
 # anywhere in this file that no entry covers, so the read this gate grows next
 # is the one it catches.
-SOURCE_INPUTS = [LIFETIME_SOURCE, COMPOSE_REALM]
+# `deploy/helm` is read by the SUITE rather than by the gate, and it is
+# declared all the same. `test_the_shipped_charts_carry_an_authority_this_can
+# _split` reads every chart's `identity.authority` to establish that the value
+# the deploy path splits still has the shape it splits — a subject test that
+# does not gate the files it validates is a subject test in name only.
+CHART_VALUES = "deploy/helm"
+
+SOURCE_INPUTS = [LIFETIME_SOURCE, COMPOSE_REALM, CHART_VALUES]
 
 WORKFLOW_PATH = ".github/workflows/realm.yml"
 
@@ -217,6 +224,22 @@ def split_authority(authority: str) -> tuple[str, str]:
     further `/` in it, which is the traversal `read_admin.py` escapes and this
     refuses outright.
     """
+    # WHITESPACE ANYWHERE IS REFUSED, AND A NEWLINE IS THE REASON. What this
+    # function's two results become is `NAME=value` lines appended to
+    # `$GITHUB_ENV`, so a newline inside the value ends that assignment and
+    # starts another — an `identity.authority` of
+    # `https://host/realms/x\nSOME_VAR=...` sets SOME_VAR for every remaining
+    # step of the rollout. The value comes from `helm get values`, so the
+    # authority to trust is whatever is in the cluster, and "whoever can edit a
+    # release can set this job's environment" is not a privilege this check may
+    # hand out. Refusing all whitespace rather than newlines alone: a realm
+    # name with a space in it is not one this gate can put in a URL either.
+    if any(character.isspace() for character in authority):
+        raise SystemExit(
+            f"realm-gate: identity.authority is {authority!r}, which contains "
+            "whitespace. This value becomes a NAME=value line in $GITHUB_ENV, "
+            "where a newline starts a second assignment.")
+
     if not authority.startswith("https://"):
         raise SystemExit(
             f"realm-gate: identity.authority is {authority!r}. The admin API "
@@ -453,7 +476,13 @@ def check_source_inputs_covers_reads() -> list[str]:
     to what the workflow must cover, so declaring it here would make the
     workflow require itself twice and say nothing new.
     """
-    source = Path(__file__).resolve().read_text(encoding="utf-8")
+    # THE WHOLE TREE, NOT THIS FILE. What the workflow triggers on is a change
+    # to anything `deploy/keycloak` reads, and the suite reads a chart value
+    # this file never opens — a declared-inputs list scoped to one module is a
+    # list that goes stale the first time a sibling grows a read.
+    source = "\n".join(
+        module.read_text(encoding="utf-8")
+        for module in sorted(Path(__file__).resolve().parent.glob("*.py")))
 
     # TWO SCANS, BECAUSE ONE OF THEM CANNOT SEE A FILE AT THE REPOSITORY ROOT.
     # The literal scan requires a separator, so a read of `global.json` or
@@ -478,6 +507,13 @@ def check_source_inputs_covers_reads() -> list[str]:
     # argument for having that test. `..` is subtracted as the price: the
     # docstring's relative links to the blueprint are not reads.
     quoted = {r for r in quoted if ".." not in r.split("/")}
+    # A PATH LITERAL IS ONE WHOSE FIRST SEGMENT EXISTS AT THE REPOSITORY ROOT.
+    # Without that, `application/json` and `application/x-www-form-urlencoded`
+    # -- the two media types `read_admin.py` sends -- are read as reads, and
+    # the check demands a SOURCE_INPUTS entry for a MIME type. The rule is also
+    # the precise one: a path nothing could open is not a read, and a new read
+    # under a top-level directory that does not exist is a read of nothing.
+    quoted = {r for r in quoted if (ROOT / r.split("/")[0]).exists()}
 
     problems: list[str] = []
     used = set()
@@ -590,6 +626,9 @@ def main(argv: list[str]) -> int:
         "authority", help="the realm to read, derived from the release's own values")
     authority.add_argument("--values", required=True, type=Path,
                            help="`helm get values <release> -o json` for the release being rolled")
+    authority.add_argument("--trusted-origin", required=True,
+                           help="the identity provider this deployment is willing to authenticate "
+                                "to; the release's authority must name it")
 
     args = parser.parse_args(argv[1:])
 
@@ -604,8 +643,45 @@ def main(argv: list[str]) -> int:
             raise SystemExit(f"realm-gate: {args.values} is not a values document")
 
         root, realm = split_authority(authority_of(document))
+
+        # THE ORIGIN IS PINNED AND THE REALM IS DERIVED, and mixing those up
+        # either way is a hole. Deriving the realm is what stops the gate
+        # checking a realm nobody is deploying to; deriving the *origin* would
+        # hand the release's values control of where this job sends a client
+        # secret — an authority of `https://attacker.example/realms/x` and the
+        # credential is posted to that host's token endpoint. So the origin
+        # comes from the deploy environment, the realm comes from the chart,
+        # and the two are required to agree: a release pointed at an identity
+        # provider this deployment does not trust stops the rollout rather than
+        # authenticating to it.
+        trusted = args.trusted_origin.strip().rstrip("/")
+        if root != trusted:
+            raise SystemExit(
+                f"realm-gate: the release is running with an authority on "
+                f"{root!r}, and this deployment trusts {trusted!r}. Refusing "
+                "to authenticate to an identity provider the deploy "
+                "environment does not name.")
+
+        # THE CHECK IS REPEATED ON THE OUTPUT, and the repetition is the
+        # point. `split_authority` refuses whitespace in its input, so this
+        # cannot fire today — but what must never contain a newline is what is
+        # WRITTEN, and a future refusal relaxed on the input side would move
+        # that guarantee somewhere this line cannot see. A subject test asserts
+        # this line refuses, by handing it a value the parser would have
+        # rejected.
+        for value in (root, realm):
+            if any(character.isspace() for character in value):
+                raise SystemExit(
+                    f"realm-gate: refusing to write {value!r} into the "
+                    "environment: whitespace in a NAME=value line starts a "
+                    "second assignment.")
+
         # Two `NAME=value` lines, for `>> $GITHUB_ENV`. Nothing else goes to
         # stdout on this path, because anything else would be read as one.
+        # The base URL is written even though it equals the trusted origin the
+        # caller already holds: `read_admin.py` requires all four names in the
+        # environment, and writing the one this file verified is what makes the
+        # verification load-bearing rather than advisory.
         print(f"{BASE_URL_VARIABLE}={root}")
         print(f"{REALM_VARIABLE}={realm}")
         return 0

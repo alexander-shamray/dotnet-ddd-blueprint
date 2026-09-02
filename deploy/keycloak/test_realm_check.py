@@ -20,6 +20,8 @@ subject.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -473,6 +475,64 @@ class TheDeclaredInputs(unittest.TestCase):
         self.assertTrue(any(realm_check.LIFETIME_SOURCE in problem for problem in found))
 
 
+class TheTrustedOrigin(unittest.TestCase):
+    """The realm is derived and the origin is pinned, and swapping those is a hole.
+
+    Deriving the realm stops the gate checking a realm nobody is deploying to.
+    Deriving the *origin* would hand a release's values control of where this
+    job posts a client secret — `https://attacker.example/realms/x` and the
+    credential goes to that host's token endpoint, which is a worse hole than
+    the mismatch deriving was introduced to close.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.values = Path(self.directory.name) / "values.json"
+
+    def run_authority(self, authority: str, trusted: str) -> int:
+        self.values.write_text(
+            json.dumps({"identity": {"authority": authority}}), encoding="utf-8")
+        # The two `NAME=value` lines are the point of the command and noise in
+        # a suite, so they are captured rather than printed.
+        with contextlib.redirect_stdout(io.StringIO()):
+            return realm_check.main([
+                "realm_check.py", "authority",
+                "--values", str(self.values), "--trusted-origin", trusted])
+
+    def test_a_release_on_the_trusted_origin_is_accepted(self):
+        self.assertEqual(
+            self.run_authority("https://id.example.com/realms/commerce",
+                               "https://id.example.com"), 0)
+
+    def test_a_trailing_slash_on_the_trusted_origin_does_not_matter(self):
+        self.assertEqual(
+            self.run_authority("https://id.example.com/realms/commerce",
+                               "https://id.example.com/"), 0)
+
+    def test_a_release_on_another_origin_stops_the_rollout(self):
+        """The exfiltration case: the secret would have gone to that host."""
+        with self.assertRaises(SystemExit) as stop:
+            self.run_authority("https://attacker.example/realms/commerce",
+                               "https://id.example.com")
+        self.assertIn("attacker.example", str(stop.exception))
+        self.assertIn("does not name", str(stop.exception))
+
+    def test_a_sibling_host_is_not_the_trusted_one(self):
+        """Prefix matching would admit `id.example.com.attacker.example`."""
+        with self.assertRaises(SystemExit) as stop:
+            self.run_authority("https://id.example.com.attacker.example/realms/x",
+                               "https://id.example.com")
+        self.assertIn("Refusing", str(stop.exception))
+
+    def test_a_path_under_the_trusted_origin_is_not_the_trusted_origin(self):
+        """`/auth/realms/x` is a different root, and this refuses rather than trims."""
+        with self.assertRaises(SystemExit) as stop:
+            self.run_authority("https://id.example.com/auth/realms/commerce",
+                               "https://id.example.com")
+        self.assertIn("/auth", str(stop.exception))
+
+
 class TheAuthorityDecidesWhichRealmIsRead(unittest.TestCase):
     """The realm checked is the realm the rollout installs, by construction.
 
@@ -485,6 +545,19 @@ class TheAuthorityDecidesWhichRealmIsRead(unittest.TestCase):
 
     def values(self, authority) -> dict:
         return {"image": {"tag": "abc"}, "identity": {"authority": authority}}
+
+    def test_whitespace_anywhere_stops_because_the_value_becomes_an_env_line(self):
+        """A newline ends the assignment and starts another.
+
+        `authority` prints `NAME=value` lines a shell appends to
+        `$GITHUB_ENV`, and the authority comes from `helm get values` — so
+        without this refusal, whoever can edit a release can set an arbitrary
+        environment variable for every remaining step of the rollout.
+        """
+        with self.assertRaises(SystemExit) as stop:
+            realm_check.split_authority(
+                "https://id.example.com/realms/com\nSOME_VAR=x")
+        self.assertIn("whitespace", str(stop.exception))
 
     def test_the_root_and_the_realm_come_out_of_the_authority(self):
         root, realm = realm_check.split_authority(
