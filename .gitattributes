@@ -86,3 +86,11 @@ deploy/canary/** text eol=lf
 # whose result depends on who checked it out, which is the property the .cs
 # paragraph above spent a PR discovering.
 deploy/observability/** text eol=lf
+
+# deploy/keycloak/ joins for the reason deploy/canary/ did, and again ahead of
+# paying for it. The .py files are covered above; this is for anything that
+# arrives beside them -- a fixture realm, a README -- so the tree is one thing.
+# `realm_check.py` matches a C# declaration with an anchored pattern, on a
+# Linux runner and from a Windows checkout, which is the property the .cs
+# paragraph above spent a PR discovering.
+deploy/keycloak/** text eol=lf
