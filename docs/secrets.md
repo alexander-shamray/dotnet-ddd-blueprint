@@ -175,7 +175,7 @@ the local broker, and are an obligation on whoever provisions a deployed one.
 repository that **no pod ever reads**. It belongs to a workflow rather than to a
 workload: `deploy.yml`'s rollout job authenticates with it, fetches the realm
 that deployment is about to be rolled onto, and hands the document to
-`deploy/keycloak/realm_check.py` before the first step that touches the cluster
+`deploy/keycloak/realm_check.py` before the rollout changes anything
 ([ADR-042](backend-architecture/appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)).
 
 **It is a service account of the realm being checked, with realm-read rights and
@@ -198,13 +198,21 @@ other side of the pipeline: without it the rollout refuses to start, which is
 pod's.
 
 **It lives in the `production` GitHub Environment**, which is the mechanism
-§15.4 already relies on to scope a deployment's secrets — three Environment
-*variables*, `KEYCLOAK_BASE_URL` (the server root, not the realm's issuer URL),
-`KEYCLOAK_REALM` and `KEYCLOAK_CHECK_CLIENT_ID`, and one Environment *secret*,
-`KEYCLOAK_CHECK_CLIENT_SECRET`. Only the last is a credential; the other three
-are named here because `read_admin.py` requires all four and stops naming every
-one that is missing, so a rotation that replaces the client rather than its
-secret has more than the secret to move.
+§15.4 already relies on to scope a deployment's secrets — one Environment
+*variable*, `KEYCLOAK_CHECK_CLIENT_ID`, and one Environment *secret*,
+`KEYCLOAK_CHECK_CLIENT_SECRET`. A rotation that replaces the client rather
+than its secret has both to move.
+
+**The other two values `read_admin.py` requires are not configured at all, and
+that is the point.** `KEYCLOAK_BASE_URL` and `KEYCLOAK_REALM` are *derived*, by
+`realm_check.py authority`, from the `identity.authority` the release being
+rolled is running with — `helm get values` answers it and `-f
+stable-values.yaml` reinstalls it. **A realm named beside the chart rather than
+out of it is a check that can pass on the wrong realm**: a compliant unrelated
+realm satisfies every obligation while every host the rollout installs stays
+pointed at the non-compliant one. Configuring them would re-open exactly that,
+which is why the workflow does not pass them even though the code would accept
+them.
 
 Keycloak's two-active-secrets affordance applies here exactly as it does to the
 BFF's client, so the procedure is that one with no vault in it and a different
@@ -216,7 +224,8 @@ proof:
    the next workflow run reads it and no running process is holding the old one.
 3. Run a rollout, or wait for the next one. The *Read the deployed realm* step
    printing the realm and its client count is the proof: that line is a read the
-   admin API answers only to a working credential.
+   admin API answers only to a working credential, against a realm the step
+   before it derived from the chart.
 4. Retire the old secret in Keycloak.
 
 **Rotating this credential cannot break a running service**, because nothing

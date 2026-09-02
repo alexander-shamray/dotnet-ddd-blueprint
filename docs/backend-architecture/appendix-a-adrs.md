@@ -3113,9 +3113,12 @@ against a Keycloak **realm representation**, and two things run it. `realm.yml`
 runs it over `deploy/compose/keycloak/realm-export.json` on every change to
 that file, to `AuthenticationExtensions` or to the gate itself; `deploy.yml`'s
 rollout job runs it over the realm a deployment actually points at, fetched
-through the admin API by `read_admin.py`, **before the first step that touches
-the cluster**. A realm that disagrees fails the rollout rather than being rolled
-onto. What is asserted is the table
+through the admin API by `read_admin.py`, **before the rollout changes
+anything**. Which realm that is is **derived from the chart** — `helm get
+values` answers the `identity.authority` the release is running with, and
+`realm_check.py authority` splits it into the server root and the realm name.
+A realm that disagrees fails the rollout rather than being rolled onto. What
+is asserted is the table
 [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
 drew: `accessTokenLifespan` equal to the `AccessTokenLifetime`
 [ADR-040](#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
@@ -3189,6 +3192,17 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   18000, an issued refresh token, and the local realm judged as a deployed one.
   Every row of the issue's table is asserted except `ClockSkew`, which the issue
   itself excludes.
+- **The realm checked is the realm installed, by construction rather than by
+  two values kept in step.** Naming the realm in the deploy environment beside
+  a chart value naming another is a gate that passes on a compliant unrelated
+  realm while every host it installs stays pointed at the non-compliant one —
+  #157 closed in a description and nowhere else. The pair `read_admin.py` reads
+  is written by `realm_check.py authority` out of `identity.authority`, which
+  `-f stable-values.yaml` reinstalls two steps later, and the workflow passes
+  neither of them from the environment even though the code would take them.
+  **The names are declared once too**: `read_admin.py` imports them from
+  `realm_check.py`, on `deploy/canary`'s import direction, because a writer and
+  a reader spelling a variable separately agree until one is edited.
 - **A rollout is the only moment a deployed realm is read, and a realm edited
   between rollouts is unobserved until the next one.** That is a narrower gap
   than the one this record closes and it is a real one:
@@ -3207,7 +3221,13 @@ read decorative, which is the shape ADR-033 was written to withdraw.
 - **It fails closed in every direction, and each refusal was a decision.** An
   absent environment variable stops the run naming every one that is missing; a
   base URL that is not `https` is refused, because the token this fetch carries
-  can read every client secret in the realm; a realm that cannot be read stops
+  can read every client secret in the realm; **a redirect is refused rather
+  than followed**, because `urllib` copies a request's headers onto the
+  redirected one and strips only the content ones, so an `Authorization` header
+  would travel to any host a 302 named; **the client list is paged to the end**,
+  because one page of a realm is not a realm and every per-client obligation is
+  satisfied by the clients nobody fetched; an authority this gate cannot split
+  stops it; a realm that cannot be read stops
   the rollout on the rule the Prometheus read beside it already follows; a realm
   document with no `clients` array is refused rather than passed, because every
   per-client obligation is vacuously true of an empty one; a flag that is not a

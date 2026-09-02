@@ -473,6 +473,96 @@ class TheDeclaredInputs(unittest.TestCase):
         self.assertTrue(any(realm_check.LIFETIME_SOURCE in problem for problem in found))
 
 
+class TheAuthorityDecidesWhichRealmIsRead(unittest.TestCase):
+    """The realm checked is the realm the rollout installs, by construction.
+
+    Two environment variables naming a realm, beside a chart value naming
+    another, is a gate that passes on realm A while the workload is pointed at
+    realm B — compliant, unrelated, and no help at all. So the pair is derived
+    from `identity.authority` in the release's own values rather than declared
+    beside it, and there is no second place to keep in step.
+    """
+
+    def values(self, authority) -> dict:
+        return {"image": {"tag": "abc"}, "identity": {"authority": authority}}
+
+    def test_the_root_and_the_realm_come_out_of_the_authority(self):
+        root, realm = realm_check.split_authority(
+            realm_check.authority_of(self.values("https://id.example.com/realms/commerce")))
+        self.assertEqual(root, "https://id.example.com")
+        self.assertEqual(realm, "commerce")
+
+    def test_the_root_is_not_the_authority(self):
+        """Keycloak's admin endpoints sit beside `/realms`, not under it.
+
+        Handing `read_admin.py` the authority is the mistake this split exists
+        to make impossible, and it is the one an operator makes by hand.
+        """
+        root, _ = realm_check.split_authority("https://id.example.com/auth/realms/commerce")
+        self.assertEqual(root, "https://id.example.com/auth")
+
+    def test_a_trailing_slash_does_not_become_part_of_the_realm(self):
+        _, realm = realm_check.split_authority("https://id.example.com/realms/commerce/")
+        self.assertEqual(realm, "commerce")
+
+    def test_a_release_with_no_identity_authority_stops(self):
+        with self.assertRaises(SystemExit) as stop:
+            realm_check.authority_of({"image": {"tag": "abc"}})
+        self.assertIn("identity.authority", str(stop.exception))
+
+    def test_an_empty_authority_stops(self):
+        with self.assertRaises(SystemExit) as stop:
+            realm_check.authority_of(self.values("   "))
+        self.assertIn("names no realm", str(stop.exception))
+
+    def test_plain_http_stops(self):
+        with self.assertRaises(SystemExit) as stop:
+            realm_check.split_authority("http://id.example.com/realms/commerce")
+        self.assertIn("https or nothing", str(stop.exception))
+
+    def test_an_authority_with_no_realms_segment_stops(self):
+        with self.assertRaises(SystemExit) as stop:
+            realm_check.split_authority("https://id.example.com/commerce")
+        self.assertIn("/realms/", str(stop.exception))
+
+    def test_a_query_or_fragment_stops(self):
+        """An admin path appended to one of these lands inside it."""
+        for authority in ("https://id.example.com/realms/commerce?x=1",
+                          "https://id.example.com/realms/commerce#x"):
+            with self.assertRaises(SystemExit) as stop:
+                realm_check.split_authority(authority)
+            self.assertIn("query or a fragment", str(stop.exception))
+
+    def test_a_realm_name_with_a_separator_in_it_stops(self):
+        with self.assertRaises(SystemExit) as stop:
+            realm_check.split_authority("https://id.example.com/realms/commerce/../master")
+        self.assertIn("single path segment", str(stop.exception))
+
+    def test_the_shipped_charts_carry_an_authority_this_can_split(self):
+        """The subject test: the chart value this reads still has the shape it parses.
+
+        Every chart's `identity.authority` is a placeholder in this repository
+        and a real one at a rollout, but the *shape* is what this parses — so a
+        chart that changed the key or the form would break the deploy path and
+        nothing else would say so.
+        """
+        import re
+        from pathlib import Path
+
+        root = Path(realm_check.__file__).resolve().parents[2]
+        found = []
+        for values in sorted((root / "deploy" / "helm").glob("*/values.yaml")):
+            text = values.read_text(encoding="utf-8")
+            match = re.search(r"^\s*authority:\s*(\S+)\s*$", text, re.MULTILINE)
+            if match:
+                found.append((values.name, match.group(1)))
+        self.assertTrue(found, "no chart declares identity.authority")
+        for name, authority in found:
+            root_url, realm = realm_check.split_authority(authority)
+            self.assertTrue(root_url.startswith("https://"), name)
+            self.assertTrue(realm, name)
+
+
 class TheRealmIsLoaded(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

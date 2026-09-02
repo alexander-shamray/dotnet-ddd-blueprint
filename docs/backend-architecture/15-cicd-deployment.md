@@ -262,7 +262,11 @@ browser client with `standardFlowEnabled` true beside it.
 holds no copy of.** The same predicate runs in `deploy.yml`'s rollout job, over
 the realm a deployment is about to be rolled onto — fetched through Keycloak's
 admin API by `read_admin.py`, under the `production` GitHub Environment, and
-judged before the first step that touches the cluster. That is also what the CI
+judged before the rollout changes anything. **Which realm that is comes out of
+the chart rather than out of a variable beside it** — `helm get values` answers
+what the release is running with, and `realm_check.py authority` splits its
+`identity.authority` into the server root and the realm name, so the realm
+checked and the realm installed cannot be two realms. That is also what the CI
 half is for: a deploy-time check nothing has ever executed is a check nobody
 has established is looking at anything, and the local realm is the one subject
 available to establish it on.

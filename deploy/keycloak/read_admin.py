@@ -47,27 +47,33 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+# The names of the four environment variables this reads, declared in the file
+# that DECIDES rather than here — `deploy/canary`'s direction, where
+# `read_prometheus.py` imports from `canary.py` and never the reverse. Two of
+# the four are what `realm_check.py authority` writes into `$GITHUB_ENV`, and a
+# writer and a reader spelling a variable separately agree right up until one
+# of them is edited.
+from realm_check import ENVIRONMENT as REQUIRED
+
+# The first of the four is the SERVER ROOT and not the realm's issuer URL — the
+# admin endpoints sit beside `/realms`, not under it — which is why
+# `realm_check.py authority` splits an authority rather than passing it whole.
+BASE_URL, REALM, CLIENT_ID, CLIENT_SECRET = REQUIRED
+
 TIMEOUT_SECONDS = 30
 
-# The environment this reads, and every entry is required. `KEYCLOAK_BASE_URL`
-# is the server root and not the realm's issuer URL — the admin endpoints sit
-# beside `/realms`, not under it, and handing this an issuer URL is the mistake
-# worth naming in the help text.
-#
-# NAMED ONCE, IN THE TUPLE, AND UNPACKED. The four constants below hold
-# variable *names* and never a value, and spelling one as
-# `CLIENT_SECRET = "..."` is the shape §15.1's secret scan exists to catch --
-# a credential-shaped name assigned a literal. It would have been a false
-# positive and an allow-list line, and an accepted finding is a decision
-# somebody has to re-read; naming them here instead costs one line and leaves
-# that rule meaning exactly what it says.
-REQUIRED = (
-    "KEYCLOAK_BASE_URL",
-    "KEYCLOAK_REALM",
-    "KEYCLOAK_CHECK_CLIENT_ID",
-    "KEYCLOAK_CHECK_CLIENT_SECRET",
-)
-BASE_URL, REALM, CLIENT_ID, CLIENT_SECRET = REQUIRED
+# Keycloak's admin list endpoints take `first` and `max`, and what they do when
+# `max` is absent has differed by version. A page size is therefore given
+# rather than relied on, and `fetch` pages until a short page arrives — a
+# truncated client list is a realm whose every per-client obligation passes
+# without being judged, which is the vacuous read this whole tree exists to
+# refuse.
+PAGE_SIZE = 100
+
+# A page count that stops a loop rather than a server. 200 pages of 100 is
+# twenty thousand clients; a realm that large is a realm this gate has no
+# business guessing about, so it stops rather than spinning.
+MAX_PAGES = 200
 
 
 def environment() -> dict[str, str]:
@@ -96,6 +102,33 @@ def environment() -> dict[str, str]:
     return values
 
 
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    """A redirect is refused rather than followed, because the header travels.
+
+    `urllib` copies a request's headers onto the redirected request and strips
+    only the content ones, so an `Authorization` header follows a 302 to
+    **any** host — including one outside the realm's origin, and the `https`
+    check in `environment` says nothing about where a redirect leads. The token
+    this fetch carries can read every client secret in the realm, so it is the
+    one header that must not travel.
+
+    Refusing rather than re-signing per origin is the smaller decision: the
+    admin API of the realm a rollout is about to install is not a place a
+    redirect is expected, and a redirect that *is* expected is a change to
+    where this reads, which belongs to whoever makes it.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code,
+            f"refusing to follow a {code} redirect to {newurl} — the admin "
+            "credential would travel with it", headers, fp)
+
+
+# One opener for every request this file makes, so no call site can forget.
+OPENER = urllib.request.build_opener(NoRedirects)
+
+
 def token(base_url: str, realm: str, client_id: str, client_secret: str) -> str:
     """A client-credentials access token for the service account.
 
@@ -117,7 +150,7 @@ def token(base_url: str, realm: str, client_id: str, client_secret: str) -> str:
 
     request = urllib.request.Request(url, data=form, method="POST")
     request.add_header("Content-Type", "application/x-www-form-urlencoded")
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
+    with OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
         body = json.loads(response.read().decode("utf-8"))
 
     access = body.get("access_token")
@@ -135,8 +168,37 @@ def get(url: str, access_token: str) -> object:
     request = urllib.request.Request(url, method="GET")
     request.add_header("Authorization", f"Bearer {access_token}")
     request.add_header("Accept", "application/json")
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
+    with OPENER.open(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310
         return json.loads(response.read().decode("utf-8"))
+
+
+def clients(base: str, realm: str, access_token: str) -> list:
+    """Every client, paged, because one page is not every client.
+
+    Keycloak's `/clients` endpoint takes `first` and `max`. Reading one page
+    and calling it the realm is how a client past the boundary enables the
+    implicit flow, or overrides the token lifetime, without ever reaching
+    `check_realm` — and with `web-app` on the first page the rollout would pass
+    on a realm nobody looked at the end of.
+    """
+    collected: list = []
+    for page in range(MAX_PAGES):
+        query = urllib.parse.urlencode({"first": page * PAGE_SIZE, "max": PAGE_SIZE})
+        answer = get(f"{base}/admin/realms/{realm}/clients?{query}", access_token)
+        if not isinstance(answer, list):
+            raise SystemExit("read_admin: the admin API did not answer a client list.")
+        collected += answer
+        # A short page is the last page. An exactly-full one is not, even when
+        # it is: one more request answering nothing costs a round trip and
+        # removes the guess.
+        if len(answer) < PAGE_SIZE:
+            return collected
+
+    raise SystemExit(
+        f"read_admin: the realm answered {MAX_PAGES} full pages of clients. "
+        "That is not a realm this gate can judge, and reporting the first "
+        f"{MAX_PAGES * PAGE_SIZE} as though they were all of them is the "
+        "truncated read it exists to refuse.")
 
 
 def fetch(values: dict[str, str]) -> dict:
@@ -149,9 +211,7 @@ def fetch(values: dict[str, str]) -> dict:
     if not isinstance(representation, dict):
         raise SystemExit("read_admin: the admin API did not answer a realm representation.")
 
-    clients = get(f"{base}/admin/realms/{realm}/clients", access)
-    if not isinstance(clients, list):
-        raise SystemExit("read_admin: the admin API did not answer a client list.")
+    every_client = clients(base, realm, access)
 
     # The realm representation carries no `clients` key of its own, so this
     # adds rather than overwrites. Asserting that keeps a future Keycloak
@@ -163,7 +223,7 @@ def fetch(values: dict[str, str]) -> dict:
             "key. Joining the client list would overwrite it, and which of the "
             "two the checker should judge is a decision this file must not "
             "take on its own.")
-    representation["clients"] = clients
+    representation["clients"] = every_client
     return representation
 
 

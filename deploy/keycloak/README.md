@@ -14,7 +14,7 @@ This file is that tree's operational reference, on
 | | |
 |---|---|
 | `realm.yml` | `deploy/compose/keycloak/realm-export.json` — [§14.1](../../docs/backend-architecture/14-local-development.md)'s Compose realm, on every change to it, to `AuthenticationExtensions.cs` or to this tree |
-| `deploy.yml` | the realm a deployment is about to be rolled onto, fetched by `read_admin.py`, before the first step that touches the cluster |
+| `deploy.yml` | the realm a deployment is about to be rolled onto — **derived from the chart**, fetched by `read_admin.py`, and judged before the rollout changes anything |
 
 **One predicate judges both**, because a Keycloak realm export and the admin
 API's `RealmRepresentation` are the same document — the export is that
@@ -66,6 +66,11 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   the next one
   ([#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)).
   What bounds that window is ADR-040's runtime guard, not this tree.
+- **Which realm a *future* rollout will install.** The authority is read from
+  the release as it stands, so a rollout that also changes `identity.authority`
+  checks the realm it is leaving. Nothing here does that — `-f
+  stable-values.yaml` carries the value forward — but a change that started
+  moving authorities would owe this file a second look.
 - **Anything about a cluster.** The deploy half has never run, because
   `deploy.yml` has never reached one and says so in its own header. What has
   been executed is the local half — which is exactly why the local half exists:
@@ -74,13 +79,23 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
 
 ## The credential
 
-`read_admin.py` needs four values and stops naming every one that is missing:
-`KEYCLOAK_BASE_URL` (the **server root**, not the realm's issuer URL),
-`KEYCLOAK_REALM`, `KEYCLOAK_CHECK_CLIENT_ID` and
-`KEYCLOAK_CHECK_CLIENT_SECRET`. They come from the `production` GitHub
-Environment; [`docs/secrets.md`](../../docs/secrets.md) carries how the service
-account is provisioned and rotated, and why it is the one credential here that
-reaches no row of §15.4's table.
+`read_admin.py` needs four values and stops naming every one that is missing,
+and they arrive from two different places on purpose.
+
+**Two are configured.** `KEYCLOAK_CHECK_CLIENT_ID` and
+`KEYCLOAK_CHECK_CLIENT_SECRET` come from the `production` GitHub Environment;
+[`docs/secrets.md`](../../docs/secrets.md) carries how the service account is
+provisioned and rotated, and why it is the one credential here that reaches no
+row of §15.4's table.
+
+**Two are derived, and configuring them would re-open the hole.**
+`KEYCLOAK_BASE_URL` (the **server root**, not the realm's issuer URL) and
+`KEYCLOAK_REALM` are written into `$GITHUB_ENV` by `realm_check.py authority`,
+out of the `identity.authority` the release being rolled is running with. A
+realm named beside the chart rather than out of it is a check that can pass on
+a compliant realm nobody is deploying to.
 
 A base URL that is not `https` is refused: the bearer token that fetch obtains
-can read every client secret in the realm.
+can read every client secret in the realm. So is a redirect — `urllib` carries
+an `Authorization` header onto a redirected request, and the `https` check says
+nothing about where a 302 leads.

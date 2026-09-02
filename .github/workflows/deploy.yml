@@ -174,12 +174,18 @@ jobs:
           TAG: ${{ inputs.tag }}
           WORKLOAD: ${{ inputs.workload }}
 
-      # THE REALM IS CHECKED BEFORE THE CLUSTER IS TOUCHED, and this is the
-      # step #157 asked for. ADR-033's 330-second revocation bound and
+      # THE REALM IS CHECKED BEFORE THE ROLLOUT CHANGES ANYTHING, and this is
+      # the step #157 asked for. ADR-033's 330-second revocation bound and
       # ADR-034's no-refresh-token rule are realm settings, and until ADR-042
       # the only realm anything read was the Compose export -- so both were
       # verified locally and merely stated for the realm every chart actually
       # points at.
+      #
+      # "Before the rollout changes anything" and not "before the cluster is
+      # touched", because the first of these three steps READS the cluster.
+      # The first step that CHANGES it is the HPA patch below, and the
+      # difference is worth the extra words: a read is what makes the check
+      # honest, and a claim that nothing has been contacted would be false.
       #
       # ADR-040 declined a pipeline check on the grounds that one "needs admin
       # credentials in CI", and that objection is answered by WHERE this sits
@@ -190,9 +196,21 @@ jobs:
       # rights and nothing else -- docs/secrets.md carries how it is
       # provisioned and rotated.
       #
-      # It fails closed in every direction: an absent variable, a realm that
-      # cannot be read, a realm that disagrees. A rollout that cannot see its
-      # own realm stops, on the same rule the Prometheus read below follows.
+      # THE REALM READ IS DERIVED FROM THE AUTHORITY THIS ROLLOUT INSTALLS, and
+      # that is not a detail. Two environment variables naming a realm, beside
+      # a chart value naming another, is a gate that passes on a compliant
+      # unrelated realm while every host it deploys is pointed at the
+      # non-compliant one -- which would have closed #157 in the description
+      # and nowhere else. `helm get values` answers what the release is running
+      # with, `-f stable-values.yaml` below reinstalls exactly that, and
+      # `realm_check.py authority` splits its `identity.authority` into the
+      # server root and the realm name. There is no second place to keep in
+      # step, so there is nothing to keep in step.
+      #
+      # It fails closed in every direction: an absent variable, an authority
+      # this gate cannot split, a realm that cannot be read, a realm that
+      # disagrees. A rollout that cannot see its own realm stops, on the same
+      # rule the Prometheus read below follows.
       #
       # The suite runs first here as well as in `realm.yml`, and the repetition
       # is the point: this job runs the gate from the dispatched ref, so the
@@ -200,11 +218,26 @@ jobs:
       - name: The realm gate's negatives
         run: python -m unittest discover -s deploy/keycloak
 
+      # `-o json`, because stdlib parses that and no YAML. The same read
+      # happens again below for the rollout's own `-f` file; it is cheap, and
+      # sharing one file across forty lines of unrelated steps would couple
+      # this check to the order of everything between them.
+      - name: The realm to read is the realm this rollout installs
+        run: |
+          set -euo pipefail
+          helm get values "$WORKLOAD" -n "$NAMESPACE" -o json > "$RUNNER_TEMP/installed.json"
+          python deploy/keycloak/realm_check.py authority \
+            --values "$RUNNER_TEMP/installed.json" >> "$GITHUB_ENV"
+        env:
+          WORKLOAD: ${{ inputs.workload }}
+
       - name: Read the deployed realm
         run: python deploy/keycloak/read_admin.py --out "$RUNNER_TEMP/realm.json"
         env:
-          KEYCLOAK_BASE_URL: ${{ vars.KEYCLOAK_BASE_URL }}
-          KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM }}
+          # KEYCLOAK_BASE_URL and KEYCLOAK_REALM are NOT here. They arrive
+          # through GITHUB_ENV from the step above, derived from the chart
+          # value, and declaring them here would let an Environment variable
+          # override the realm this rollout is actually installing.
           KEYCLOAK_CHECK_CLIENT_ID: ${{ vars.KEYCLOAK_CHECK_CLIENT_ID }}
           KEYCLOAK_CHECK_CLIENT_SECRET: ${{ secrets.KEYCLOAK_CHECK_CLIENT_SECRET }}
 

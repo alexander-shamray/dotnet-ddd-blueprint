@@ -22,6 +22,9 @@ import io
 import json
 import os
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 import unittest
 from pathlib import Path
 
@@ -84,8 +87,13 @@ class TheEnvironment(unittest.TestCase):
                          "https://id.example.com")
 
 
-class TheJoin(unittest.TestCase):
-    """The clients list is added to the realm representation, and never over it."""
+class Stubbed(unittest.TestCase):
+    """The fixture the three classes below share, and no case of its own.
+
+    It was `TheJoin` until `WhatItWrites` subclassed it, which re-ran every one
+    of that class's cases under this one's name — a suite whose count grows
+    without its coverage.
+    """
 
     def setUp(self):
         # Zipped rather than spelled out key by key, for the reason
@@ -104,10 +112,25 @@ class TheJoin(unittest.TestCase):
         read_admin.token = lambda *args: "a-token"
 
     def answers(self, representation, clients):
+        """One realm document and one client list, served the way Keycloak does.
+
+        The client list is PAGED here rather than returned whole, because
+        `read_admin.clients` pages and a stub that ignores `first`/`max` would
+        make the paging untested while looking covered.
+        """
         def get(url: str, _access: str):
-            return clients if url.endswith("/clients") else representation
+            if "/clients" not in url:
+                return representation
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            first = int(query.get("first", ["0"])[0])
+            most = int(query.get("max", [str(read_admin.PAGE_SIZE)])[0])
+            return clients[first:first + most]
 
         read_admin.get = get
+
+
+class TheJoin(Stubbed):
+    """The clients list is added to the realm representation, and never over it."""
 
     def test_the_two_documents_join_into_one_export_shape(self):
         self.answers({"realm": "commerce", "accessTokenLifespan": 300},
@@ -130,13 +153,71 @@ class TheJoin(unittest.TestCase):
         self.assertIn("realm representation", str(stop.exception))
 
     def test_a_clients_answer_that_is_not_a_list_stops(self):
-        self.answers({"realm": "commerce"}, {"clientId": "web-app"})
+        read_admin.get = lambda url, _a: ({"clientId": "web-app"}
+                                          if "/clients" in url else {"realm": "commerce"})
         with self.assertRaises(SystemExit) as stop:
             read_admin.fetch(self.values)
         self.assertIn("client list", str(stop.exception))
 
 
-class WhatItWrites(TheJoin):
+class ThePaging(Stubbed):
+    """Every client, and not the first page of them.
+
+    A client past the first page can enable the implicit flow or override the
+    token lifetime, and with `web-app` on page one the rollout would pass on a
+    realm nobody looked at the end of.
+    """
+
+    def realm_of(self, count: int) -> list:
+        return [{"clientId": f"client-{n}"} for n in range(count)]
+
+    def test_a_client_past_the_first_page_is_still_read(self):
+        every = self.realm_of(read_admin.PAGE_SIZE + 7)
+        self.answers({"realm": "commerce"}, every)
+        fetched = read_admin.fetch(self.values)["clients"]
+        self.assertEqual(len(fetched), len(every))
+        self.assertEqual(fetched[-1]["clientId"], f"client-{read_admin.PAGE_SIZE + 6}")
+
+    def test_an_exactly_full_page_is_not_assumed_to_be_the_last(self):
+        """The boundary that a `len(page) == max` shortcut gets wrong."""
+        every = self.realm_of(read_admin.PAGE_SIZE)
+        self.answers({"realm": "commerce"}, every)
+        self.assertEqual(len(read_admin.fetch(self.values)["clients"]), read_admin.PAGE_SIZE)
+
+    def test_a_realm_that_never_returns_a_short_page_stops(self):
+        """A server paging forever is not a realm to report the start of."""
+        read_admin.get = lambda url, _a: (
+            [{"clientId": "x"}] * read_admin.PAGE_SIZE if "/clients" in url
+            else {"realm": "commerce"})
+        with self.assertRaises(SystemExit) as stop:
+            read_admin.fetch(self.values)
+        self.assertIn("full pages", str(stop.exception))
+
+
+class TheRedirect(unittest.TestCase):
+    """A redirect is refused, because `urllib` carries the credential onto it."""
+
+    def test_the_opener_refuses_to_follow_one(self):
+        handler = read_admin.NoRedirects()
+        with self.assertRaises(urllib.error.HTTPError) as refused:
+            handler.redirect_request(
+                urllib.request.Request("https://id.example.com/admin/realms/commerce"),
+                None, 302, "Found", {}, "https://elsewhere.example.com/")
+        self.assertIn("elsewhere.example.com", str(refused.exception))
+
+    def test_the_opener_this_file_uses_carries_the_refusal(self):
+        """The subject test: it is the OPENER every call goes through that matters.
+
+        A handler nothing installs refuses nothing, and `urlopen` — the call
+        this file used to make — follows redirects with the default opener
+        whatever this module defines.
+        """
+        self.assertTrue(
+            any(isinstance(h, read_admin.NoRedirects) for h in read_admin.OPENER.handlers),
+            read_admin.OPENER.handlers)
+
+
+class WhatItWrites(Stubbed):
     """The seam: the file `--out` writes is a file the deploy-time check reads.
 
     It meets here and nowhere else in either suite, so this case drives
@@ -208,7 +289,7 @@ class WhatItWrites(TheJoin):
         self.assertIn("accessTokenLifespan", found[0])
 
 
-class TheRealmSegmentIsEscaped(TheJoin):
+class TheRealmSegmentIsEscaped(Stubbed):
     """`/` in a realm name must not change which realm is read."""
 
     def test_a_traversal_in_the_realm_name_does_not_reach_another_realm(self):
@@ -216,7 +297,7 @@ class TheRealmSegmentIsEscaped(TheJoin):
 
         def get(url: str, _access: str):
             seen.append(url)
-            return [] if url.endswith("/clients") else {"realm": "commerce"}
+            return [] if "/clients" in url else {"realm": "commerce"}
 
         read_admin.get = get
         self.values[read_admin.REALM] = "commerce/../master"

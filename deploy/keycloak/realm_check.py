@@ -104,6 +104,32 @@ LOCAL = "local"
 DEPLOYED = "deployed"
 KINDS = (LOCAL, DEPLOYED)
 
+# The chart value that decides which realm every host validates against, and
+# the two environment variables `read_admin.py` reads. `authority` derives the
+# second pair from the first so the two cannot name different realms: a
+# rollout that checked realm A and installed realm B would pass this gate and
+# leave the workload pointed at the realm it was filed about.
+AUTHORITY_VALUE = ("identity", "authority")
+REALMS_SEGMENT = "/realms/"
+
+# The environment `read_admin.py` reads, declared HERE and imported there —
+# `deploy/canary`'s direction, where `read_prometheus.py` imports from
+# `canary.py` and never the reverse. Two of these four are what `authority`
+# writes, so the names have to be one statement or the writer and the reader
+# drift; and a name spelled in the fetcher and again in the writer is that
+# drift with a file boundary through the middle of it.
+#
+# Named in a tuple and unpacked, on read_admin.py's own reasoning: a
+# credential-shaped constant assigned a literal is the shape §15.1's secret
+# scan exists to catch, and these hold variable names and never values.
+ENVIRONMENT = (
+    "KEYCLOAK_BASE_URL",
+    "KEYCLOAK_REALM",
+    "KEYCLOAK_CHECK_CLIENT_ID",
+    "KEYCLOAK_CHECK_CLIENT_SECRET",
+)
+BASE_URL_VARIABLE, REALM_VARIABLE = ENVIRONMENT[0], ENVIRONMENT[1]
+
 # Every flag this gate reads, and it reads no other. Keycloak serialises these
 # as JSON booleans in both an export and an admin-API answer, so anything else
 # is a hand-edited realm — and `check_flags_are_booleans` refuses one rather
@@ -149,6 +175,69 @@ def read_access_token_lifetime(root: Path = ROOT) -> int:
             "owes is read from that declaration, so this gate cannot say what "
             "the realm owes and must not report a pass.")
     return int(matches[0])
+
+
+def authority_of(values: dict) -> str:
+    """`identity.authority` out of a release's own values, or a stop.
+
+    The subject is `helm get values <release> -o json`, which answers what the
+    running release was installed with — and what `-f stable-values.yaml`
+    reinstalls two steps later. So the realm this gate reads is the realm the
+    rollout is about to point every host at, by construction rather than by two
+    variables somebody keeps in step.
+    """
+    node: object = values
+    for key in AUTHORITY_VALUE:
+        if not isinstance(node, dict) or key not in node:
+            path = ".".join(AUTHORITY_VALUE)
+            raise SystemExit(
+                f"realm-gate: the release's values carry no {path}. Every chart "
+                "requires it (§15.4), so a release without one is a release "
+                "this gate cannot check rather than one that passes.")
+        node = node[key]
+
+    if not isinstance(node, str) or not node.strip():
+        raise SystemExit(
+            f"realm-gate: identity.authority is {node!r}, which names no realm.")
+    return node.strip()
+
+
+def split_authority(authority: str) -> tuple[str, str]:
+    """An OIDC authority into the server root and the realm name.
+
+    Keycloak's admin endpoints sit *beside* `/realms` rather than under it, so
+    the two halves are what `read_admin.py` needs and neither is the authority.
+
+    It refuses rather than guesses in four directions, and each one is a realm
+    this gate would otherwise read wrongly: plain HTTP, because the token it
+    obtains can read every client secret in the realm; a URL carrying a query
+    or a fragment, because an admin path appended to one lands inside it; an
+    authority with no `/realms/<name>` segment, because Keycloak's admin API is
+    not reachable from a root this gate cannot locate; and a realm name with a
+    further `/` in it, which is the traversal `read_admin.py` escapes and this
+    refuses outright.
+    """
+    if not authority.startswith("https://"):
+        raise SystemExit(
+            f"realm-gate: identity.authority is {authority!r}. The admin API "
+            "carries a bearer token that can read every client secret in the "
+            "realm, so it is https or nothing.")
+    if "?" in authority or "#" in authority:
+        raise SystemExit(
+            f"realm-gate: identity.authority is {authority!r}. An admin path "
+            "appended to a URL carrying a query or a fragment lands inside it.")
+
+    root, separator, realm = authority.rstrip("/").partition(REALMS_SEGMENT)
+    if not separator or not realm:
+        raise SystemExit(
+            f"realm-gate: identity.authority is {authority!r}, which has no "
+            f"{REALMS_SEGMENT}<name> segment. Keycloak's admin endpoints sit "
+            "beside that segment, so this gate cannot say where to read.")
+    if "/" in realm:
+        raise SystemExit(
+            f"realm-gate: the realm in {authority!r} is {realm!r}, which is not "
+            "a single path segment.")
+    return root, realm
 
 
 def clients_of(realm: dict) -> list[dict]:
@@ -373,14 +462,15 @@ def check_source_inputs_covers_reads() -> list[str]:
     # fix: `access.token.lifespan` is a dotted bare word too, and this file is
     # full of them. So the second scan looks at how a path is *used*: joining
     # the repository root with a constant names a read, whatever it looks like.
-    # COMMENT LINES ARE NOT CODE, and this scan reads its own source. Without
-    # the strip, the sentence above describing the pattern satisfies it, and
-    # the check reports a read of a path nothing opens — a self-check that
-    # fails on its own documentation is one somebody deletes.
+    # COMMENT LINES ARE NOT CODE, and BOTH scans read the stripped copy. Only
+    # one of them did in the first draft, which is this file's own lesson
+    # arriving inside the fix for it: without the strip, a path named in a `#`
+    # comment is reported as a read of something nothing opens, and a
+    # self-check that fails on its own documentation is one somebody deletes.
     code = "\n".join(
         line for line in source.splitlines() if not line.lstrip().startswith("#"))
 
-    quoted = set(re.findall(PATH_LITERAL, source))
+    quoted = set(re.findall(PATH_LITERAL, code))
     # A dot is an ordinary character in a path segment, because `Common.Web` is
     # a directory. An earlier form allowed one only at the start of a segment,
     # which quietly matched nothing in the one read this gate most depends on —
@@ -496,7 +586,29 @@ def main(argv: list[str]) -> int:
 
     commands.add_parser("inputs", help="this gate's reads against its workflow's triggers")
 
+    authority = commands.add_parser(
+        "authority", help="the realm to read, derived from the release's own values")
+    authority.add_argument("--values", required=True, type=Path,
+                           help="`helm get values <release> -o json` for the release being rolled")
+
     args = parser.parse_args(argv[1:])
+
+    if args.command == "authority":
+        try:
+            document = json.loads(args.values.read_text(encoding="utf-8"))
+        except OSError as error:
+            raise SystemExit(f"realm-gate: {args.values} is not readable: {error}") from error
+        except json.JSONDecodeError as error:
+            raise SystemExit(f"realm-gate: {args.values} is not JSON: {error}") from error
+        if not isinstance(document, dict):
+            raise SystemExit(f"realm-gate: {args.values} is not a values document")
+
+        root, realm = split_authority(authority_of(document))
+        # Two `NAME=value` lines, for `>> $GITHUB_ENV`. Nothing else goes to
+        # stdout on this path, because anything else would be read as one.
+        print(f"{BASE_URL_VARIABLE}={root}")
+        print(f"{REALM_VARIABLE}={realm}")
+        return 0
 
     if args.command == "inputs":
         problems = check_source_inputs_covers_reads() + check_workflow_covers_inputs()
