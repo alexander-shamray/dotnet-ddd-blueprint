@@ -465,6 +465,65 @@ class TheDeclaredInputs(unittest.TestCase):
         """The other direction, over this gate's own source."""
         self.assertEqual(realm_check.check_source_inputs_covers_reads(), [])
 
+    def test_the_chart_values_the_suite_reads_are_seen_by_the_scan(self):
+        """Removing one entry must name that entry, not merely fail.
+
+        `CHART_VALUES` is read by a sibling module as `root /
+        realm_check.CHART_VALUES`, and an unqualified `ROOT / NAME` pattern
+        could not see it — so the entry passed on its own declaration and
+        pointing the read at another tree would have gone unnoticed. This
+        removes exactly that entry and demands the scan says so.
+        """
+        original = list(realm_check.SOURCE_INPUTS)
+        self.addCleanup(lambda: setattr(realm_check, "SOURCE_INPUTS", original))
+        realm_check.SOURCE_INPUTS = [e for e in original if e != realm_check.CHART_VALUES]
+        found = realm_check.check_source_inputs_covers_reads()
+        self.assertTrue(any(realm_check.CHART_VALUES in problem for problem in found), found)
+
+    # THE FIXTURES BELOW ASSEMBLE THEIR PATHS RATHER THAN SPELLING THEM.
+    # This module is one of the sources the scan reads, so a path literal
+    # written here is a read of that path as far as the scan is concerned —
+    # the first draft of these two cases made `realm_check.py inputs`
+    # report three problems against the repository, which is the same
+    # collision one layer further out.
+    SEPARATOR = '/'
+
+    def fixture(self, *lines: str) -> str:
+        return "\n".join(lines)
+
+    def test_a_path_named_only_in_prose_is_not_a_read(self):
+        """The failure this tree has had three times, tested rather than reworded.
+
+        A comment or a docstring explaining what the scan looks for
+        satisfies the scan, so the check fails on its own documentation —
+        and the fix that lasts is stripping prose, not choosing different
+        words.
+        """
+        real = self.SEPARATOR.join(
+            ["src", "BuildingBlocks", "Common.Web", "Authentication.cs"])
+        prose = self.SEPARATOR.join(["deploy", "nowhere", "absent.json"])
+        commented = self.SEPARATOR.join(["deploy", "nowhere", "other.json"])
+        joined = "ROOT " + self.SEPARATOR + " MISSING"
+        code = realm_check.code_of(self.fixture(
+            f'X = \"{real}\"',
+            'def f():',
+            f'    """Prose naming {prose} and {joined}."""',
+            f'    # A comment naming {commented} too',
+            '    return 1'))
+        self.assertIn(real, code)
+        self.assertNotIn(prose, code)
+        self.assertNotIn(commented, code)
+        self.assertNotIn("MISSING", code)
+
+    def test_a_docstring_closed_on_its_opening_line_keeps_the_code_after_it(self):
+        """A one-line docstring toggles twice, so what follows survives."""
+        kept = self.SEPARATOR.join(["deploy", "keycloak", "x.json"])
+        code = realm_check.code_of(self.fixture(
+            'def f():',
+            '    """One line."""',
+            f'    Y = \"{kept}\"'))
+        self.assertIn(kept, code)
+
     def test_an_undeclared_read_is_caught(self):
         """Emptying the declaration must fail, or the check is reading its own copy."""
         original = list(realm_check.SOURCE_INPUTS)
@@ -524,6 +583,23 @@ class TheTrustedOrigin(unittest.TestCase):
             self.run_authority("https://id.example.com.attacker.example/realms/x",
                                "https://id.example.com")
         self.assertIn("Refusing", str(stop.exception))
+
+    def test_the_written_values_are_checked_again_before_they_are_printed(self):
+        """The second-line defence against `$GITHUB_ENV` injection.
+
+        `split_authority` refuses whitespace, so this guard cannot fire through
+        the ordinary path — which is exactly why it needs a test of its own. A
+        refactor that relaxed the input-side refusal would otherwise move the
+        guarantee out of sight with the suite green.
+        """
+        original = realm_check.split_authority
+        self.addCleanup(lambda: setattr(realm_check, "split_authority", original))
+        realm_check.split_authority = lambda _authority: (
+            "https://id.example.com", "com\nSOME_VAR=x")
+        with self.assertRaises(SystemExit) as stop:
+            self.run_authority("https://id.example.com/realms/commerce",
+                               "https://id.example.com")
+        self.assertIn("refusing to write", str(stop.exception))
 
     def test_a_path_under_the_trusted_origin_is_not_the_trusted_origin(self):
         """`/auth/realms/x` is a different root, and this refuses rather than trims."""
@@ -622,18 +698,47 @@ class TheAuthorityDecidesWhichRealmIsRead(unittest.TestCase):
         import re
         from pathlib import Path
 
+        # `realm_check.CHART_VALUES`, NOT a `"deploy" / "helm"` spelled here.
+        # The declared-inputs scan looks for path literals, and a join of two
+        # bare segments is invisible to it — so this read would have been
+        # undeclared while the constant that declares it sat unused.
         root = Path(realm_check.__file__).resolve().parents[2]
-        found = []
-        for values in sorted((root / "deploy" / "helm").glob("*/values.yaml")):
+        charts = sorted((root / realm_check.CHART_VALUES).glob("*/values.yaml"))
+        self.assertTrue(charts, "no chart values found under " + realm_check.CHART_VALUES)
+
+        # ANCHORED TO `identity:`, because that is the key path the deploy
+        # step walks. An unanchored `authority:` matches a chart that renamed
+        # the parent, which is exactly the change that would stop a rollout
+        # with this test green.
+        pattern = re.compile(
+            r"^identity:\s*$(?:\n(?![A-Za-z])[^\n]*)*?\n\s+authority:\s*(\S+)\s*$",
+            re.MULTILINE)
+        # EVERY DEPLOYABLE CHART, and the set is derived rather than taken
+        # from what still mentions an authority. Scoping by "mentions one"
+        # excuses the chart that stopped mentioning one, which is the removal
+        # this is for; scoping by "declares identity:" excuses the chart that
+        # renamed the parent. The deployables are `deploy/helm/smoke.sh`'s
+        # classification — every directory with a `Chart.yaml`, less the
+        # library chart and the umbrella, which render no workload of their own.
+        deployables = sorted(
+            v for v in charts
+            if v.parent.name not in ("common", "platform")
+            and (v.parent / "Chart.yaml").exists())
+        self.assertTrue(deployables, "no deployable chart found")
+
+        declared = 0
+        for values in deployables:
             text = values.read_text(encoding="utf-8")
-            match = re.search(r"^\s*authority:\s*(\S+)\s*$", text, re.MULTILINE)
-            if match:
-                found.append((values.name, match.group(1)))
-        self.assertTrue(found, "no chart declares identity.authority")
-        for name, authority in found:
-            root_url, realm = realm_check.split_authority(authority)
-            self.assertTrue(root_url.startswith("https://"), name)
-            self.assertTrue(realm, name)
+            match = pattern.search(text)
+            self.assertIsNotNone(
+                match, f"{values.parent.name} declares an authority that is not "
+                       "under an `identity:` key, which is the path "
+                       "realm_check.authority_of walks")
+            declared += 1
+            # `split_authority` refuses a bad shape by raising, which is the
+            # assertion. Calling it is the test.
+            realm_check.split_authority(match.group(1))
+        self.assertTrue(declared, "no chart declares identity.authority")
 
 
 class TheRealmIsLoaded(unittest.TestCase):

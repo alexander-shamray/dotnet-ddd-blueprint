@@ -22,6 +22,7 @@ import io
 import json
 import os
 import tempfile
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -179,10 +180,27 @@ class ThePaging(Stubbed):
         self.assertEqual(fetched[-1]["clientId"], f"client-{read_admin.PAGE_SIZE + 6}")
 
     def test_an_exactly_full_page_is_not_assumed_to_be_the_last(self):
-        """The boundary a `len(page) == max` shortcut gets wrong."""
-        every = self.realm_of(read_admin.PAGE_SIZE)
-        self.answers({"realm": "commerce"}, every)
-        self.assertEqual(len(read_admin.fetch(self.values)["clients"]), read_admin.PAGE_SIZE)
+        """The boundary a `len(page) == max` shortcut gets wrong.
+
+        Asserting the OFFSETS REQUESTED rather than the count returned, because
+        every terminating condition — right or wrong — returns a hundred
+        clients here. What tells them apart is whether a second request was
+        made at all.
+        """
+        served = []
+
+        def get(url: str, _access: str):
+            if "/clients" not in url:
+                return {"realm": "commerce"}
+            first = int(urllib.parse.parse_qs(
+                urllib.parse.urlsplit(url).query).get("first", ["0"])[0])
+            served.append(first)
+            return self.realm_of(read_admin.PAGE_SIZE) if first == 0 else []
+
+        read_admin.get = get
+        fetched = read_admin.fetch(self.values)["clients"]
+        self.assertEqual(len(fetched), read_admin.PAGE_SIZE)
+        self.assertEqual(served, [0, read_admin.PAGE_SIZE, read_admin.PAGE_SIZE * 2])
 
     def test_a_short_page_is_not_the_last_page_either(self):
         """Keycloak drops representations it cannot render, mid-list.
@@ -210,16 +228,43 @@ class ThePaging(Stubbed):
         read_admin.get = get
         fetched = read_admin.fetch(self.values)["clients"]
         self.assertIn("implicit-flow-client", [c["clientId"] for c in fetched])
-        self.assertEqual(served, [0, read_admin.PAGE_SIZE, read_admin.PAGE_SIZE * 2])
+        # Four requests, not three: the loop stops on the SECOND empty page,
+        # because on this function's own premise a whole page of clients this
+        # account cannot view answers empty with more behind it.
+        self.assertEqual(served, [0, read_admin.PAGE_SIZE,
+                                  read_admin.PAGE_SIZE * 2, read_admin.PAGE_SIZE * 3])
 
-    def test_a_realm_that_never_returns_an_empty_page_stops(self):
+    def test_a_single_empty_page_is_not_the_end(self):
+        """The hole the first-empty-page rule left, one page-size coarser.
+
+        A run of clients this account cannot view can fill a whole page, so an
+        empty page in the middle of a realm looks exactly like the end of one.
+        Two consecutive empty pages is a bound rather than a proof, and the
+        residual is stated in `README.md`.
+        """
+        def get(url: str, _access: str):
+            if "/clients" not in url:
+                return {"realm": "commerce"}
+            first = int(urllib.parse.parse_qs(
+                urllib.parse.urlsplit(url).query).get("first", ["0"])[0])
+            if first == read_admin.PAGE_SIZE:
+                return []          # a page of clients this account cannot see
+            if first == read_admin.PAGE_SIZE * 2:
+                return [{"clientId": "past-the-invisible-page"}]
+            return [] if first else self.realm_of(read_admin.PAGE_SIZE)
+
+        read_admin.get = get
+        fetched = read_admin.fetch(self.values)["clients"]
+        self.assertIn("past-the-invisible-page", [c["clientId"] for c in fetched])
+
+    def test_a_realm_that_never_returns_two_empty_pages_stops(self):
         """A server paging forever is not a realm to report the start of."""
         read_admin.get = lambda url, _a: (
             [{"clientId": "x"}] * read_admin.PAGE_SIZE if "/clients" in url
             else {"realm": "commerce"})
         with self.assertRaises(SystemExit) as stop:
             read_admin.fetch(self.values)
-        self.assertIn("without an empty one", str(stop.exception))
+        self.assertIn("without two empty ones", str(stop.exception))
 
 
 class TheRedirect(unittest.TestCase):
@@ -234,15 +279,26 @@ class TheRedirect(unittest.TestCase):
         self.assertIn("elsewhere.example.com", str(refused.exception))
 
     def test_the_opener_this_file_uses_carries_the_refusal(self):
-        """The subject test: it is the OPENER every call goes through that matters.
-
-        A handler nothing installs refuses nothing, and `urlopen` — the call
-        this file used to make — follows redirects with the default opener
-        whatever this module defines.
-        """
+        """A handler nothing installs refuses nothing."""
         self.assertTrue(
             any(isinstance(h, read_admin.NoRedirects) for h in read_admin.OPENER.handlers),
             read_admin.OPENER.handlers)
+
+    def test_every_network_call_in_the_file_goes_through_that_opener(self):
+        """The subject test, and the assertion above is not it.
+
+        `OPENER` carrying the refusal proves nothing about whether anything
+        uses it: changing either call site back to `urllib.request.urlopen`
+        leaves the handler installed on an opener nothing opens, and the
+        credential follows a 302 again with the suite green. Every other case
+        in this file replaces `read_admin.get` and `read_admin.token` wholesale,
+        so no test reaches the real call sites — which is why this one reads
+        the source.
+        """
+        source = Path(read_admin.__file__).read_text(encoding="utf-8")
+        opened = re.findall(r"^\s+with (\S+)\.open\(", source, re.MULTILINE)
+        self.assertEqual(opened, ["OPENER", "OPENER"], source)
+        self.assertNotIn("urllib.request.urlopen(", source)
 
 
 class WhatItWrites(Stubbed):

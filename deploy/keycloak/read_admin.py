@@ -53,6 +53,7 @@ from pathlib import Path
 # the four are what `realm_check.py authority` writes into `$GITHUB_ENV`, and a
 # writer and a reader spelling a variable separately agree right up until one
 # of them is edited.
+import realm_check
 from realm_check import ENVIRONMENT as REQUIRED
 
 # The first of the four is the SERVER ROOT and not the realm's issuer URL — the
@@ -182,24 +183,33 @@ def clients(base: str, realm: str, access_token: str) -> list:
     on a realm nobody looked at the end of.
     """
     collected: list = []
+    empty = 0
     for page in range(MAX_PAGES):
         query = urllib.parse.urlencode({"first": page * PAGE_SIZE, "max": PAGE_SIZE})
         answer = get(f"{base}/admin/realms/{realm}/clients?{query}", access_token)
         if not isinstance(answer, list):
             raise SystemExit("read_admin: the admin API did not answer a client list.")
         collected += answer
-        # AN EMPTY PAGE IS THE LAST PAGE, AND A SHORT ONE IS NOT. Keycloak
-        # pages client *models* and then drops representations it cannot
-        # render, so a page of 100 models can answer 99 entries with more
-        # clients behind it — and stopping there is a realm whose tail is
-        # unjudged, which is the vacuous read this tree refuses. One extra
-        # request answering nothing is what the certainty costs.
-        if not answer:
+        # TWO CONSECUTIVE EMPTY PAGES, AND NEITHER A SHORT ONE NOR A SINGLE
+        # EMPTY ONE. Keycloak pages client *models* and drops representations
+        # it cannot render afterwards, so a page of 100 models can answer 99
+        # entries with more clients behind it — and on the same premise it can
+        # answer NONE, when a run of clients this account cannot view happens
+        # to fill a page. Stopping at the first empty page is that hole one
+        # page-size coarser.
+        #
+        # Two is a bound and not a proof, and the residual is stated in
+        # `README.md`: nothing here distinguishes "the end" from "a run of
+        # invisible clients longer than two pages". What closes it is the
+        # service account's rights, which is why `docs/secrets.md` specifies
+        # realm-read rather than a narrower grant.
+        empty = 0 if answer else empty + 1
+        if empty == 2:
             return collected
 
     raise SystemExit(
         f"read_admin: the realm answered {MAX_PAGES} pages of clients without "
-        "an empty one. That is not a realm this gate can judge, and reporting "
+        "two empty ones. That is not a realm this gate can judge, and reporting "
         f"the first {MAX_PAGES * PAGE_SIZE} as though they were all of them is "
         "the truncated read it exists to refuse.")
 
@@ -227,7 +237,14 @@ def fetch(values: dict[str, str]) -> dict:
             "two the checker should judge is a decision this file must not "
             "take on its own.")
     representation["clients"] = every_client
-    return representation
+
+    # REDACTED BEFORE IT IS WRITTEN, not only before it is judged. The admin
+    # API answers a `secret` for every confidential client, and this file's
+    # output is a file on a CI runner that a later step reads and an operator
+    # may print. `realm_check.load_realm` redacts again on the way in, and the
+    # repetition is deliberate: neither file may be the only one that does it,
+    # because either can be handed a document the other never touched.
+    return realm_check.redact(representation)
 
 
 def main(argv: list[str]) -> int:

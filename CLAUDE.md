@@ -783,6 +783,30 @@ to reach both, and the guide is the master copy.
   everything else here — if the body's `## Severity` section and the label
   disagree, one of them is a bug report against the other, and the fix is not
   finished until both say it.
+- **A reply is not a resolution, and the thread stays open until you resolve
+  it.** `/review-copilot` carries the mechanics — the helper, the GraphQL
+  mutation, and the rule that an `Ask` is left open on purpose — and what
+  belongs here is that the obligation does not come from the command. It comes
+  from having acted. **Triage by hand skips no step**: a session that reads the
+  comments itself, fixes them and answers each one has done everything except
+  the part a reviewer can see, and a PR whose threads all read "unresolved"
+  looks exactly like a PR nobody answered. Measured, and this is why the bullet
+  exists: seven threads across two review rounds were replied to and fixed, and
+  not one of them was resolved until the repository owner asked. **Resolve in
+  the same act as the reply** — the reply says what you did, the resolution
+  says it is finished, and only the second one is legible from the pull request
+  list.
+- **A CodeQL alert is a defect in the pull request that raised it, and it is
+  fixed there.** Not deferred to an issue, not dismissed as a false positive
+  without reading the flow it reports: the alert names a source, a sink and a
+  path between them, and the answer is either a change that breaks the path or
+  a stated reason the path cannot be taken. **Prefer breaking it structurally
+  over policing the sink** — the alert that produced this rule was a realm
+  document flowing into a `print`, and the fix was to redact the credential at
+  the door rather than to remember, at every future message, not to format a
+  client. A dismissal is a decision like any other here: it goes in the commit
+  body with its argument, and a PR that leaves an alert neither fixed nor
+  argued is not finished.
 - **Uncommitted work in the tree belongs in the PR being worked on.** When a
   change appears that nobody in the current task wrote — an edit made directly
   by the repo owner, most often — it is not stray churn to be reverted or left

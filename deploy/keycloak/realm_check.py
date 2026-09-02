@@ -94,7 +94,12 @@ OWN_TREE = "deploy/keycloak"
 # with a module constant. `check_source_inputs_covers_reads` needs both; the
 # argument for two scans is there rather than here.
 PATH_LITERAL = r'"((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+)"'
-ROOT_USE = r"(?:^|[^A-Za-z0-9_.])(?:ROOT|root)\s*/\s*([A-Z_][A-Z0-9_]*)"
+# `root / CONSTANT` and `root / module.CONSTANT` alike. The qualified form is
+# how a SIBLING module names one of this file's paths — which is the shape the
+# suite uses, and which the unqualified pattern could not see: the entry it
+# needs was passing on the strength of its own declaration rather than on a
+# read anything had found.
+ROOT_USE = r"(?:^|[^A-Za-z0-9_.])(?:ROOT|root)\s*/\s*(?:[a-z_][A-Za-z0-9_]*\.)?([A-Z_][A-Z0-9_]*)"
 
 # The two triggers `realm.yml` must carry, named so a failure can say which.
 TRIGGERS = ("pull_request", "push")
@@ -106,6 +111,24 @@ TRIGGERS = ("pull_request", "push")
 # below — a subject derived from the predicate passes vacuously the moment the
 # predicate is what has gone wrong.
 BROWSER_CLIENT = "web-app"
+
+# A REALM REPRESENTATION CARRIES EVERY CONFIDENTIAL CLIENT'S SECRET, and this
+# gate needs none of them. The admin API answers `secret` for each such client
+# to a caller with realm-read rights, §14.1's own export carries one, and this
+# file's business is flags, lifespans and attribute values — so the credential
+# is removed at the door rather than avoided by every message downstream.
+#
+# The alternative was to police the *messages*, which is the shape that fails:
+# nothing stops the next check from formatting a client dict, and CodeQL was
+# right to read a document holding a `secret` key flowing into a print as a
+# clear-text log. Redacting at load makes the property structural — there is no
+# secret in the object at all — rather than a rule every future author must
+# remember.
+CREDENTIAL_KEYS = frozenset({
+    "secret", "password", "value", "privateKey", "publicKey", "certificate",
+    "bindCredential", "clientSecret", "adminPassword",
+})
+REDACTED = "<redacted by realm_check>"
 
 LOCAL = "local"
 DEPLOYED = "deployed"
@@ -182,6 +205,28 @@ def read_access_token_lifetime(root: Path = ROOT) -> int:
             "owes is read from that declaration, so this gate cannot say what "
             "the realm owes and must not report a pass.")
     return int(matches[0])
+
+
+def redact(node: object) -> object:
+    """The same document with every credential-shaped value replaced.
+
+    Recursive over objects and arrays, because a realm nests them — a client's
+    `secret`, a user's `credentials[].value`, an LDAP component's
+    `bindCredential`. The KEY decides, not the value, so nothing here has to
+    guess what a secret looks like.
+
+    `value` is in the set and it is the one that costs something: it is a
+    generic name, and any `value` key anywhere in a realm is redacted whether
+    it held a credential or not. That is the right way round for a document
+    this gate only reads flags out of, and it is stated rather than left to be
+    discovered by a reader wondering where a field went.
+    """
+    if isinstance(node, dict):
+        return {key: (REDACTED if key in CREDENTIAL_KEYS else redact(value))
+                for key, value in node.items()}
+    if isinstance(node, list):
+        return [redact(item) for item in node]
+    return node
 
 
 def authority_of(values: dict) -> str:
@@ -456,11 +501,51 @@ def check_browser_client(client: dict, kind: str) -> list[str]:
     return problems
 
 
-def check_source_inputs_covers_reads() -> list[str]:
-    """Every path this file reads is covered by a SOURCE_INPUTS entry.
+def code_of(source: str) -> str:
+    """The source with its comments and its string paragraphs removed.
 
-    Grepping its own source, because the list and the reads drift the moment a
-    check grows a second input. `SOURCE_INPUTS` is the Helm tree's, and this
+    **Three times now, a matcher in this tree has matched the prose about
+    the matcher.** A `#` line describing the pattern satisfied it, and a
+    docstring saying an earlier form could not see a root-joined name was
+    then read as a read of one. Rewording is a fix that lasts until the
+    next sentence, so the scans are given code rather than a file.
+
+    Two shapes, and the second was missed on the first attempt. A span
+    that OPENS AND CLOSES ON ONE LINE leaves an even delimiter count, so a
+    toggle alone keeps it — and a one-line docstring holds prose exactly
+    as a paragraph does. Inline spans are removed first, which leaves any
+    remaining delimiter as a genuine opener or closer for the toggle.
+
+    A regex rather than an `ast` walk, deliberately: what has to disappear
+    is every string written as prose, and `ast` would find only the ones in
+    a docstring position.
+    """
+    inline = re.compile(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'')
+    kept: list[str] = []
+    inside = False
+    for raw in source.splitlines():
+        line = raw if inside else inline.sub("", raw)
+        delimiters = line.count('"""') + line.count("'''")
+        if inside:
+            if delimiters % 2:
+                inside = False
+            continue
+        if delimiters % 2:
+            inside = True
+            continue
+        if line.lstrip().startswith("#"):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def check_source_inputs_covers_reads() -> list[str]:
+    """Every path this TREE reads is covered by a SOURCE_INPUTS entry.
+
+    The tree and not this file: what the workflow triggers on is a change to
+    anything `deploy/keycloak` reads, and the suite reads a chart value this
+    module never opens. Grepping the sources, because the list and the reads
+    drift the moment a check grows a second input. `SOURCE_INPUTS` is the Helm tree's, and this
     direction is what every copy of it was found to owe after `canary.py`
     declared two paths and opened three — adopted here rather than re-learned,
     and `docs/lessons.md` carries the measurement.
@@ -491,13 +576,12 @@ def check_source_inputs_covers_reads() -> list[str]:
     # fix: `access.token.lifespan` is a dotted bare word too, and this file is
     # full of them. So the second scan looks at how a path is *used*: joining
     # the repository root with a constant names a read, whatever it looks like.
-    # COMMENT LINES ARE NOT CODE, and BOTH scans read the stripped copy. Only
-    # one of them did in the first draft, which is this file's own lesson
-    # arriving inside the fix for it: without the strip, a path named in a `#`
-    # comment is reported as a read of something nothing opens, and a
-    # self-check that fails on its own documentation is one somebody deletes.
-    code = "\n".join(
-        line for line in source.splitlines() if not line.lstrip().startswith("#"))
+    # PROSE IS NOT CODE, and both scans read the stripped copy. Only one of
+    # them did in the first draft, and the strip covered only `#` lines in
+    # the second -- each time the documentation of a pattern satisfied it,
+    # and a self-check that fails on its own explanation is one somebody
+    # deletes.
+    code = code_of(source)
 
     quoted = set(re.findall(PATH_LITERAL, code))
     # A dot is an ordinary character in a path segment, because `Common.Web` is
@@ -532,8 +616,8 @@ def check_source_inputs_covers_reads() -> list[str]:
     if not reads:
         return problems + [
             "the self-check found no path literal and no root-joined constant "
-            "in this file, so it is the scan that is broken rather than the "
-            "list that is complete"
+            "anywhere in deploy/keycloak, so it is the scan that is broken "
+            "rather than the list that is complete"
         ]
 
     for read in sorted(reads):
@@ -597,7 +681,11 @@ def load_realm(path: Path) -> dict:
         raise SystemExit(f"realm-gate: {path} is not JSON: {error}") from error
     if not isinstance(document, dict):
         raise SystemExit(f"realm-gate: {path} is not a realm representation")
-    return document
+
+    # BEFORE ANYTHING ELSE HOLDS IT. Every caller of this function reaches a
+    # `print` eventually, and the one thing that must never reach one is a
+    # credential — so the redaction is here rather than at each of them.
+    return redact(document)
 
 
 def fail(problems: list[str], subject: str) -> int:
@@ -654,8 +742,12 @@ def main(argv: list[str]) -> int:
         # and the two are required to agree: a release pointed at an identity
         # provider this deployment does not trust stops the rollout rather than
         # authenticating to it.
+        # BOTH SIDES ARE TRIMMED THE SAME WAY. Only the trusted value was,
+        # so an authority of `https://host//realms/x` produced a root ending
+        # in a slash and matched nothing an operator would ever type — a
+        # rollout refused with a message that did not say why.
         trusted = args.trusted_origin.strip().rstrip("/")
-        if root != trusted:
+        if root.rstrip("/") != trusted:
             raise SystemExit(
                 f"realm-gate: the release is running with an authority on "
                 f"{root!r}, and this deployment trusts {trusted!r}. Refusing "

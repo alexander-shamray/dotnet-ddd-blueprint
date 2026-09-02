@@ -233,7 +233,18 @@ jobs:
       - name: The realm to read is the realm this rollout installs
         run: |
           set -euo pipefail
-          helm get values "$WORKLOAD" -n "$NAMESPACE" -o json > "$RUNNER_TEMP/installed.json"
+          # `--all`, and its absence would have stopped every rollout. Without
+          # it `helm get values` emits only the overrides the caller supplied
+          # and omits the chart's own defaults -- and `identity.authority` HAS
+          # a default in all four charts, so a release that never overrode it
+          # answers a document with no `identity` key at all. `--all` is the
+          # computed values, which is what the release is running with and what
+          # the question is. The sibling `helm get values ... -o yaml` below
+          # deliberately does NOT take it: that one produces the `-f` file for
+          # the upgrade, where re-supplying defaults as explicit overrides is
+          # exactly what must not happen.
+          helm get values "$WORKLOAD" -n "$NAMESPACE" --all -o json \
+            > "$RUNNER_TEMP/installed.json"
           python deploy/keycloak/realm_check.py authority \
             --values "$RUNNER_TEMP/installed.json" \
             --trusted-origin "$KEYCLOAK_TRUSTED_ORIGIN" >> "$GITHUB_ENV"
