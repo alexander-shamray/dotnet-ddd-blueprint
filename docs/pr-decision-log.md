@@ -116,8 +116,13 @@ rule for that was wrong.** It stopped on any batch it could not delete
 *entirely*, on the premise that such a batch comes back unchanged. It does not:
 `TOP` refills the deleted slots with the next-oldest candidates, so one held key
 at the head ended a pass after roughly one batch and left the rest of the table
-for an hour later. The rule is progress now — stop when a batch deletes nothing
-— and a test stages a held key mid-backlog and asserts the pass gets past it.
+for an hour later. The rule is the store's answer now — stop when it releases
+nothing — and a test stages a held key mid-backlog and asserts the pass gets
+past it. **Stopping on nothing *deleted* was the intermediate spelling and was
+also wrong**, for a reason the first one hid: with three replicas, another
+purger may delete the selected rows first, so a zero is concurrent progress
+rather than a batch nobody may touch, and stopping on it hands the backlog to
+the next pass or to nobody.
 
 **The delete is by row, which meets a limit belonging to another layer.** Each
 row costs two parameters — its key and the `CommittedAt` that identifies the

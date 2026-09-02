@@ -262,11 +262,19 @@ public static class AuthenticationExtensions
                         if (expires - clock.GetUtcNow() <= RevocationBound)
                             return Task.CompletedTask;
 
+                        // Two causes, and naming only the first sends an
+                        // operator to change a realm that is correct. The
+                        // comparison reads this host's clock, so an issuer
+                        // running more than the skew AHEAD of it makes a
+                        // conforming 300-second token look long-lived here.
                         context.Fail(
                             $"The token has more than {RevocationBound.TotalSeconds} seconds of life " +
                             "left, which is longer than the revocation bound this platform states " +
-                            "(ADR-033). The realm that issued it sets an access-token lifetime, or a " +
-                            "client-level override, above what §11.3 requires.");
+                            "(ADR-033). Either the realm that issued it sets an access-token " +
+                            "lifetime, or a client-level override, above what §11.3 requires — or " +
+                            "this host's clock is running behind the issuer's by more than the " +
+                            "skew, which makes a conforming token read as a long-lived one. Check " +
+                            "the clocks before changing the realm.");
 
                         return Task.CompletedTask;
                     }

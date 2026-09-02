@@ -2729,19 +2729,25 @@ This decision keeps the TTL and moves the question instead.
   two clock steps, and nothing here stages one; what the suite does hold is
   that the identity join still deletes, which is the failure a join can have
   that a predicate cannot.
-- **The candidates are ordered oldest first, and the pass stops when it stops
-  making progress.** A batch that deletes nothing has every row still held, and
-  the next `SELECT` would return those same rows — nothing about them has
-  moved — so continuing costs a round trip for no deletions. **Stopping on a
-  merely *partial* batch was the first spelling and was wrong**, on a premise
-  that reads as obvious: a partially deleted batch is not returned unchanged,
-  because `TOP` refills the deleted slots with the next-oldest candidates. One
-  held key at the head therefore ended a pass after about one batch — 4,999
-  rows where the ceiling allows 100,000 — and left the rest of the table for an
-  hour later. What remains is bounded rather than absent: at a batch size of
-  one, a held oldest key stops every pass until its claim expires, which is a
-  day at `IdempotencyRetention.Window`, and a batch of one is not a
-  configuration this platform ships.
+- **The candidates are ordered oldest first, and the pass stops when the claim
+  store releases nothing.** That is the only state in which the next `SELECT`
+  is certain to return the same rows, so it is the only one where continuing is
+  certain to be futile. **Two earlier spellings were wrong, in opposite
+  directions**, and both are worth carrying because each reads as obvious.
+  Stopping on a *partial* batch rested on the premise that such a batch comes
+  back unchanged — it does not, because `TOP` refills the deleted slots with
+  the next-oldest candidates, so one held key at the head ended a pass after
+  about one batch, 4,999 rows where the ceiling allows 100,000. Stopping on
+  *nothing deleted* then read a zero from the wrong side of a race: with
+  [§15.3](15-cicd-deployment.md)'s three replicas another purger may delete
+  every row this one selected before its own `DELETE`, and that zero is
+  concurrent progress rather than a batch nobody may touch — stopping on it
+  hands the backlog to the next hourly pass, or to nobody if the winning
+  replica has since exited. What the store released does not depend on who won.
+  What remains is bounded rather than absent: at a batch size of one, a held
+  oldest key stops every pass until its claim expires, which is a day at
+  `IdempotencyRetention.Window`, and a batch of one is not a configuration this
+  platform ships.
 - **The floor survives and its job changes, which is a smaller claim than it
   used to make.** `RetentionPolicy.IdempotencyWindow` may still not be shorter
   than `IdempotencyRetention.MarkerFloor`, and the refusal message no longer

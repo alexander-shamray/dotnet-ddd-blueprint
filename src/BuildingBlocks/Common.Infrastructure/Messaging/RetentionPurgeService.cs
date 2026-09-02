@@ -366,28 +366,39 @@ public sealed class RetentionPurgeService : BackgroundService
                 ct);
             total += deleted;
 
-            // Two ways to stop, and the second is PROGRESS rather than
-            // completeness. A short SELECT means the table holds no further
-            // candidates. A batch that deleted nothing means every row it
-            // returned is still held, and the next SELECT would return those
-            // same rows — ordered oldest first, with nothing about them
-            // changed — so continuing would re-read and re-ask for no
+            // Two ways to stop, and the second asks the STORE rather than the
+            // database. A short SELECT means the table holds no further
+            // candidates. A batch the store released nothing from means every
+            // row it returned is still claimed, and the next SELECT would
+            // return those same rows — ordered oldest first, with nothing about
+            // them changed — so continuing would re-read and re-ask for no
             // deletions.
             //
-            // `deleted < candidates.Length` was the earlier spelling and it was
-            // wrong, on a premise that reads as obvious and is false: a
-            // PARTIALLY deleted batch is not returned unchanged. TOP refills
-            // the deleted slots with the next-oldest candidates, so one held
-            // key at the head ended a pass after about one batch — 4,999 rows
-            // where the ceiling allows 100,000 — and the rest of the table
-            // waited an hour for no reason.
+            // Two earlier spellings were wrong, in opposite directions.
+            // `deleted < candidates.Length` rested on a premise that reads as
+            // obvious and is false: a PARTIALLY deleted batch is not returned
+            // unchanged, because TOP refills the deleted slots with the
+            // next-oldest candidates. One held key at the head therefore ended
+            // a pass after about one batch — 4,999 rows where the ceiling
+            // allows 100,000.
+            //
+            // `deleted == 0` then read a zero from the wrong side of a race.
+            // §15.3 ships three replicas, so another purger can delete every
+            // row this one selected before its own DELETE runs; the zero is
+            // then concurrent PROGRESS rather than a batch nobody may touch,
+            // and stopping on it hands the backlog to the next hourly pass —
+            // or to nobody, if the winning replica has since exited.
+            //
+            // `gone` is the reading that does not depend on who won: it is what
+            // the claim store released, so an empty one is the only state where
+            // continuing is certain to be futile.
             //
             // What is left is bounded rather than absent: at BatchSize 1, a
             // held oldest key stops every pass until its claim expires, which
             // is a day at IdempotencyRetention.Window. Nothing starves for
             // longer than a claim lives, and a batch of one is not a
             // configuration this platform ships.
-            if (candidates.Length < _policy.BatchSize || deleted == 0)
+            if (candidates.Length < _policy.BatchSize || gone.Count == 0)
                 break;
         }
 

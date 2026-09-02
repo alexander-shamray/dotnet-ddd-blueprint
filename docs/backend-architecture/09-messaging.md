@@ -2063,17 +2063,21 @@ one nothing can, and the marker's window is a correctness property, where one
 clock on both ends is worth more than a substitutable one.
 
 **That pass therefore has a second way to stop, and the other two do not need
-one.** A batch that deletes **nothing** would be returned unchanged by the next
-`SELECT` — the candidates come back oldest first and nothing about those rows
-has moved — so it stops there rather than re-reading and re-asking for no
-deletions, and an hour later the claim they are waiting on has ordinarily gone.
+one.** A batch the claim store **releases nothing from** would be returned
+unchanged by the next `SELECT` — the candidates come back oldest first and
+nothing about those rows has moved — so it stops there rather than re-reading
+and re-asking for no deletions, and an hour later the claim they are waiting on
+has ordinarily gone.
 
-> **Stopping on a merely *partial* batch is the version of that rule to avoid,
-> and it shipped for one review round.** A partially deleted batch is not
-> returned unchanged: `TOP` refills the deleted slots with the next-oldest
-> candidates, so one held key at the head ended a pass after about one batch —
-> 4,999 rows where `MaxBatchesPerPass` allows 100,000. The rule is progress,
-> not completeness
+> **Two nearby rules are wrong and each shipped for a round, which is why the
+> condition is the store's answer rather than the database's.** Stopping on a
+> merely *partial* batch assumes such a batch comes back unchanged: it does
+> not, because `TOP` refills the deleted slots with the next-oldest candidates,
+> and one held key at the head ended a pass after about one batch — 4,999 rows
+> where `MaxBatchesPerPass` allows 100,000. Stopping on *nothing deleted* then
+> reads a zero from the wrong side of a race: [§15.3](15-cicd-deployment.md)
+> ships three replicas, so another purger may have deleted the selected rows
+> first, and that zero is progress rather than a wall
 > ([ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)).
 
 **What the carve-out costs is smaller than it reads, and saying so is cheaper
