@@ -888,26 +888,34 @@ class TheRolloutStillCallsThisGate(unittest.TestCase):
         self.assertNotEqual(mutation, -1, "the rollout no longer patches the HPA")
         self.assertLess(judged, mutation)
 
-    def test_the_authority_that_was_checked_is_the_one_installed(self):
-        """Every `helm upgrade` in the job pins it, or one of them installs another.
+    def upgrades(self) -> list[str]:
+        """Each `helm upgrade` in the rollout, joined across its continuations.
 
-        Reading the authority from the running release and then upgrading to a
-        checked-out chart are different questions: an authority that came from
-        the old chart's default is replaced by the new chart's, and the realm
-        checked a step earlier is not the realm the workload ends up on.
+        A command is one logical line here: the invocations wrap over five or
+        six physical lines with trailing backslashes, so anything that reasons
+        about a whole command has to rejoin them first.
         """
-        text = self.workflow()
-        # COMMAND LINES, not mentions: three of the matches in this file are
-        # prose about `helm upgrade` rather than a call to it, and counting
-        # those would make the assertion fail on a comment.
-        upgrades = len([line for line in text.splitlines()
-                        if line.strip().startswith("helm upgrade")])
-        pins = text.count('--set-string identity.authority="$CHECKED_AUTHORITY"')
-        self.assertTrue(upgrades, "the rollout no longer upgrades anything")
-        self.assertEqual(
-            pins, upgrades,
-            f"{upgrades} helm upgrade(s) and {pins} authority pin(s): every "
-            "invocation has to install the authority that was checked")
+        joined = self.workflow().replace("\\" + chr(10), " ")
+        return [line.strip() for line in joined.splitlines()
+                if line.strip().startswith("helm upgrade")]
+
+    def test_every_upgrade_installs_the_authority_that_was_checked(self):
+        """Per command, because a total is not the invariant.
+
+        Counting pins against invocations across the whole file passes on two
+        pins in one command and none in another — which is the shape that
+        actually ships, since the promotion and the canary are edited at
+        different times for different reasons. What has to be true is that no
+        `helm upgrade` in this job installs an authority nobody checked.
+        """
+        commands = self.upgrades()
+        self.assertTrue(commands, "the rollout no longer upgrades anything")
+        for command in commands:
+            pins = command.count(
+                '--set-string identity.authority="$CHECKED_AUTHORITY"')
+            self.assertEqual(
+                pins, 1,
+                f"{pins} authority pin(s) on: {command[:120]}")
 
 
 class TheRealmIsLoaded(unittest.TestCase):
