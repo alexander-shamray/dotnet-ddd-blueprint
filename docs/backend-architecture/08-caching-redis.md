@@ -1228,12 +1228,9 @@ ORDER BY CommittedAt;
 -- statement cannot reach it however the clock behaves — the property the
 -- single statement had for free and the split had to buy back.
 --
--- Chunked at 900 rows because each costs TWO parameters and SQL Server refuses
--- more than 2,100.
---
--- Chunked at a thousand keys by the caller. Dapper expands `IN @Keys` into one
--- parameter per element and SQL Server refuses more than 2,100 of them, where
--- the default BatchSize is 5,000 — so chunking is what keeps BatchSize meaning
+-- Chunked at 900 rows by the caller, because each costs TWO parameters — its
+-- key and its version — and SQL Server refuses more than 2,100 of them, where
+-- the default BatchSize is 5,000. Chunking is what keeps BatchSize meaning
 -- rows considered per batch instead of quietly capping it at a limit belonging
 -- to a different layer.
 DELETE marker

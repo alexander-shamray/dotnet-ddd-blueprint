@@ -2700,12 +2700,30 @@ This decision keeps the TTL and moves the question instead.
   statement had for free, and buying it back is what the split owed. Rows are
   chunked at 900 rather than 1,000 because each now costs two parameters
   against SQL Server's 2,100.
-- **A `rowversion` column would say the same thing in a byte or two, and was
-  not taken.** It is a column, a migration for each service, a change to
-  §4.5's scaffold and an Appendix D row, to identify a row that
-  `(Key, CommittedAt)` already identifies — the key is the primary key and the
-  timestamp is written once by a column default. Should a marker ever become
-  updatable, that reasoning fails and the column is the answer.
+- **`(Key, CommittedAt)` is an identity by construction rather than by
+  constraint, and the difference is this decision's last residual.** The key is
+  the primary key and the timestamp is written once by a column default, so two
+  writes under one key differ in it — but nothing *enforces* that. `CommittedAt`
+  is a `datetimeoffset(7)` taken from `SYSDATETIMEOFFSET()`, with no uniqueness
+  constraint, so a replacement colliding with the row a purger selected would
+  be matched and deleted with its claim live: the ABA this join closes,
+  re-entered through the identity itself.
+- **What that needs is an exact coincidence rather than a magnitude, and the
+  distinction is why it is recorded instead of fixed here.** Every hazard
+  above — the two-clock comparison, the forward step, the backward step, the
+  step and its correction — follows from a drift of *sufficient size* in a
+  direction, which NTP corrections, host migrations and resumed snapshots
+  genuinely produce. A collision needs the database's clock to be set to the
+  same 100-nanosecond tick as a row at least `IdempotencyWindow` old. That is
+  not a smaller probability of the same fault; it is a different fault.
+- **A `rowversion` closes it and is owed rather than declined**
+  ([#173](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173)).
+  It is unique and monotonic per database and reads no clock at all, so it is
+  the identity this join wants. It costs a column, a migration for each
+  service, a sixth template migration in §4.5's scaffold and an Appendix D row
+  — a schema change to every service, which is the shape this appendix gives
+  its own record rather than folding into a pull request about something else.
+  ADR-038 filed #171 on exactly those terms.
 - **The defect and three successive wrong fixes were all found by review rather
   than by a test.** The interleaving needs several purgers, a retry and one or
   two clock steps, and nothing here stages one; what the suite does hold is

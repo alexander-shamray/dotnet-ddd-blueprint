@@ -344,11 +344,8 @@ public sealed class RetentionPurgeService : BackgroundService
             if (candidates.Length == 0)
                 break;
 
-            // The version bound, taken from the rows rather than from a clock.
-            // ORDER BY CommittedAt makes the last one the newest, and the
-            // delete below refuses anything above it — which is what stops a
-            // replacement committed after this SELECT being deleted by it.
-            DateTimeOffset selectedThrough = candidates[^1].CommittedAt;
+            // Keys for the store, which answers about commands; the rows
+            // themselves go to the delete, which acts on writes.
             string[] keys = [.. candidates.Select(candidate => candidate.Key)];
 
             // Not caught, and the caller's `catch` is why that is safe: an

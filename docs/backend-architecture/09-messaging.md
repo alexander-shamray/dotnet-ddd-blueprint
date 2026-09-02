@@ -2063,11 +2063,18 @@ one nothing can, and the marker's window is a correctness property, where one
 clock on both ends is worth more than a substitutable one.
 
 **That pass therefore has a second way to stop, and the other two do not need
-one.** A batch the store would not let go of entirely would be returned
-unchanged by the next `SELECT` — the candidates come back oldest first and
-nothing about those rows has moved — so it stops there rather than re-reading
-and re-asking for no deletions, and an hour later the claim they are waiting on
-has ordinarily gone.
+one.** A batch that deletes **nothing** would be returned unchanged by the next
+`SELECT` — the candidates come back oldest first and nothing about those rows
+has moved — so it stops there rather than re-reading and re-asking for no
+deletions, and an hour later the claim they are waiting on has ordinarily gone.
+
+> **Stopping on a merely *partial* batch is the version of that rule to avoid,
+> and it shipped for one review round.** A partially deleted batch is not
+> returned unchanged: `TOP` refills the deleted slots with the next-oldest
+> candidates, so one held key at the head ended a pass after about one batch —
+> 4,999 rows where `MaxBatchesPerPass` allows 100,000. The rule is progress,
+> not completeness
+> ([ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)).
 
 **What the carve-out costs is smaller than it reads, and saying so is cheaper
 than letting a reader discover it.** No retention test here substitutes the

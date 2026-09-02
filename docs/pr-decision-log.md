@@ -119,11 +119,11 @@ at the head ended a pass after roughly one batch and left the rest of the table
 for an hour later. The rule is progress now — stop when a batch deletes nothing
 — and a test stages a held key mid-backlog and asserts the pass gets past it.
 
-**The delete is by key, which meets a limit belonging to another layer.**
-Dapper expands `IN @Keys` into one parameter per element and SQL Server refuses
-more than 2,100, where the default `BatchSize` is 5,000. Chunking at a thousand
-keeps `BatchSize` meaning rows considered per batch instead of being quietly
-capped by a number nobody set.
+**The delete is by row, which meets a limit belonging to another layer.** Each
+row costs two parameters — its key and the `CommittedAt` that identifies the
+write — and SQL Server refuses a statement carrying more than 2,100, where the
+default `BatchSize` is 5,000. Chunking at 900 keeps `BatchSize` meaning rows
+considered per batch instead of being quietly capped by a number nobody set.
 
 **The purge now depends on Redis, and the failure directions differ.** A
 service with markers and no claim store fails to resolve at startup, which is
