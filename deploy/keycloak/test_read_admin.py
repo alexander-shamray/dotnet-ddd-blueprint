@@ -235,10 +235,25 @@ class TheGrant(Stubbed):
         self.answers({"realm": "commerce"}, [{"clientId": "web-app"}])
         self.assertEqual(len(read_admin.fetch(self.values)["clients"]), 1)
 
-    def test_view_realm_is_accepted_because_it_implies_view_clients(self):
-        read_admin.token = lambda *args: self.jwt(["view-realm"])
+    def test_realm_admin_is_accepted_because_it_composes_view_clients(self):
+        read_admin.token = lambda *args: self.jwt(["realm-admin"])
         self.answers({"realm": "commerce"}, [{"clientId": "web-app"}])
         self.assertEqual(len(read_admin.fetch(self.values)["clients"]), 1)
+
+    def test_view_realm_alone_is_refused_because_it_composes_nothing(self):
+        """The role that reads like it should be enough, and is not.
+
+        An earlier revision accepted it on the reasoning that it implies
+        `view-clients`. `deploy/compose/keycloak/realm-export.json` says
+        otherwise — `view-realm` is a non-composite role — so accepting it
+        approved a credential with no client visibility for the one check whose
+        purpose is to establish that it has some.
+        """
+        read_admin.token = lambda *args: self.jwt(["view-realm"])
+        self.answers({"realm": "commerce"}, [])
+        with self.assertRaises(SystemExit) as stop:
+            read_admin.fetch(self.values)
+        self.assertIn("view-clients", str(stop.exception))
 
     def test_an_account_without_the_grant_stops_before_it_asks(self):
         """Not after: a list nobody could have seen in full is not a list to judge."""
@@ -273,6 +288,63 @@ class TheGrant(Stubbed):
         with self.assertRaises(SystemExit) as stop:
             read_admin.fetch(self.values)
         self.assertIn("holds none of", str(stop.exception))
+
+
+class TheRolesThisGateAccepts(unittest.TestCase):
+    """The premise behind `COMPLETENESS_ROLES`, asserted against a realm.
+
+    The list is a claim about Keycloak's role model — that these roles grant
+    visibility of every client and that the ones left out do not — and a claim
+    like that belongs against an artefact rather than in a comment. It shipped
+    wrong once: `view-realm` was accepted on the reasoning that it implies
+    `view-clients`, which the export beside it flatly contradicts.
+
+    §14.1's realm is the subject because it is the one this repository owns and
+    because Keycloak generates these roles itself, so the shape here is the
+    shape a deployed realm has.
+    """
+
+    def realm_management_roles(self) -> dict:
+        import realm_check
+
+        export = (Path(realm_check.__file__).resolve().parents[2]
+                  / realm_check.COMPOSE_REALM)
+        document = json.loads(export.read_text(encoding="utf-8"))
+        roles = document["roles"]["client"][read_admin.REALM_MANAGEMENT]
+        return {role["name"]: role for role in roles}
+
+    def composed_by(self, name: str) -> set[str]:
+        """The roles `name` grants directly, one level down."""
+        role = self.realm_management_roles()[name]
+        if not role.get("composite"):
+            return set()
+        return set(role.get("composites", {})
+                   .get("client", {})
+                   .get(read_admin.REALM_MANAGEMENT, []))
+
+    def test_every_accepted_role_grants_client_visibility(self):
+        """Either it IS view-clients, or it composes it."""
+        roles = self.realm_management_roles()
+        for accepted in read_admin.COMPLETENESS_ROLES:
+            self.assertIn(accepted, roles, f"{accepted} is not a realm-management role")
+            self.assertTrue(
+                accepted == "view-clients" or "view-clients" in self.composed_by(accepted),
+                f"{accepted} is accepted by read_admin but neither is nor composes "
+                "view-clients, so it does not establish that the client list is complete")
+
+    def test_view_realm_is_not_accepted_and_the_export_says_why(self):
+        """The specific mistake, pinned against the artefact that disproves it."""
+        self.assertNotIn("view-realm", read_admin.COMPLETENESS_ROLES)
+        self.assertNotIn("view-clients", self.composed_by("view-realm"))
+
+    def test_the_export_still_declares_the_role_this_gate_names(self):
+        """The subject test for the subject test: `view-clients` has to exist.
+
+        A realm that renamed it would make every case above vacuous — they all
+        ask about a role by name — and would leave the gate refusing every
+        credential rather than accepting a wrong one.
+        """
+        self.assertIn("view-clients", self.realm_management_roles())
 
 
 class TheRedirect(unittest.TestCase):

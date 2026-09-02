@@ -75,6 +75,10 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   token is decoded and **not verified**, which is safe because nothing is
   authorised on it — the server issued it and the server enforces the roles;
   it is read to find out whether this account could see the whole realm.
+  **`view-realm` is not accepted** and reads as though it should be: Keycloak
+  defines it as a non-composite role granting nothing else, so it carries no
+  client visibility. The suite asserts that against §14.1's export rather than
+  restating it here.
 - **Whether the realm is reachable outside a rollout.** It is read when a
   deployment reads it, so a realm edited between rollouts is unobserved until
   the next one

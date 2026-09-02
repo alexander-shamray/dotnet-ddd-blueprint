@@ -189,9 +189,17 @@ client-model stream and then drops the representations the caller may not see,
 so an account short of that role produces a client list that is silently
 incomplete and looks exactly like a complete one. `read_admin.py` reads the
 roles out of its own access token and stops before asking for anything unless
-one of `view-clients`, `view-realm` or `realm-admin` is among them — a
-credential provisioned too narrowly fails the deploy loudly instead of passing
-a realm nobody saw the end of. The token it
+`view-clients` or `realm-admin` is among them — a credential provisioned too
+narrowly fails the deploy loudly instead of passing a realm nobody saw the end
+of.
+
+**`view-realm` is not one of them, and it reads as though it should be.** It is
+a *non-composite* role in Keycloak's own model — §14.1's export shows it
+granting nothing else, where `view-clients` composes `query-clients` and
+`realm-admin` composes both — so an account holding it has no client visibility
+at all. Provisioning this credential with `view-realm` and expecting it to work
+is the plausible mistake here, and the gate refuses it by name rather than
+letting it through to a silently short list. The token it
 obtains can already see every client secret in the realm it does reach, which is
 why `read_admin.py` refuses a base URL that is not `https`, and why widening the
 grant costs more than widening it looks like it costs.

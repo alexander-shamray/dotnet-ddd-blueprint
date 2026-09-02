@@ -92,10 +92,20 @@ CLIENT_LIMIT = 10000
 # read for the grant that was actually issued, and a run whose account cannot
 # see every client stops instead of judging the ones it can.
 #
-# `view-clients` is implied by `view-realm`, and Keycloak grants either through
-# the `realm-management` client, so both are accepted.
+# `view-realm` IS NOT ONE OF THEM, and an earlier revision of this list said it
+# was on the reasoning that it implies `view-clients`. It does not, and this
+# repository ships the proof: in `deploy/compose/keycloak/realm-export.json`
+# the `realm-management` role `view-realm` is `"composite": false` with no
+# composites at all, while `view-clients` is a separate role composing
+# `query-clients`. Accepting it would have approved a credential with no client
+# visibility for a check whose entire purpose is to establish that it has some.
+#
+# `realm-admin` stays because it composes `view-clients` in that same file. The
+# suite asserts both of those facts against the export rather than restating
+# them here, so a realm that reorganises its roles fails a test instead of
+# quietly widening what this accepts.
 REALM_MANAGEMENT = "realm-management"
-COMPLETENESS_ROLES = ("view-clients", "view-realm", "realm-admin")
+COMPLETENESS_ROLES = ("view-clients", "realm-admin")
 
 
 def environment() -> dict[str, str]:
@@ -250,8 +260,9 @@ def clients(base: str, realm: str, access_token: str) -> list:
             "read_admin: this account holds none of "
             f"{', '.join(COMPLETENESS_ROLES)} on {REALM_MANAGEMENT}, so "
             "Keycloak will silently drop the clients it may not view and a "
-            "short list would look exactly like a complete one. "
-            "docs/secrets.md specifies realm-read for this reason.")
+            "short list would look exactly like a complete one. `view-realm` "
+            "is NOT enough and does not compose `view-clients`; "
+            "docs/secrets.md carries what the account needs.")
 
     query = urllib.parse.urlencode({"max": CLIENT_LIMIT})
     answer = get(f"{base}/admin/realms/{realm}/clients?{query}", access_token)

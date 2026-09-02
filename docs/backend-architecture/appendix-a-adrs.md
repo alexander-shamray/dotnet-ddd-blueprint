@@ -3244,8 +3244,11 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   representations the caller may not see, so a filtered list and a complete one
   are indistinguishable and every per-client obligation is satisfied by the
   clients nobody fetched. No ceiling can establish that; what can be
-  established is the premise it rests on, so a run whose account holds none of
-  `view-clients`, `view-realm` or `realm-admin` stops before it asks;
+  established is the premise it rests on, so a run whose account holds neither
+  `view-clients` nor `realm-admin` stops before it asks — and `view-realm` is
+  not among them, because Keycloak defines it as a non-composite role that
+  grants no client visibility at all, which §14.1's export is asserted against
+  rather than restated;
   **whatever Helm's `strvals` parser reads as structure is refused in an
   authority**, because the derived value is passed to `--set-string` and a
   comma there makes one assignment into two — the tag preflight's lesson, one
