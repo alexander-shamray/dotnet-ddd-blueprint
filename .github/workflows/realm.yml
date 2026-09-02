@@ -40,6 +40,10 @@ name: Realm
 #     chart's `identity.authority` still has the shape `realm_check.py
 #     authority` splits at deploy time, and a subject test that does not gate
 #     the files it validates is a subject test in name only.
+#   - .github/workflows/deploy.yml, because it is the only caller that closes
+#     #157 and its rollout job runs on `workflow_dispatch` alone. A change that
+#     deleted or reordered the derive/fetch/check steps would otherwise reach
+#     `main` with this workflow skipped and nothing else looking at them.
 on:
   pull_request:
     paths:
@@ -47,6 +51,7 @@ on:
       - 'deploy/compose/keycloak/realm-export.json'
       - 'deploy/helm/**'
       - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
+      - '.github/workflows/deploy.yml'
       - '.github/workflows/realm.yml'
   push:
     branches: [main]
@@ -55,6 +60,7 @@ on:
       - 'deploy/compose/keycloak/realm-export.json'
       - 'deploy/helm/**'
       - 'src/BuildingBlocks/Common.Web/AuthenticationExtensions.cs'
+      - '.github/workflows/deploy.yml'
       - '.github/workflows/realm.yml'
 
 permissions:

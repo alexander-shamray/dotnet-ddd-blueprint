@@ -63,18 +63,20 @@ BASE_URL, REALM, CLIENT_ID, CLIENT_SECRET = REQUIRED
 
 TIMEOUT_SECONDS = 30
 
-# Keycloak's admin list endpoints take `first` and `max`, and what they do when
-# `max` is absent has differed by version. A page size is therefore given
-# rather than relied on, and `fetch` pages until a short page arrives — a
-# truncated client list is a realm whose every per-client obligation passes
-# without being judged, which is the vacuous read this whole tree exists to
-# refuse.
-PAGE_SIZE = 100
-
-# A page count that stops a loop rather than a server. 200 pages of 100 is
-# twenty thousand clients; a realm that large is a realm this gate has no
-# business guessing about, so it stops rather than spinning.
-MAX_PAGES = 200
+# ONE REQUEST WITH A CEILING, AND A REFUSAL AT THE CEILING. Paging was tried
+# twice here and both terminating conditions were wrong for the same reason:
+# Keycloak pages client MODELS and filters representations it cannot render
+# afterwards, so neither a short page nor an empty one proves there is nothing
+# behind it. There is no clients/count endpoint to appeal to, and the export
+# that would be authoritative needs rights this credential deliberately does
+# not hold.
+#
+# So completeness is not inferred at all. `max` is asked for far above any
+# realm this platform will have, and a response AT the ceiling is refused
+# rather than truncated — the one case where the answer might not be the whole
+# list is the one case this stops on. `first` is not sent: there is nothing to
+# skip when the ceiling is the whole realm.
+CLIENT_LIMIT = 10000
 
 
 def environment() -> dict[str, str]:
@@ -174,44 +176,31 @@ def get(url: str, access_token: str) -> object:
 
 
 def clients(base: str, realm: str, access_token: str) -> list:
-    """Every client, paged, because one page is not every client.
+    """Every client, in one request, or a refusal.
 
-    Keycloak's `/clients` endpoint takes `first` and `max`. Reading one page
-    and calling it the realm is how a client past the boundary enables the
-    implicit flow, or overrides the token lifetime, without ever reaching
-    `check_realm` — and with `web-app` on the first page the rollout would pass
-    on a realm nobody looked at the end of.
+    Reading part of a realm and calling it the realm is how a client past the
+    boundary enables the implicit flow, or overrides the token lifetime,
+    without ever reaching `check_realm` — and with `web-app` in what was read,
+    the rollout passes on a realm nobody looked at the end of.
+
+    **Completeness is refused rather than inferred.** A response holding
+    exactly `CLIENT_LIMIT` clients is the only one that could have been cut
+    short, and it stops the run; anything below the ceiling is the whole list,
+    because the server had room to answer more and did not.
     """
-    collected: list = []
-    empty = 0
-    for page in range(MAX_PAGES):
-        query = urllib.parse.urlencode({"first": page * PAGE_SIZE, "max": PAGE_SIZE})
-        answer = get(f"{base}/admin/realms/{realm}/clients?{query}", access_token)
-        if not isinstance(answer, list):
-            raise SystemExit("read_admin: the admin API did not answer a client list.")
-        collected += answer
-        # TWO CONSECUTIVE EMPTY PAGES, AND NEITHER A SHORT ONE NOR A SINGLE
-        # EMPTY ONE. Keycloak pages client *models* and drops representations
-        # it cannot render afterwards, so a page of 100 models can answer 99
-        # entries with more clients behind it — and on the same premise it can
-        # answer NONE, when a run of clients this account cannot view happens
-        # to fill a page. Stopping at the first empty page is that hole one
-        # page-size coarser.
-        #
-        # Two is a bound and not a proof, and the residual is stated in
-        # `README.md`: nothing here distinguishes "the end" from "a run of
-        # invisible clients longer than two pages". What closes it is the
-        # service account's rights, which is why `docs/secrets.md` specifies
-        # realm-read rather than a narrower grant.
-        empty = 0 if answer else empty + 1
-        if empty == 2:
-            return collected
+    query = urllib.parse.urlencode({"max": CLIENT_LIMIT})
+    answer = get(f"{base}/admin/realms/{realm}/clients?{query}", access_token)
+    if not isinstance(answer, list):
+        raise SystemExit("read_admin: the admin API did not answer a client list.")
 
-    raise SystemExit(
-        f"read_admin: the realm answered {MAX_PAGES} pages of clients without "
-        "two empty ones. That is not a realm this gate can judge, and reporting "
-        f"the first {MAX_PAGES * PAGE_SIZE} as though they were all of them is "
-        "the truncated read it exists to refuse.")
+    if len(answer) >= CLIENT_LIMIT:
+        raise SystemExit(
+            f"read_admin: the realm answered {len(answer)} clients against a "
+            f"ceiling of {CLIENT_LIMIT}, so this may not be all of them. A "
+            "realm that large is one this gate refuses to judge rather than "
+            "truncate — every per-client obligation is satisfied by the "
+            "clients nobody fetched.")
+    return answer
 
 
 def fetch(values: dict[str, str]) -> dict:

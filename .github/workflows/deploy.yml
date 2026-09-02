@@ -267,6 +267,26 @@ jobs:
           python deploy/keycloak/realm_check.py check
           --realm "$RUNNER_TEMP/realm.json" --kind deployed
 
+      # AND THE AUTHORITY THAT WAS CHECKED IS THE ONE EVERY HELM CALL BELOW
+      # INSTALLS. Reading it from the running release and then upgrading to a
+      # checked-out chart is not the same question: `-f stable-values.yaml`
+      # carries the caller's OVERRIDES, so an authority that came from the old
+      # chart's default is replaced by the new chart's default, and the realm
+      # checked a step ago is not the realm the workload ends up pointed at.
+      #
+      # Pinning it as an explicit override closes that by construction. It is
+      # set once here and every `helm upgrade` in this job takes it, so there
+      # is no invocation that could take a different one -- and `--set-string`
+      # is safe for this value because `realm_check.py authority` has already
+      # refused whitespace, a query, a fragment and a second path segment. The
+      # remaining `strvals` character is a comma, which cannot occur in a URL
+      # that passed those refusals and reached a `/realms/<name>` split.
+      - name: The checked authority is the one that gets installed
+        run: |
+          set -euo pipefail
+          echo "CHECKED_AUTHORITY=${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}" \
+            >> "$GITHUB_ENV"
+
       - name: The first rung has a price, and it is paid before anything rolls
         run: |
           set -euo pipefail
@@ -444,6 +464,7 @@ jobs:
               helm upgrade "$WORKLOAD" "deploy/helm/$CANARY_CHART" \
                 -n "$NAMESPACE" \
                 -f stable-values.yaml --set-string image.tag="$TAG" \
+                --set-string identity.authority="$CHECKED_AUTHORITY" \
                 --atomic --wait --timeout 20m
               helm uninstall "$WORKLOAD-canary" -n "$NAMESPACE"
               break
@@ -488,6 +509,7 @@ jobs:
             # replica count and the API server defaults it to one, making
             # every rung of the ladder a single pod.
             helm upgrade --install "$WORKLOAD-canary" "deploy/helm/$CANARY_CHART" \
+              --set-string identity.authority="$CHECKED_AUTHORITY" \
               -n "$NAMESPACE" \
               -f stable-values.yaml \
               --set canary.enabled=true \

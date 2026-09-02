@@ -3206,7 +3206,13 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   `https://attacker.example/realms/x` would send the credential there.
   `KEYCLOAK_TRUSTED_ORIGIN` comes from the deploy environment, the two are
   required to agree, and a rollout onto an identity provider this deployment
-  does not name stops rather than authenticating to it. **The names are
+  does not name stops rather than authenticating to it. **And what was checked
+  is what gets installed**: the authority is pinned as an explicit override on
+  every `helm upgrade` in the job, because reading it from the running release
+  and then upgrading to a checked-out chart are different questions — an
+  authority that came from the old chart's default is replaced by the new
+  chart's, and the realm checked a step earlier is not the realm the workload
+  ends up on. **The names are
   declared once too**: `read_admin.py` imports them from `realm_check.py`, on
   `deploy/canary`'s import direction, because a writer and a reader spelling a
   variable separately agree until one is edited.
@@ -3231,17 +3237,23 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   can read every client secret in the realm; **a redirect is refused rather
   than followed**, because `urllib` copies a request's headers onto the
   redirected one and strips only the content ones, so an `Authorization` header
-  would travel to any host a 302 named; **the client list is paged until an
-  empty page**, because one page of a realm is not a realm, a *short* page is
-  not the last one either — Keycloak drops representations it cannot render —
-  and every per-client obligation is satisfied by the clients nobody fetched;
+  would travel to any host a 302 named; **the client list is read in one
+  request with a ceiling and a response *at* the ceiling is refused**, because
+  completeness cannot be inferred from a page — Keycloak pages client models
+  and filters representations it cannot render afterwards, so neither a short
+  page nor an empty one proves there is nothing behind it, and every per-client
+  obligation is satisfied by the clients nobody fetched;
   **whitespace in an authority is refused**, because the two values derived
   from it become `NAME=value` lines in `$GITHUB_ENV` and a newline there starts
   a second assignment; an authority this gate cannot split stops it; a realm
   that cannot be read stops
   the rollout on the rule the Prometheus read beside it already follows; a realm
   document with no `clients` array is refused rather than passed, because every
-  per-client obligation is vacuously true of an empty one; a flag that is not a
+  per-client obligation is vacuously true of an empty one; **the realm the gate
+  holds is a projection of six named fields rather than the document it was
+  handed**, so no credential is in it to leak into a message — a redaction was
+  the first answer and it rested on a deny-list staying complete as Keycloak
+  grows fields; a flag that is not a
   boolean is refused rather than compared, because every comparison here is an
   identity test and a string is neither; and a lifetime declaration this gate
   cannot anchor stops it rather than defaulting. **No count opens that
@@ -3252,6 +3264,12 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   two development logins — and it is the one suite that runs a real Keycloak.
   What this record adds is a second instrument with a different subject: the
   settings that must hold of **any** realm, in a form a deployment can run.
+- **The gate's own caller is one of its declared inputs**, and that is not
+  bookkeeping. `deploy.yml`'s rollout job runs on `workflow_dispatch` alone, so
+  a change deleting or reordering the derive-fetch-judge steps would reach
+  `main` with this workflow skipped and nothing else looking at them. It is
+  declared, both triggers cover it, and a case asserts the three calls exist,
+  run in that order, and run before the first command that changes the cluster.
 - **The gate is a fifth `deploy/**` subtree exercised by CI rather than
   deployed**, and §15.1's count moves with it. It is also the fifth workflow to
   reach outside its own tree, and the fifth copy of the Helm tree's

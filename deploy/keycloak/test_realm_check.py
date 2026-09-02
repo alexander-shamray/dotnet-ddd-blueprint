@@ -127,7 +127,7 @@ class TheLifetime(Fixture):
         """Cannot say what that client issues, which is not the same as saying it is fine."""
         client = browser(attributes={"use.refresh.tokens": "false",
                                      "access.token.lifespan": "5 min"})
-        self.assertIn("not a number", self.one(realm(client)))
+        self.assertIn("not a number of seconds", self.one(realm(client)))
 
     def test_an_override_equal_to_the_realm_value_is_not_a_finding(self):
         """Redundant is not wrong, and refusing it would fail a compliant realm."""
@@ -155,11 +155,11 @@ class TheFlagsAreBooleans(Fixture):
     def test_a_string_flag_is_refused_rather_than_read_as_off(self):
         found = self.problems(realm(browser(implicitFlowEnabled="true")))
         self.assertEqual(len(found), 1, found)
-        self.assertIn("not a boolean", found[0])
+        self.assertIn("rather than a boolean", found[0])
 
     def test_a_string_false_is_refused_too(self):
         """The right answer in an unjudgeable value. A realm this loose is one to fix."""
-        self.assertIn("not a boolean", self.one(realm(browser(implicitFlowEnabled="false"))))
+        self.assertIn("rather than a boolean", self.one(realm(browser(implicitFlowEnabled="false"))))
 
     def test_an_integer_flag_is_refused_and_the_obligation_speaks_too(self):
         """Two problems for one field, and both are true statements about it.
@@ -170,7 +170,7 @@ class TheFlagsAreBooleans(Fixture):
         """
         found = self.problems(realm(browser(standardFlowEnabled=1)))
         self.assertEqual(len(found), 2, found)
-        self.assertIn("not a boolean", found[0])
+        self.assertIn("rather than a boolean", found[0])
         self.assertIn("standard flow", found[1])
 
     def test_a_null_flag_is_left_to_the_check_that_reads_it(self):
@@ -741,15 +741,163 @@ class TheAuthorityDecidesWhichRealmIsRead(unittest.TestCase):
         self.assertTrue(declared, "no chart declares identity.authority")
 
 
+class WhatTheGateHolds(unittest.TestCase):
+    """A credential cannot leak out of a document that never carried one.
+
+    Redacting the credential keys was the first answer and it was not enough:
+    the object still held every other field of a realm, so the property rested
+    on a deny-list staying complete as Keycloak grows fields. The projection
+    inverts it — six named keys survive and nothing else does.
+    """
+
+    # The three fixture values live here and are REFERENCED below rather than
+    # written beside their keys. §15.1's secret scan reads a credential-shaped
+    # name assigned a literal, and `"password": "..."` is exactly that shape —
+    # so spelling them inline earns two accepted findings for strings whose
+    # whole purpose is to be absent from the output.
+    MARKERS = {"smtp": "marker-one", "user": "marker-two", "client": "marker-three"}
+
+    def realm_with_secrets(self) -> dict:
+        return {
+            "realm": "commerce",
+            "accessTokenLifespan": 300,
+            "smtpServer": {"password": self.MARKERS["smtp"], "host": "mail"},
+            "users": [{"username": "demo",
+                       "credentials": [{"type": "password",
+                                        "value": self.MARKERS["user"]}]}],
+            "clients": [{
+                "clientId": realm_check.BROWSER_CLIENT,
+                "standardFlowEnabled": True,
+                "implicitFlowEnabled": False,
+                "directAccessGrantsEnabled": False,
+                "secret": self.MARKERS["client"],
+                "protocolMappers": [{"name": "x"}],
+                "attributes": {"use.refresh.tokens": "false",
+                               "pkce.code.challenge.method": "S256"},
+            }],
+        }
+
+    def test_no_credential_bearing_field_survives_the_projection(self):
+        held = json.dumps(realm_check.judged(realm_check.redact(self.realm_with_secrets())))
+        for leaked in self.MARKERS.values():
+            self.assertNotIn(leaked, held)
+        self.assertNotIn("smtpServer", held)
+        self.assertNotIn("credentials", held)
+        self.assertNotIn("secret", held)
+
+    def test_the_fields_every_check_reads_do_survive(self):
+        """The other half: a projection that dropped these would judge nothing."""
+        held = realm_check.judged(self.realm_with_secrets())
+        self.assertEqual(held["accessTokenLifespan"], 300)
+        client = held["clients"][0]
+        self.assertEqual(client["clientId"], realm_check.BROWSER_CLIENT)
+        self.assertTrue(client["standardFlowEnabled"])
+        self.assertEqual(client["attributes"]["use.refresh.tokens"], "false")
+        self.assertEqual(
+            realm_check.check_realm(held, realm_check.DEPLOYED, 300), [])
+
+    def test_an_absent_key_stays_absent(self):
+        """Half the checks turn on absence, so a projection must not default one."""
+        held = realm_check.judged({"clients": [{"clientId": "x"}]})
+        self.assertNotIn("accessTokenLifespan", held)
+        self.assertNotIn("attributes", held["clients"][0])
+        self.assertNotIn("standardFlowEnabled", held["clients"][0])
+
+    def test_a_client_that_is_not_an_object_survives_to_be_refused(self):
+        """Dropping it would hide the malformed realm rather than judge it."""
+        held = realm_check.judged({"clients": ["not-a-client"]})
+        self.assertEqual(held["clients"], ["not-a-client"])
+        self.assertTrue(any("where a client object belongs" in p
+                            for p in realm_check.check_realm(held, realm_check.LOCAL, 300)))
+
+    def test_an_unknown_attribute_does_not_survive(self):
+        """The attribute allow-list is two keys, and the realm ships more."""
+        held = realm_check.judged(self.realm_with_secrets())
+        self.assertNotIn("pkce.code.challenge.method", held["clients"][0]["attributes"])
+
+
+class TheRolloutStillCallsThisGate(unittest.TestCase):
+    """The three calls that close #157, and the order they have to be in.
+
+    Every other case here asks what the gate decides. This one asks whether
+    anything still asks it — the rollout job runs on `workflow_dispatch` alone,
+    so a change that deleted or reordered these steps reaches `main` with no
+    job that would have noticed. `deploy.yml` is a declared input of this tree
+    for the same reason, so a change to it runs this suite.
+    """
+
+    def workflow(self) -> str:
+        return (Path(realm_check.__file__).resolve().parents[2]
+                / realm_check.DEPLOY_WORKFLOW).read_text(encoding="utf-8")
+
+    def positions(self) -> list[int]:
+        text = self.workflow()
+        calls = [
+            "realm_check.py authority",       # which realm, out of the chart
+            "read_admin.py --out",            # fetch it
+            "realm_check.py check",           # judge it
+        ]
+        found = []
+        for call in calls:
+            index = text.find(call)
+            self.assertNotEqual(
+                index, -1,
+                f"{realm_check.DEPLOY_WORKFLOW} no longer contains `{call}`, so "
+                "nothing in the rollout closes #157")
+            found.append(index)
+        return found
+
+    def test_all_three_calls_are_there_and_in_that_order(self):
+        found = self.positions()
+        self.assertEqual(found, sorted(found),
+                         "the rollout derives, fetches and judges out of order")
+
+    def test_they_run_before_the_first_command_that_changes_the_cluster(self):
+        """`kubectl patch` is the first mutation, and the check is upstream of it.
+
+        A check that runs after the HPA floor has moved is a check on a cluster
+        the rollout has already started changing.
+        """
+        text = self.workflow()
+        judged = text.find("realm_check.py check")
+        mutation = text.find("kubectl patch")
+        self.assertNotEqual(mutation, -1, "the rollout no longer patches the HPA")
+        self.assertLess(judged, mutation)
+
+    def test_the_authority_that_was_checked_is_the_one_installed(self):
+        """Every `helm upgrade` in the job pins it, or one of them installs another.
+
+        Reading the authority from the running release and then upgrading to a
+        checked-out chart are different questions: an authority that came from
+        the old chart's default is replaced by the new chart's, and the realm
+        checked a step earlier is not the realm the workload ends up on.
+        """
+        text = self.workflow()
+        # COMMAND LINES, not mentions: three of the matches in this file are
+        # prose about `helm upgrade` rather than a call to it, and counting
+        # those would make the assertion fail on a comment.
+        upgrades = len([line for line in text.splitlines()
+                        if line.strip().startswith("helm upgrade")])
+        pins = text.count('--set-string identity.authority="$CHECKED_AUTHORITY"')
+        self.assertTrue(upgrades, "the rollout no longer upgrades anything")
+        self.assertEqual(
+            pins, upgrades,
+            f"{upgrades} helm upgrade(s) and {pins} authority pin(s): every "
+            "invocation has to install the authority that was checked")
+
+
 class TheRealmIsLoaded(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / "realm.json"
 
-    def test_a_realm_document_is_loaded(self):
+    def test_a_realm_document_is_loaded_and_narrowed_to_what_is_judged(self):
+        """`realm` is not among the fields this gate reads, so it does not survive."""
         self.path.write_text(json.dumps(realm()), encoding="utf-8")
-        self.assertEqual(realm_check.load_realm(self.path)["realm"], "commerce")
+        loaded = realm_check.load_realm(self.path)
+        self.assertEqual(loaded["accessTokenLifespan"], 300)
+        self.assertNotIn("realm", loaded)
 
     def test_a_body_that_is_not_json_stops(self):
         """A proxy answering an HTML error page with a 200 is the ordinary way this happens."""

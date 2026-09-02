@@ -79,7 +79,20 @@ COMPOSE_REALM = "deploy/compose/keycloak/realm-export.json"
 # does not gate the files it validates is a subject test in name only.
 CHART_VALUES = "deploy/helm"
 
-SOURCE_INPUTS = [LIFETIME_SOURCE, COMPOSE_REALM, CHART_VALUES]
+# The deploy workflow is an input to this tree even though nothing here opens
+# it at check time, and leaving it out was the sharper half of a review
+# finding. `deploy.yml` is the ONLY caller that closes #157 — it derives the
+# authority, fetches the realm and judges it, in that order — and the rollout
+# job runs on `workflow_dispatch` alone, so a change that deleted or reordered
+# those three steps would have gone through CI with this workflow skipped and
+# `deploy.yml`'s own `check` job running only the canary's arithmetic.
+#
+# A gate that cannot see its own invocation is a gate that stops being invoked
+# quietly, which is this repository's most-repeated failure with the call site
+# rather than the subject as its object.
+DEPLOY_WORKFLOW = ".github/workflows/deploy.yml"
+
+SOURCE_INPUTS = [LIFETIME_SOURCE, COMPOSE_REALM, CHART_VALUES, DEPLOY_WORKFLOW]
 
 WORKFLOW_PATH = ".github/workflows/realm.yml"
 
@@ -129,6 +142,22 @@ CREDENTIAL_KEYS = frozenset({
     "bindCredential", "clientSecret", "adminPassword",
 })
 REDACTED = "<redacted by realm_check>"
+
+# EXACTLY WHAT THE CHECKS READ, AND THE GATE JUDGES NOTHING ELSE. Redacting the
+# credential keys was not enough and CodeQL was right to keep saying so: the
+# object still carried every other field of a realm, so any message formatting
+# any part of it was a document with a `secret` key flowing into a `print`, and
+# the property depended on a deny-list staying complete.
+#
+# A projection inverts that. `judged` builds a new document out of the named
+# fields below, so what the checks hold has no credential in it to leak — not a
+# redacted one, none — and a Keycloak version that adds a new secret-bearing
+# field changes nothing here. An allow-list of six keys is also the honest
+# statement of what this gate reads.
+REALM_FIELDS = ("accessTokenLifespan",)
+CLIENT_FIELDS = ("clientId", "standardFlowEnabled", "implicitFlowEnabled",
+                 "directAccessGrantsEnabled")
+CLIENT_ATTRIBUTES = ("use.refresh.tokens", "access.token.lifespan")
 
 LOCAL = "local"
 DEPLOYED = "deployed"
@@ -227,6 +256,39 @@ def redact(node: object) -> object:
     if isinstance(node, list):
         return [redact(item) for item in node]
     return node
+
+
+def judged(document: dict) -> dict:
+    """A realm reduced to the fields this gate reads, and nothing else.
+
+    Absence is preserved rather than defaulted, because half the checks turn on
+    it — an absent `use.refresh.tokens` is ADR-034 violated, and an absent
+    `accessTokenLifespan` is not 300. A key is copied only when the source has
+    it, so "missing here" continues to mean "missing there".
+
+    A client that is not an object survives as itself, because refusing one is
+    `check_flags_are_booleans`'s job and a projection that dropped it would
+    hide the malformed realm rather than judge it.
+    """
+    realm = {key: document[key] for key in REALM_FIELDS if key in document}
+
+    clients: list = []
+    for client in document.get("clients", []) if isinstance(document.get("clients"), list) else []:
+        if not isinstance(client, dict):
+            clients.append(client)
+            continue
+        narrowed = {key: client[key] for key in CLIENT_FIELDS if key in client}
+        attributes = client.get("attributes")
+        if isinstance(attributes, dict):
+            narrowed["attributes"] = {
+                key: attributes[key] for key in CLIENT_ATTRIBUTES if key in attributes}
+        elif "attributes" in client:
+            narrowed["attributes"] = attributes
+        clients.append(narrowed)
+
+    if "clients" in document:
+        realm["clients"] = clients
+    return realm
 
 
 def authority_of(values: dict) -> str:
@@ -378,10 +440,11 @@ def check_flags_are_booleans(clients: list[dict]) -> list[str]:
             # left to the check that reads it rather than decided in advance.
             if flag in client and client[flag] is not None and not isinstance(client[flag], bool):
                 problems.append(
-                    f"client {client.get('clientId')!r} sets {flag}="
-                    f"{client[flag]!r}, which is not a boolean. Every check "
-                    "here compares against true or false, so a value of any "
-                    "other type would be neither and would pass unjudged")
+                    f"client {client.get('clientId')!r} sets {flag} to a "
+                    f"{type(client[flag]).__name__} rather than a boolean. "
+                    "Every check here compares against true or false, so a "
+                    "value of any other type would be neither and would pass "
+                    "unjudged")
     return problems
 
 
@@ -419,20 +482,27 @@ def check_lifetime(realm: dict, clients: list[dict], lifetime: int) -> list[str]
 
         seconds = str(override).strip()
         if not seconds.lstrip("-").isdigit():
+            # THE VALUE IS NAMED, NOT ECHOED, and the key is why: an attribute
+            # spelled `access.token.lifespan` is a token-shaped name, so a
+            # message quoting whatever a realm put there is a credential-shaped
+            # read reaching a log. The setting and the expectation are the
+            # diagnostic; the string a misconfigured realm chose is not.
             problems.append(
                 f"client {client.get('clientId')!r} sets "
-                f"access.token.lifespan={override!r}, which is not a number of "
+                "access.token.lifespan to something that is not a number of "
                 "seconds. This gate cannot say what lifetime that client "
                 "issues, which is not the same as saying it is the realm's")
         # An override equal to the realm value is not a finding. It is
         # redundant rather than wrong, and failing it would make this gate
         # refuse a realm that holds the obligation it exists to enforce.
         elif int(seconds) != lifetime:
+            # The PARSED number, not the source text. A count of seconds is the
+            # diagnostic and cannot carry anything else.
             problems.append(
                 f"client {client.get('clientId')!r} sets "
-                f"access.token.lifespan={override!r}, overriding the realm's "
-                f"{lifetime}. A client-level lifespan is the misconfiguration "
-                "this gate was filed for")
+                f"access.token.lifespan to {int(seconds)} seconds, overriding "
+                f"the realm's {lifetime}. A client-level lifespan is the "
+                "misconfiguration this gate was filed for")
     return problems
 
 
@@ -475,8 +545,9 @@ def check_browser_client(client: dict, kind: str) -> list[str]:
             "default, so the absence is ADR-034 violated and not unspecified")
     elif str(refresh).lower() != "false":
         problems.append(
-            f"client {BROWSER_CLIENT!r} sets use.refresh.tokens={refresh!r}. "
-            "ADR-034 gives the browser an access token and no refresh token")
+            f"client {BROWSER_CLIENT!r} sets use.refresh.tokens to something "
+            "other than \"false\". ADR-034 gives the browser an access token "
+            "and no refresh token")
 
     # The positive half. Without it the attribute above holds for the wrong
     # reason: a client with no standard flow issues no refresh token because it
@@ -682,10 +753,12 @@ def load_realm(path: Path) -> dict:
     if not isinstance(document, dict):
         raise SystemExit(f"realm-gate: {path} is not a realm representation")
 
-    # BEFORE ANYTHING ELSE HOLDS IT. Every caller of this function reaches a
-    # `print` eventually, and the one thing that must never reach one is a
-    # credential — so the redaction is here rather than at each of them.
-    return redact(document)
+    # PROJECTED BEFORE ANYTHING ELSE HOLDS IT. Every caller of this function
+    # reaches a `print` eventually, and the one thing that must never reach one
+    # is a credential — so the narrowing is here rather than at each of them,
+    # and it is a narrowing rather than a redaction because a deny-list is only
+    # as good as its next entry.
+    return judged(redact(document))
 
 
 def fail(problems: list[str], subject: str) -> int:

@@ -115,17 +115,16 @@ class Stubbed(unittest.TestCase):
     def answers(self, representation, clients):
         """One realm document and one client list, served the way Keycloak does.
 
-        The client list is PAGED here rather than returned whole, because
-        `read_admin.clients` pages and a stub that ignores `first`/`max` would
-        make the paging untested while looking covered.
+        The `max` ceiling is honoured here rather than ignored, because a stub
+        that answered the whole list whatever was asked would make the ceiling
+        untested while looking covered.
         """
         def get(url: str, _access: str):
             if "/clients" not in url:
                 return representation
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
-            first = int(query.get("first", ["0"])[0])
-            most = int(query.get("max", [str(read_admin.PAGE_SIZE)])[0])
-            return clients[first:first + most]
+            most = int(query.get("max", [str(read_admin.CLIENT_LIMIT)])[0])
+            return clients[:most]
 
         read_admin.get = get
 
@@ -161,110 +160,50 @@ class TheJoin(Stubbed):
         self.assertIn("client list", str(stop.exception))
 
 
-class ThePaging(Stubbed):
-    """Every client, and not the first page of them.
+class TheCeiling(Stubbed):
+    """Completeness is refused rather than inferred.
 
-    A client past the first page can enable the implicit flow or override the
-    token lifetime, and with `web-app` on page one the rollout would pass on a
-    realm nobody looked at the end of.
+    Paging was tried twice and both terminating conditions were wrong for the
+    same reason: Keycloak pages client models and filters representations it
+    cannot render afterwards, so neither a short page nor an empty one proves
+    there is nothing behind it. One request with a ceiling has no terminating
+    condition to get wrong — only a response AT the ceiling could have been cut
+    short, and that one stops the run.
     """
 
     def realm_of(self, count: int) -> list:
         return [{"clientId": f"client-{n}"} for n in range(count)]
 
-    def test_a_client_past_the_first_page_is_still_read(self):
-        every = self.realm_of(read_admin.PAGE_SIZE + 7)
-        self.answers({"realm": "commerce"}, every)
-        fetched = read_admin.fetch(self.values)["clients"]
-        self.assertEqual(len(fetched), len(every))
-        self.assertEqual(fetched[-1]["clientId"], f"client-{read_admin.PAGE_SIZE + 6}")
-
-    def test_an_exactly_full_page_is_not_assumed_to_be_the_last(self):
-        """The boundary a `len(page) == max` shortcut gets wrong.
-
-        Asserting the OFFSETS REQUESTED rather than the count returned, because
-        every terminating condition — right or wrong — returns a hundred
-        clients here. What tells them apart is whether a second request was
-        made at all.
-        """
-        served = []
+    def test_the_request_asks_for_the_whole_realm_at_once(self):
+        asked = []
 
         def get(url: str, _access: str):
             if "/clients" not in url:
                 return {"realm": "commerce"}
-            first = int(urllib.parse.parse_qs(
-                urllib.parse.urlsplit(url).query).get("first", ["0"])[0])
-            served.append(first)
-            return self.realm_of(read_admin.PAGE_SIZE) if first == 0 else []
+            asked.append(url)
+            return self.realm_of(9)
 
         read_admin.get = get
-        fetched = read_admin.fetch(self.values)["clients"]
-        self.assertEqual(len(fetched), read_admin.PAGE_SIZE)
-        self.assertEqual(served, [0, read_admin.PAGE_SIZE, read_admin.PAGE_SIZE * 2])
+        self.assertEqual(len(read_admin.fetch(self.values)["clients"]), 9)
+        self.assertEqual(len(asked), 1, asked)
+        self.assertIn(f"max={read_admin.CLIENT_LIMIT}", asked[0])
+        # `first` is not sent: there is nothing to skip when the ceiling is the
+        # whole realm, and a paged request is what the two wrong terminating
+        # conditions were built on.
+        self.assertNotIn("first=", asked[0])
 
-    def test_a_short_page_is_not_the_last_page_either(self):
-        """Keycloak drops representations it cannot render, mid-list.
-
-        A page of 100 client models can answer 99 entries with more clients
-        behind it, so a `len(page) < max` shortcut stops on a realm whose tail
-        is unjudged — and the tail is exactly where a violating client sits
-        when `web-app` is on page one.
-        """
-        served = []
-
-        def get(url: str, _access: str):
-            if "/clients" not in url:
-                return {"realm": "commerce"}
-            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
-            first = int(query.get("first", ["0"])[0])
-            served.append(first)
-            if first == 0:
-                # A filtered page: one model short of full, and not the last.
-                return self.realm_of(read_admin.PAGE_SIZE - 1)
-            if first == read_admin.PAGE_SIZE:
-                return [{"clientId": "implicit-flow-client", "implicitFlowEnabled": True}]
-            return []
-
-        read_admin.get = get
-        fetched = read_admin.fetch(self.values)["clients"]
-        self.assertIn("implicit-flow-client", [c["clientId"] for c in fetched])
-        # Four requests, not three: the loop stops on the SECOND empty page,
-        # because on this function's own premise a whole page of clients this
-        # account cannot view answers empty with more behind it.
-        self.assertEqual(served, [0, read_admin.PAGE_SIZE,
-                                  read_admin.PAGE_SIZE * 2, read_admin.PAGE_SIZE * 3])
-
-    def test_a_single_empty_page_is_not_the_end(self):
-        """The hole the first-empty-page rule left, one page-size coarser.
-
-        A run of clients this account cannot view can fill a whole page, so an
-        empty page in the middle of a realm looks exactly like the end of one.
-        Two consecutive empty pages is a bound rather than a proof, and the
-        residual is stated in `README.md`.
-        """
-        def get(url: str, _access: str):
-            if "/clients" not in url:
-                return {"realm": "commerce"}
-            first = int(urllib.parse.parse_qs(
-                urllib.parse.urlsplit(url).query).get("first", ["0"])[0])
-            if first == read_admin.PAGE_SIZE:
-                return []          # a page of clients this account cannot see
-            if first == read_admin.PAGE_SIZE * 2:
-                return [{"clientId": "past-the-invisible-page"}]
-            return [] if first else self.realm_of(read_admin.PAGE_SIZE)
-
-        read_admin.get = get
-        fetched = read_admin.fetch(self.values)["clients"]
-        self.assertIn("past-the-invisible-page", [c["clientId"] for c in fetched])
-
-    def test_a_realm_that_never_returns_two_empty_pages_stops(self):
-        """A server paging forever is not a realm to report the start of."""
-        read_admin.get = lambda url, _a: (
-            [{"clientId": "x"}] * read_admin.PAGE_SIZE if "/clients" in url
-            else {"realm": "commerce"})
+    def test_a_response_at_the_ceiling_is_refused_rather_than_truncated(self):
+        """The only answer that might not be the whole list is the one that stops."""
+        self.answers({"realm": "commerce"}, self.realm_of(read_admin.CLIENT_LIMIT))
         with self.assertRaises(SystemExit) as stop:
             read_admin.fetch(self.values)
-        self.assertIn("without two empty ones", str(stop.exception))
+        self.assertIn("refuses to judge", str(stop.exception))
+
+    def test_one_below_the_ceiling_is_the_whole_realm(self):
+        """The server had room to answer more and did not, so this is all of them."""
+        self.answers({"realm": "commerce"}, self.realm_of(read_admin.CLIENT_LIMIT - 1))
+        fetched = read_admin.fetch(self.values)["clients"]
+        self.assertEqual(len(fetched), read_admin.CLIENT_LIMIT - 1)
 
 
 class TheRedirect(unittest.TestCase):

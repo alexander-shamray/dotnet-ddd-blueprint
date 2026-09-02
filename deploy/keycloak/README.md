@@ -56,11 +56,19 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   setting at all — it is `Common.Web`'s, pinned by `JwtAuthenticationTests`.
   An operator told to configure a realm `ClockSkew` would go looking for
   something that does not exist.
-- **Everything else in the realm.** The audience mapper, the permission
-  vocabulary, the client scopes, the two development logins and the absence of
-  a second client secret are `tests/Common.Web.Tests/RealmImportTests.cs`'s,
-  and that suite is not superseded. This gate holds the subset that must be
-  true of *any* realm.
+- **Everything else in the realm — and it does not merely decline to check
+  it, it does not hold it.** What the gate judges is a projection of six named
+  fields, so the audience mapper, the permission vocabulary, the client scopes,
+  the two development logins and every client secret are not in the object at
+  all. Those belong to `tests/Common.Web.Tests/RealmImportTests.cs`, which is
+  not superseded. The projection is also why no message here can leak a
+  credential: there is none to leak.
+- **A realm with more clients than the ceiling.** The client list is read in
+  one request asking for far more than any realm this platform will have, and a
+  response *at* that ceiling stops the run rather than being truncated —
+  completeness is refused rather than inferred, because Keycloak pages client
+  models and filters representations afterwards, so no page boundary proves
+  anything.
 - **Whether the realm is reachable outside a rollout.** It is read when a
   deployment reads it, so a realm edited between rollouts is unobserved until
   the next one
