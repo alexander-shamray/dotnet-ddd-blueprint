@@ -219,6 +219,18 @@ constant without saying which would read as the reverse.
   regression — one `DELETE` had the same window — and both attempts are already
   past `Window` from the original commit, where §8.5's guarantee ends by
   design.
+- **A second race in that window WAS a regression, and this entry carried "not
+  a regression" over it for four review rounds.** A key names a command and not
+  a row, so a retry past the guarantee can *commit* under a key this pass has
+  already selected — and with three purge replicas, a second purger's key-only
+  delete removes that replacement: a row inside its window with a live claim
+  behind it. The statement this split replaced matched on age and could not.
+  The `DELETE` now repeats the cutoff, which restores the property rather than
+  adding one. **The lesson is the one this repository keeps paying for**: a
+  refactor that splits an atomic statement has to be checked against what the
+  atomicity was buying, and "the same race existed before" was true of one half
+  and hid the other. Found by the fifth review round; no test stages it, because
+  the interleaving needs three purgers and a retry.
 
 ## PR-33 — the two terms an allowance stood in for, and what closed them
 

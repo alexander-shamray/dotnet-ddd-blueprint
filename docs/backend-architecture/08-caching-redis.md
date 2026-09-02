@@ -1204,11 +1204,14 @@ ORDER BY CommittedAt;
 -- Delimited, because Key is a reserved word in T-SQL and the column is named
 -- for what it holds rather than around the parser.
 --
--- No age predicate here, and its absence is deliberate rather than saved work:
--- the rows were selected by age moments ago and are addressed by primary key,
--- so repeating the cutoff would re-evaluate it against a clock that may have
--- moved between the two statements — which is the coupling the split exists to
--- remove, reintroduced at the last step.
+-- THE AGE PREDICATE IS REPEATED, and leaving it out was an ABA hole rather
+-- than saved work. A key names a command, not a row: past the guarantee the
+-- key is claimable again, so a retry can commit a FRESH marker under a key
+-- this pass already selected, and §15.3's three replicas can have a second
+-- purger's delete arrive after that. A key-only delete removes the
+-- replacement. The single statement this split replaced matched on age and
+-- could not; repeating the cutoff restores exactly that. It couples nothing —
+-- both ends are the same server's clock, as in the SELECT above.
 --
 -- Chunked at a thousand keys by the caller. Dapper expands `IN @Keys` into one
 -- parameter per element and SQL Server refuses more than 2,100 of them, where
@@ -1216,18 +1219,26 @@ ORDER BY CommittedAt;
 -- rows considered per batch instead of quietly capping it at a limit belonging
 -- to a different layer.
 DELETE FROM ordering.IdempotencyMarkers
-WHERE [Key] IN @Keys;
+WHERE [Key] IN @Keys
+    AND CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
 ```
 
-> **Two statements are a window one statement did not have, and it is not a
-> new one.** A retry can re-claim a key between the `SELECT` and the `DELETE`,
-> and the marker then goes while a claim is live — but a retry arriving during
-> the single `DELETE` met the same outcome, because that statement deleted the
-> row the retry's transaction was about to read. What bounds it either way is
-> that both attempts are already past `Retention` from the original commit,
-> which is where this section's guarantee ends by design. Stated because a
-> reader counting statements will find it and should not have to work out
-> whether it arrived with ADR-039.
+> **Two statements are a window one statement did not have, and one half of it
+> was new.** A retry can re-claim a key between the `SELECT` and the `DELETE`
+> and the marker then goes while a claim is live — that half is old, because a
+> retry arriving during the single `DELETE` met the same outcome, and both
+> attempts are past `Retention` from the original commit either way, which is
+> where this section's guarantee ends by design.
+>
+> **The other half was a genuine regression and is closed rather than
+> tolerated.** A key names a command and not a row, so the retry can *commit*
+> under that key — and with [§15.3](15-cicd-deployment.md)'s three replicas, a
+> second purger holding the same selected key can delete the replacement: a row
+> inside its window with a live claim behind it, after which the next retry
+> runs the command a third time. The single statement could not do that,
+> because it matched on age and a replacement is stamped `now`. The `DELETE`
+> above therefore repeats the cutoff, which is what makes the split safe rather
+> than merely equivalent.
 
 > **The floor is the claim's window exactly, and it was the claim's window
 > *plus* an allowance until both of the things that reordered the two expiries

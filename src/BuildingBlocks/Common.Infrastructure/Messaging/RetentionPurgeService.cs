@@ -33,11 +33,14 @@ namespace Common.Infrastructure.Messaging;
 /// not, and why its pass is the only one that asks something before deleting.
 /// </para>
 /// <para>
-/// <b>Age selects there and does not delete.</b> The other two compare a
-/// column against a cutoff and are done; the marker's compares a column
-/// against a cutoff to find <em>candidates</em>, and then asks
+/// <b>Age is necessary there and no longer sufficient.</b> The other two
+/// compare a column against a cutoff and are done; the marker's compares a
+/// column against a cutoff to find <em>candidates</em>, asks
 /// <see cref="Common.Application.IIdempotencyStore"/> which of them it has
-/// already let go of. Deleting on age alone put the claim's window and the
+/// already let go of, and then re-checks the same cutoff as it deletes — a key
+/// names a command rather than a row, so a retry can commit a fresh marker
+/// under one this pass already selected. Deleting on age alone put the claim's
+/// window and the
 /// marker's on two servers' clocks with nothing coupling their rates, so a
 /// forward step of the database's deleted the row while the claim it backs up
 /// was still live
@@ -139,9 +142,9 @@ public sealed class RetentionPurgeService : BackgroundService
 
         // The marker is TWO statements where the other two are one, and the
         // split is this pass's whole subject rather than a batching detail.
-        // Age still selects, but age no longer deletes: what deletes is
-        // IIdempotencyStore.UnheldAsync agreeing that the claim behind the row
-        // is gone (#171, ADR-039).
+        // Age is still necessary on both of them and is no longer SUFFICIENT
+        // on either: what decides is IIdempotencyStore.UnheldAsync agreeing
+        // that the claim behind the row is gone (#171, ADR-039).
         //
         // The window alone used to decide it, and that put two clocks either
         // side of one comparison. Redis expires the claim after
@@ -180,16 +183,28 @@ public sealed class RetentionPurgeService : BackgroundService
         // Delimited, because Key is a reserved word in T-SQL and the column is
         // named for what it holds rather than around the parser.
         //
-        // No age predicate here, and its absence is deliberate rather than
-        // saved work: the rows were selected by age moments ago and are
-        // addressed by primary key, so repeating the cutoff would re-evaluate
-        // it against a clock that may have moved between the two statements —
-        // which is the coupling this split exists to remove, reintroduced at
-        // the last step.
+        // THE AGE PREDICATE IS REPEATED HERE, and leaving it out was an ABA
+        // hole rather than saved work. A key names a command, not a row: past
+        // the guarantee the key is claimable again, so a retry can re-run the
+        // command and commit a FRESH marker under the same key between this
+        // pass's SELECT and its DELETE. §15.3 ships three replicas, so two
+        // purgers can select the same row and the second one's delete arrives
+        // after the first has removed it and after the replacement exists. A
+        // key-only delete removes that replacement — a row inside its window
+        // with a live claim behind it — and the retry after that runs the
+        // command a third time.
+        //
+        // The single statement this split replaced could not do that, because
+        // it matched on age and a replacement is stamped `now`. Repeating the
+        // cutoff restores exactly that property. It couples nothing: both ends
+        // of this comparison are the same server's clock, as they are in the
+        // SELECT, and a step in either direction can only spare rows — which is
+        // the direction a marker may err in.
         _idempotencyDeleteSql =
             $"""
             DELETE FROM {markers.QualifiedName}
-            WHERE [Key] IN @Keys;
+            WHERE [Key] IN @Keys
+                AND CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
             """;
     }
 
@@ -315,7 +330,7 @@ public sealed class RetentionPurgeService : BackgroundService
             // is the failure this call exists to remove.
             IReadOnlyCollection<string> unheld = await _claims.UnheldAsync(candidates, ct);
 
-            int deleted = await DeleteKeysAsync(connection, unheld, ct);
+            int deleted = await DeleteKeysAsync(connection, unheld, windowSeconds, ct);
             total += deleted;
 
             // Two ways to stop and both are needed. A short SELECT means the
@@ -333,12 +348,21 @@ public sealed class RetentionPurgeService : BackgroundService
     }
 
     /// <summary>
-    /// Deletes the given keys, chunked to stay inside SQL Server's parameter
-    /// limit. Returns the rows actually removed.
+    /// Deletes the given keys that are still past their window, chunked to stay
+    /// inside SQL Server's parameter limit. Returns the rows actually removed.
     /// </summary>
+    /// <remarks>
+    /// <b>The window is re-checked rather than trusted from the selection.</b>
+    /// A key names a command and not a row, so a retry can commit a fresh
+    /// marker under a key this pass has already selected — and a delete
+    /// matching on the key alone would remove it. See the statement's own
+    /// comment; this is why the count returned can be lower than the number of
+    /// keys handed in.
+    /// </remarks>
     private async Task<int> DeleteKeysAsync(
         IDbConnection connection,
         IReadOnlyCollection<string> keys,
+        int windowSeconds,
         CancellationToken ct)
     {
         int deleted = 0;
@@ -348,7 +372,7 @@ public sealed class RetentionPurgeService : BackgroundService
             deleted += await connection.ExecuteAsync(
                 new CommandDefinition(
                     _idempotencyDeleteSql,
-                    new { Keys = chunk },
+                    new { Keys = chunk, WindowSeconds = windowSeconds },
                     cancellationToken: ct));
         }
 

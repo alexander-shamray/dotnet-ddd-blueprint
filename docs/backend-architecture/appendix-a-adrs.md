@@ -2660,15 +2660,28 @@ This decision keeps the TTL and moves the question instead.
   Redis outage costs a purge rather than a guarantee. Markers accumulate while
   it lasts, which is the outbox's failure mode and not this one's.
 - **The marker's pass is two statements where the other two are one, and the
-  window between them is a race this record does not close.** A retry can
-  re-claim a key between the `SELECT` and the `DELETE`, and the marker then
-  goes while a claim is live. It is **not a regression**: the same race existed
-  when one `DELETE` did the work, because a retry arriving during that
-  statement met the same outcome — the marker is deleted and the retry's
-  transaction reads no marker. What bounds it is that both attempts are already
-  past `Window` from the original commit, which is where §8.5's guarantee ends
-  by design. Stated because a reader counting statements will find it and
-  should not have to work out whether it is new.
+  window between them holds one race this record does not close and one it
+  had to.** A retry can re-claim a key between the `SELECT` and the `DELETE`,
+  and the marker then goes while a claim is live. That much is **not a
+  regression**: the same race existed when one `DELETE` did the work, because a
+  retry arriving during that statement met the same outcome — the marker is
+  deleted and the retry's transaction reads no marker. What bounds it is that
+  both attempts are already past `Window` from the original commit, which is
+  where §8.5's guarantee ends by design.
+- **The other half WAS a regression, and the `DELETE` repeats the age predicate
+  because of it.** A key names a command and not a row. Past the guarantee the
+  key is claimable, so a retry can *commit* under it and write a fresh marker —
+  and with [§15.3](15-cicd-deployment.md)'s three replicas, a second purger
+  holding the same selected key can then delete that replacement: a row inside
+  its window with a live claim behind it, after which the next retry runs the
+  command a third time. The single statement could not do it, because it
+  matched on age and a replacement is stamped `now`. **A key-only delete was
+  therefore weaker than what it replaced**, which is the one thing this split
+  was not allowed to be. Repeating the cutoff couples nothing — both ends are
+  the same server's clock, exactly as in the `SELECT` — and a step in either
+  direction can only spare rows, which is the direction a marker may err in.
+  Found by review rather than by a test: the interleaving needs three purgers
+  and a retry, and nothing here stages one.
 - **The candidates are ordered oldest first, and the pass stops on a batch it
   could not fully delete.** A batch the store still holds keys from would be
   returned unchanged by the next `SELECT` — nothing about those rows has moved
