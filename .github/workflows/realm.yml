@@ -1,3 +1,5 @@
+name: Realm
+
 # §11.3's token obligations, against the one realm this repository owns.
 #
 # ADR-033 composes a 330-second revocation bound out of a 300-second realm
