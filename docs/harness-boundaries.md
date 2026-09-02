@@ -717,6 +717,16 @@ and a path deny reaches a `Bash` command naming the path, so the `wc -c`
 preflight was refused beside it. The harness offers no deny that reaches
 the parent and not the child, so the review is readable to the writing step
 and the split holds by discipline — stated in the command as its residual.
+**The writing invocation denies `Bash` whole, and that is the fifth entry
+arriving here**: it held `Bash(wc:*)` for a size preflight and `Bash(ls:*)`
+for a link check, and a redirection on either writes what the tree deny
+refuses, so the deny was defence in depth for as long as they stood beside
+it. The size check moved into the adjudicator, which has no `Bash` and
+returns `oversized-review`; the link check became a stated property — the
+repository tracks no symbolic link, measured, and an invocation without
+`Bash` cannot add one. The bare tool name is the documented form of a
+`disallowed-tools` entry; the pattern form is the one the fifth entry
+measured.
 **The sweeps' item 5 (#75) closed by the same shape** — a second read-only
 dispatch returns a verdict, the parent opens nothing in `$work`, and
 `gh-issue-create.sh` leaves `gh issue create` with no free parameter — so
