@@ -119,7 +119,11 @@ database:
 # and `check_permissions.py` holds to the code. **Provisioning those accounts
 # on a deployed broker is an obligation this repository states and does not
 # check** — the same division §15.4 draws for every Secret, and the same one
-# ADR-033 draws for the realm.
+# ADR-033 and ADR-034 draw for the realm. ADR-040 narrows what an unchecked
+# realm can cost without discharging the obligation: no host accepts a token
+# with more than the revocation bound left to live, so a long-lived one is
+# contained rather than detected, and the realm still owes the setting.
+# Nothing here does even that much for a broker account.
 broker:
   enabled: true
   secretRef:

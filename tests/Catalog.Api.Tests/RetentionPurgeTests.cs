@@ -14,8 +14,10 @@ namespace Catalog.Api.Tests;
 /// §9.4's, §9.5's and §8.5's retention purges, driven a pass at a time against
 /// the real tables. The predicate that separates them is the whole subject: the
 /// outbox deletes on <c>ProcessedAt IS NOT NULL</c> <em>and</em> age, the inbox
-/// and the marker on age alone, and getting the first one wrong is silent,
-/// permanent data loss.
+/// on age alone, and the marker on age <em>and</em> the claim store having let
+/// its key go — age selects there and no longer decides (ADR-039). Getting the
+/// outbox's wrong is silent, permanent data loss; getting the marker's wrong is
+/// a duplicate write.
 /// </summary>
 [Collection(nameof(IntegrationCollection))]
 public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
@@ -187,19 +189,19 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_marker_is_purged_on_age_alone()
+    public async Task An_unclaimed_marker_past_its_window_is_purged_and_a_recent_one_is_not()
     {
-        // The inbox's asymmetry one table over, and the marker's window is the
-        // one that is not housekeeping: a purged marker loses the row that
-        // refuses a retry of a command that already committed. Age alone,
-        // because every row here records work that finished — so what protects
-        // a live marker is the window and nothing else.
+        // The window half of the predicate, isolated. Neither key here was ever
+        // claimed, so the store reports both unheld and what separates them is
+        // age alone — which is a statement about this test's staging, not about
+        // the pass: since ADR-039 a marker goes only when it is past its window
+        // AND its claim is gone. The two tests below supply that other half.
         //
         // Two rows rather than one, which is the whole point. The combined pass
         // below stages a single already-old marker, so a DELETE with no WHERE —
         // or one that ignored CommittedAt — would satisfy it: every row it is
-        // given is purgeable. This is the test that fails when the predicate
-        // goes, and the recent row is what makes it one.
+        // given is purgeable. This is the test that fails when the window drops
+        // out of the predicate, and the recent row is what makes it one.
         await fixture.StageIdempotencyMarkersAsync(
             new IdempotencyMarker(Key(), LongAgo),
             new IdempotencyMarker(Key(), Recently));
@@ -208,6 +210,153 @@ public sealed class RetentionPurgeTests(ServiceFixture fixture) : IAsyncLifetime
 
         IdempotencyMarker survivor = (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
         survivor.CommittedAt.ShouldBeGreaterThan(LongAgo);
+    }
+
+    [Fact]
+    public async Task A_marker_whose_claim_is_still_held_survives_however_old_the_row_is()
+    {
+        // #171, staged from the only side a test can reach it. The failure was
+        // a forward step of the DATABASE's clock relative to Redis's, and no
+        // test here owns the container's clock — but the step's whole effect is
+        // that a row reads as past its window while the claim behind it is
+        // still live, and a row staged thirty days old under a live claim is
+        // that state arrived at from the other end.
+        //
+        // The window is not what keeps this row: the control test above stages
+        // the same LongAgo under keys nothing ever claimed and watches them go.
+        // What keeps this one is the pass asking the store that owns the claim,
+        // and finding it still held (ADR-039).
+        string key = Key();
+
+        await fixture.StageIdempotencyMarkersAsync(new IdempotencyMarker(key, LongAgo));
+
+        string? claim = await fixture.IdempotencyClaims.TryClaimAsync(
+            key,
+            IdempotencyRetention.Window,
+            TestContext.Current.CancellationToken);
+
+        claim.ShouldNotBeNull("the key is this test's own, so nothing else can be holding it");
+
+        (await fixture.PurgeRetentionAsync()).Idempotency.ShouldBe(
+            0,
+            "the claim behind this key is still live, so the row that refuses its retry may not go");
+
+        // The table as well as the count, because a pass that deleted the row
+        // and miscounted is a different defect from one that kept it.
+        (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task The_same_row_goes_once_the_claim_behind_it_has_been_released()
+    {
+        // The companion, and what makes the test above about the claim rather
+        // than about anything else that might keep a row. Same row, same age,
+        // same pass; the one thing that differs is whether the store still
+        // holds the key. Without it, a pass that had simply stopped deleting
+        // markers would satisfy the assertion above and nothing would notice —
+        // a gate that stops covering what it claims to, which is this
+        // repository's most-repeated failure.
+        string key = Key();
+
+        await fixture.StageIdempotencyMarkersAsync(new IdempotencyMarker(key, LongAgo));
+
+        string? claim = await fixture.IdempotencyClaims.TryClaimAsync(
+            key,
+            IdempotencyRetention.Window,
+            TestContext.Current.CancellationToken);
+
+        claim.ShouldNotBeNull();
+
+        await fixture.IdempotencyClaims.ReleaseAsync(
+            key,
+            claim,
+            TestContext.Current.CancellationToken);
+
+        (await fixture.PurgeRetentionAsync()).Idempotency.ShouldBe(1);
+
+        (await fixture.IdempotencyMarkersAsync()).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_held_key_costs_its_own_batch_and_not_the_rest_of_the_pass()
+    {
+        // The pass stops on NO PROGRESS, not on an incomplete batch, and the
+        // difference is most of a pass's capacity. `deleted < candidates.Length`
+        // was the earlier rule, on the premise that a batch the store would not
+        // release entirely comes back unchanged — which is false: TOP refills
+        // the deleted slots with the next-oldest rows, so one held key at the
+        // head ended the pass after roughly one batch.
+        //
+        // Five rows, batches of two, and the middle one held. Under the old
+        // rule the pass deletes the first two, meets a partial second batch and
+        // stops at three. Under this one it keeps going while it is making
+        // progress and stops when a batch deletes nothing — four, every row but
+        // the held one. The two numbers differ, which is what makes this a test
+        // rather than a restatement.
+        string held = Key();
+
+        await fixture.StageIdempotencyMarkersAsync(
+            new IdempotencyMarker(Key(), LongAgo.AddMinutes(-5)),
+            new IdempotencyMarker(Key(), LongAgo.AddMinutes(-4)),
+            new IdempotencyMarker(held, LongAgo.AddMinutes(-3)),
+            new IdempotencyMarker(Key(), LongAgo.AddMinutes(-2)),
+            new IdempotencyMarker(Key(), LongAgo.AddMinutes(-1)));
+
+        (await fixture.IdempotencyClaims.TryClaimAsync(
+            held,
+            IdempotencyRetention.Window,
+            TestContext.Current.CancellationToken)).ShouldNotBeNull();
+
+        // The floor is read rather than restated, so this stays correct if
+        // IdempotencyRetention.Window is retuned.
+        RetentionPolicy twoAtATime = new()
+        {
+            BatchSize = 2,
+            MaxBatchesPerPass = 5,
+            IdempotencyWindow = IdempotencyRetention.MarkerFloor
+        };
+
+        (await fixture.PurgeWithAsync(twoAtATime)).Idempotency.ShouldBe(
+            4,
+            "stopping on a partial batch would have ended the pass at three");
+
+        IdempotencyMarker survivor = (await fixture.IdempotencyMarkersAsync()).ShouldHaveSingleItem();
+        survivor.Key.ShouldBe(held, "the row whose claim is still live is the one that stays");
+    }
+
+    [Fact]
+    public async Task A_batch_spanning_more_than_one_delete_chunk_is_deleted_whole()
+    {
+        // The chunked delete, which nothing else here reaches. `BatchSize`
+        // defaults to 5,000 and the delete is chunked at 900 rows — each costs
+        // two parameters, its key and its version, against SQL Server's 2,100
+        // — so every other marker case in this file deletes inside a single
+        // chunk and the second one never runs. An early `break`, an off-by-one
+        // on the chunk boundary, or a `Take` where a `Skip` belonged would
+        // leave all of them green and surface first against a production
+        // backlog.
+        //
+        // MORE THAN ONE CHUNK, because the boundary is the defect: a batch
+        // inside one chunk proves nothing. The figure is coupled to
+        // `RetentionPurgeService.RowsPerDelete`, which is private because it is
+        // not a knob — so raising that constant to 1,001 or beyond makes this
+        // test pass while covering nothing, and its comment there says to move
+        // this one with it. That is a rule in two places, stated rather than
+        // arrived at.
+        const int candidates = 1_001;
+
+        IdempotencyMarker[] rows =
+            [.. Enumerable.Range(0, candidates).Select(_ => new IdempotencyMarker(Key(), LongAgo))];
+
+        await fixture.StageIdempotencyMarkersAsync(rows);
+
+        // Every key here was staged directly and never claimed, so the store
+        // reports all of them unheld and the pass is about the delete alone.
+        (await fixture.PurgeRetentionAsync()).Idempotency.ShouldBe(
+            candidates,
+            "a second chunk that never ran would report a thousand and leave the remainder");
+
+        (await fixture.IdempotencyMarkersAsync()).ShouldBeEmpty();
     }
 
     [Fact]

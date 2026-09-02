@@ -14,12 +14,28 @@ namespace Common.Web.Tests;
 /// <para>
 /// <b>The realm this reads is §14.1's Compose realm, and there is no other in
 /// this repository.</b> Every chart points at an externally provisioned
-/// authority, so the security properties asserted below — the access-token
-/// lifetime, the absence of a client override, the absence of a refresh token
-/// — are verified for the realm the platform provisions itself and stated as
-/// obligations for one it does not. ADR-033 and ADR-034 carry that division;
-/// it is the same one §15.4 draws for every Secret. Read a green run here as
-/// "the local realm holds the shape", never as "the platform does".
+/// authority, so the security properties asserted below are verified for the
+/// realm the platform provisions itself and stated as obligations for one it
+/// does not. ADR-033 and ADR-034 carry that division; it is the same one
+/// §15.4 draws for every Secret. Read a green run here as "the local realm
+/// holds the shape", never as "the platform does".
+/// </para>
+/// <para>
+/// <b>One of them is bounded at run time as well as asserted here, and the
+/// split is worth carrying because it is not tidy.</b> Every host refuses a
+/// token with more than
+/// <see cref="AuthenticationExtensions.RevocationBound"/> of life left in it,
+/// whatever realm issued it (#157, ADR-040) — so the lifetime assertions below
+/// restate a number the platform also holds inbound tokens to, which is why
+/// this file reads the constant rather than its own literal.
+/// <b>That is containment and not verification</b>: the guard gates a token's
+/// <em>remaining</em> life, so a realm set to five hours has its tokens
+/// refused for most of each one and admitted in the last window — the issued
+/// lifetime and any client-level override stay obligations on whoever
+/// provisions the realm. The refresh-token attribute and the flow flags are
+/// not even contained, because a refresh token never reaches a host at all.
+/// <b>So read a green run here as "the local realm holds the shape" and
+/// nothing more</b>; #157 stays open in full.
 /// </para>
 /// </summary>
 /// <remarks>
@@ -209,9 +225,19 @@ public class RealmImportTests
         // it a fact rather than a preference: Common.Web sets no lifetime at
         // all — its AddJwtBearer validates the `exp` Keycloak wrote — so the
         // chapter's number and the realm's are two statements with nothing
-        // between them. Hence a literal here and no constant in Common.Web: a
+        // between them. This carried a literal for exactly that reason: a
         // constant nothing reads would be a registration standing in for a
         // control, which is the shape ADR-033 was written to withdraw.
+        //
+        // SOMETHING READS IT NOW, so the literal is gone and the condition
+        // that justified it is the thing that changed rather than the taste
+        // that produced it. AddJwtAuthentication refuses a token carrying more
+        // than AuthenticationExtensions.RevocationBound of remaining life —
+        // the lifetime plus the skew — so the number below is enforced against
+        // every token every host accepts and not only asserted against the one
+        // realm this repository ships (#157, ADR-040). Reading the constant is
+        // what stops the control and this assertion drifting apart; a 300 in
+        // both files agrees until one of them is edited.
         //
         // This is most of the exposure and not a tuning knob. There is no
         // denylist consumer and no introspection call (ADR-033), so a token
@@ -227,7 +253,7 @@ public class RealmImportTests
         // set — JwtAuthenticationTests asserts ClockSkew is thirty seconds —
         // so asserting it here as well would put one number in two suites and
         // give it two places to drift from.
-        const int statedLifetimeSeconds = 300;
+        int statedLifetimeSeconds = (int)AuthenticationExtensions.AccessTokenLifetime.TotalSeconds;
 
         Root.GetProperty("accessTokenLifespan").GetInt32().ShouldBe(
             statedLifetimeSeconds,

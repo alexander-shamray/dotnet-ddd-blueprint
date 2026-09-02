@@ -1965,6 +1965,25 @@ is a decision that supersedes this record rather than a gap someone may quietly
 fill: it would owe a producer, a consumer reachable from every host including
 the two with no Redis today, and a fan-out rule across per-service keyspaces.
 
+> **The callout above is amended by
+> [ADR-040](#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound),
+> and nothing here has been edited.** The decision this record took — a bounded
+> revocation window of 330 seconds, no denylist and no introspection call — is
+> untouched and still binding, and so is the arithmetic behind it.
+>
+> **What moved is where the number is held to.** This record says a deployed
+> realm can issue five-hour access tokens while every sentence here still reads
+> 300, that the realm half is stated rather than closed, and that the bound is
+> therefore half-guaranteed. **All three of those remain true**, and ADR-040
+> does not discharge the obligation this callout states: every host now refuses
+> a token carrying more than the 330 seconds above, whatever realm issued it,
+> which bounds what an unchecked realm can cost without checking it. A
+> five-hour token is refused for most of its life and admitted in its last
+> window, so the realm still owes `accessTokenLifespan` 300 and no client-level
+> override, and nothing here reads a deployed realm to find out. **The
+> `ClockSkew` sentence stands exactly as written**, and is worth keeping where
+> an operator reaching for a realm setting will read it.
+
 ## ADR-034 — The browser holds an access token and no refresh token
 
 **Decision.** [§11.2](11-identity-authorization.md)'s browser client obtains a
@@ -2017,6 +2036,19 @@ unaffected — the realm keeps
 `directAccessGrantsEnabled` on `web-app` so a developer can obtain a token with
 `curl`, which §14.1 documents as a local affordance and §11.2 now names rather
 than leaving to a realm-file description.
+
+> **This record's own gap is *not* closed by
+> [ADR-040](#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound),
+> and saying so is the point of this note.** ADR-033's lifetime became
+> enforceable at every host because a token carries how long it has left. A
+> refresh token carries nothing to a host: it passes between the browser and
+> Keycloak and never reaches a service, so `use.refresh.tokens`,
+> `standardFlowEnabled` and `directAccessGrantsEnabled` remain obligations on
+> whoever provisions a deployed realm, exactly as the callout above states.
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> stays open for this half. A reader who has just seen ADR-033's amendment
+> should not carry it across to this record, which is why the two notes are
+> written the opposite way round.
 
 ## ADR-035 — An integration event carries identifiers, not personal data
 
@@ -2375,6 +2407,27 @@ deletes it is a retention window this repository chooses.
 > the allowance existed, which is why they are worth keeping where somebody
 > reaching for one will read them.
 
+> **The same consequence is superseded a second time, by
+> [ADR-039](#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it),
+> and this is a separate note because the two records moved different things.**
+> ADR-038 moved the floor's composition. ADR-039 moved its **job**, and in
+> doing so disproved a sentence above that a reader would otherwise take as
+> live: *setting the window below the Redis claim's life leaves a stretch in
+> which the key is claimable again and nothing remembers the commit*. It does
+> not any more. §9.5's purge deletes a marker only once the claim store reports
+> the key gone, so a shorter window re-opens nothing — it asks for a guarantee
+> shorter than the claim already gives, which is a setting that cannot do what
+> it says. `RetentionPolicy` still refuses it, for that smaller reason, and its
+> refusal message was rewritten rather than left arguing a failure the code no
+> longer has.
+>
+> **What survives untouched is this record's decision and the argument that
+> earned the floor at all**: the marker is a row in the command's own
+> transaction, and its window is a correctness setting where the outbox's and
+> the inbox's are housekeeping. That is why it is still the only one of the
+> three with a floor, and why what the floor now bounds — how long the
+> guarantee lasts — is worth bounding.
+
 ## ADR-038 — The marker and its claim are ordered by construction, not a margin
 
 **Decision.** [§8.5](08-caching-redis.md)'s Redis claim and [§6.3](06-cqrs.md)'s
@@ -2516,6 +2569,346 @@ clock is a service that needs a different seam, not a different column.
   costs nothing — a marker outliving its claim by more is what the floor is
   for. What is not harmless is the forward correction that follows, and that is
   #171's forward step rather than a hazard of its own.
+
+> **The two consequences about the clocks are superseded by
+> [ADR-039](#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it),
+> and nothing here has been edited.** The decision this record took — the
+> claim's window starts before the marker is stamped, by the shape of the code
+> rather than by a margin — is untouched and still binding, and so is every
+> argument for it. `CompleteAsync` still preserves what the claim had left and
+> `CommittedAt` is still the database's clock; both are what ADR-039 builds on.
+>
+> **What moved is the term this record could only state.** It says the two
+> windows are counted by two servers with nothing coupling their rates, that
+> what absorbs a forward step is the handler's runtime plus whatever the window
+> exceeds the floor by, and that closing it means one time source for both
+> deadlines. The purge no longer counts a window against the claim's at all —
+> it asks the store whether the claim is gone — so there are not two rates to
+> couple. The paragraph refusing a third margin is the reason ADR-039 does not
+> add one, which is why it is worth keeping where somebody reaching for one
+> will read it.
+
+## ADR-039 — The marker's purge asks the claim rather than out-counting it
+
+**Decision.** [§9.5](09-messaging.md)'s retention pass stops deciding a
+marker's fate by comparing one window against another. It still selects
+candidates by age — `CommittedAt` against a cutoff the database computes, which
+is [ADR-038](#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)'s
+and is unchanged — and then asks `IIdempotencyStore.UnheldAsync` which of those
+keys the claim store has already let go of, deleting only those. A marker whose
+claim is still held survives its own window. `RetentionPolicy.IdempotencyWindow`
+keeps its floor and stops being the thing that makes the ordering true.
+
+**Why.** ADR-038 made the two *start* events ordered by construction and was
+explicit that the two *expiries* were not. Redis expires the claim after
+`IdempotencyRetention.Window` elapsed by **Redis's** clock; the purge deleted
+the marker after `IdempotencyWindow` elapsed by **SQL Server's**. Nothing
+couples those two rates, so a forward step of the database's clock — an NTP
+correction, a host migration, a resumed snapshot, an operator setting the time
+— carried the cutoff past a marker whose claim was still live. The claim then
+expired into a table that had already forgotten the commit, and the next retry
+claimed a free key and ran a committed command a second time: the duplicate
+write [§8.5](08-caching-redis.md) exists to prevent, arriving at the boundary
+the floor is supposed to hold.
+
+**A margin was not available, and this is the third time of asking.** ADR-037
+put a five-minute `MarkerLeadAllowance` on the floor for two terms; ADR-038
+removed both at the source and retired the allowance, recording that a number
+would repeat the mistake in a third term rather than close it. That reasoning
+applies here unchanged and more strongly: a clock step is bounded by nothing
+this repository can assert, and the honest size of the number is unknown. What
+absorbed it instead was the handler's runtime plus whatever the configured
+window exceeded the floor by — six days on the shipped defaults, and **nothing
+at all at the floor**, which is the value [§8.5](08-caching-redis.md) and
+`docs/pr-decision-log.md` both name as the supported way to buy back the late
+retry ADR-037 costs. The one configuration this platform recommends narrowing
+towards is the one with no margin left.
+
+**The comparison was standing in for a fact, and the fact has an owner.** *The
+marker outlives the claim* is arithmetic over two windows. *The claim is gone*
+is a question, and the store that holds the claim is the only thing that can
+answer it. Asking removes both clocks from the decision rather than
+synchronising them — there is no quantity left to be counted at a rate — and it
+is exact where the arithmetic was approximate. It costs one lookup per
+candidate on a pass that runs hourly, batched into one pipelined round trip.
+
+**Shape 1 from [#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171)
+was to give the claim a database deadline, and it was not taken.** The claim
+could carry an absolute deadline read from `SYSDATETIMEOFFSET()` instead of a
+Redis TTL, which would make the whole comparison one clock's arithmetic end to
+end. It costs §8.5 the property that **a claim expires without anybody running
+a purge**: a held key would then depend on housekeeping to be freed, which is
+the postponement ADR-037 refused when it declined to hold claims rather than
+release them, arriving by a different route. It would also put a database round
+trip inside the fast atomic exclusion whose whole value is that it is neither.
+This decision keeps the TTL and moves the question instead.
+
+**Consequences.**
+
+- **The purge depends on the claim store, and a service that has markers
+  without Redis no longer starts.** `RetentionPurgeService` takes
+  `IIdempotencyStore` as a constructor argument, so the failure is a DI
+  resolution error at startup rather than a pass that silently deletes what it
+  should have asked about. That matches how the store is registered — "a
+  service that has Redis has the store, and one that does not cannot
+  half-have it" — and §4.5's scaffold ships both together.
+- **An unreachable claim store purges no markers, and that is the safe
+  direction.** `UnheldAsync` answers for every key or throws; there is no
+  partial answer, because a key reported unheld because its lookup failed is
+  the deleted marker this record exists to prevent. The throw reaches
+  `ExecuteAsync`'s existing catch, which logs and retries next interval, so a
+  Redis outage costs the **marker** pass rather than a guarantee. It costs no
+  more than that, and the scope is worth stating precisely: `PurgeAsync` runs
+  the outbox and the inbox first, so those deletions are already committed when
+  `UnheldAsync` throws — nothing rolls back and nothing else is skipped. Markers
+  accumulate while it lasts, which is the outbox's failure mode and not this
+  one's.
+- **The marker's pass is two statements where the other two are one, and the
+  window between them holds one race this record does not close and one it
+  had to.** A retry can re-claim a key between the `SELECT` and the `DELETE`,
+  and the marker then goes while a claim is live. That much is **not a
+  regression**: the same race existed when one `DELETE` did the work, because a
+  retry arriving during that statement met the same outcome — the marker is
+  deleted and the retry's transaction reads no marker. What bounds it is that
+  both attempts are already past `Window` from the original commit, which is
+  where §8.5's guarantee ends by design.
+- **The other half WAS a regression, and it is closed by a version bound
+  rather than by a predicate.** A key names a command and not a row. Past the
+  guarantee the key is claimable, so a retry can *commit* under it and write a
+  fresh marker — and with [§15.3](15-cicd-deployment.md)'s three replicas, a
+  second purger holding the same selected key can then delete that replacement:
+  a row inside its window with a live claim behind it, after which the next
+  retry runs the command a third time. The single statement could not do it,
+  because it matched on age and a replacement is stamped `now`. **A key-only
+  delete was therefore weaker than what it replaced**, which is the one thing
+  this split was not allowed to be.
+- **Repeating the age cutoff was the first fix and was wrong, which is recorded
+  because the reasoning is the trap.** It restores what the single statement
+  matched on, and it re-reads `SYSDATETIMEOFFSET()` to do it — so a forward
+  step of the database's clock between the two statements makes the replacement
+  look old enough and the stale delete takes it anyway. **An age against a
+  moving clock cannot guard an ABA**, and this record exists because that clock
+  moves; a fix that assumes it does not is this decision arguing against
+  itself.
+- **No predicate closes it, and the third failure is what settled the shape.**
+  A bound on the newest selected `CommittedAt` survives a *forward* step, which
+  defeats the age cutoff; a *backward* step defeats the bound; and the two
+  together fall to a backward step followed by a correction, which leaves the
+  replacement both below the bound and past a re-read cutoff. **An arbitrary
+  clock cannot be out-predicated**, and a fourth attempt would have been the
+  guess this appendix spends ADR-037 and ADR-038 refusing.
+- **So the `DELETE` names the row rather than describing it.** It joins the
+  `(Key, CommittedAt)` pairs the `SELECT` returned: the key names the command
+  and the timestamp names the write, so a replacement — a different write —
+  cannot be matched — **by construction, and the next consequence is the limit
+  of that**. It is the property the single statement had for free, and buying
+  it back is what the split owed. Rows are chunked at 900 rather than 1,000
+  because each now costs two parameters against SQL Server's 2,100.
+- **`(Key, CommittedAt)` is an identity by construction rather than by
+  constraint, and the difference is this decision's last residual.** The key is
+  the primary key and the timestamp is written once by a column default, so two
+  writes under one key differ in it — but nothing *enforces* that. `CommittedAt`
+  is a `datetimeoffset(7)` taken from `SYSDATETIMEOFFSET()`, with no uniqueness
+  constraint, so a replacement colliding with the row a purger selected would
+  be matched and deleted with its claim live: the ABA this join closes,
+  re-entered through the identity itself.
+- **What that needs is an exact coincidence rather than a magnitude, and the
+  distinction is why it is recorded instead of fixed here.** Every hazard
+  above — the two-clock comparison, the forward step, the backward step, the
+  step and its correction — follows from a drift of *sufficient size* in a
+  direction, which NTP corrections, host migrations and resumed snapshots
+  genuinely produce. A collision needs the database's clock to be set to the
+  same 100-nanosecond tick as a row at least `IdempotencyWindow` old. That is
+  not a smaller probability of the same fault; it is a different fault.
+- **A `rowversion` closes it and is owed rather than declined**
+  ([#173](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173)).
+  It is unique and monotonic per database and reads no clock at all, so it is
+  the identity this join wants. It costs a column, a migration for each
+  service, a sixth template migration in §4.5's scaffold and an Appendix D row
+  — a schema change to every service, which is the shape this appendix gives
+  its own record rather than folding into a pull request about something else.
+  ADR-038 filed #171 on exactly those terms.
+- **The defect and three successive wrong fixes were all found by review rather
+  than by a test.** The interleaving needs several purgers, a retry and one or
+  two clock steps, and nothing here stages one; what the suite does hold is
+  that the identity join still deletes, which is the failure a join can have
+  that a predicate cannot.
+- **The candidates are ordered oldest first, and the pass stops when the claim
+  store releases nothing.** That is the only state in which the next `SELECT`
+  is certain to return the same rows, so it is the only one where continuing is
+  certain to be futile. **Two earlier spellings were wrong, in opposite
+  directions**, and both are worth carrying because each reads as obvious.
+  Stopping on a *partial* batch rested on the premise that such a batch comes
+  back unchanged — it does not, because `TOP` refills the deleted slots with
+  the next-oldest candidates, so one held key at the head ended a pass after
+  about one batch, 4,999 rows where the ceiling allows 100,000. Stopping on
+  *nothing deleted* then read a zero from the wrong side of a race: with
+  [§15.3](15-cicd-deployment.md)'s three replicas another purger may delete
+  every row this one selected before its own `DELETE`, and that zero is
+  concurrent progress rather than a batch nobody may touch — stopping on it
+  hands the backlog to the next hourly pass, or to nobody if the winning
+  replica has since exited. What the store released does not depend on who won.
+  What remains is bounded rather than absent: at a batch size of one, a held
+  oldest key stops every pass until its claim expires, which is a day at
+  `IdempotencyRetention.Window`, and a batch of one is not a configuration this
+  platform ships.
+- **The floor survives and its job changes, which is a smaller claim than it
+  used to make.** `RetentionPolicy.IdempotencyWindow` may still not be shorter
+  than `IdempotencyRetention.MarkerFloor`, and the refusal message no longer
+  has to carry two assumptions: the ordering it protects is now enforced rather
+  than derived. What the floor bounds is **how long the guarantee lasts** — set
+  the window to the claim's own length and a marker becomes deletable the
+  moment its claim expires, so *at most one commit per key while the marker
+  survives* ends where the claim does. That is a real reduction in the promise
+  and not a correctness hole, which is exactly the distinction the floor could
+  not draw before.
+- **Deleting by row rather than by predicate meets a limit belonging to
+  another layer.** Each row costs two parameters — its key and its version —
+  and SQL Server refuses a statement carrying more than 2,100, where the
+  default `BatchSize` is 5,000. The delete is chunked at 900 rows so
+  `BatchSize` keeps meaning rows considered per batch rather than being quietly
+  capped.
+- **What this does not close is the claim expiring under a running handler.**
+  Past `Window` a successor may claim the key and both attempts run, and what
+  keeps the loser from corrupting the winner's entry is still the claim token
+  ([#127](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/127)).
+  That residual is §8.5's, it is unchanged, and it is now the only one — where
+  ADR-038 left two and ADR-037 left three.
+- **The test that proves it cannot be written from the clock's side, and the
+  one that is written says so.** No suite here owns the database container's
+  clock, so a forward step cannot be staged. What can be staged is the state
+  the step produces: a marker thirty days old with a live claim behind it. The
+  companion test releases that claim and watches the same row go, which is what
+  makes the pair about the claim rather than about a purge that had stopped
+  deleting markers.
+
+## ADR-040 — No host accepts a token with more life left than the revocation bound
+
+**Decision.** Every host that composes `AddCommonWebDefaults` refuses an
+inbound access token carrying more than `AuthenticationExtensions.RevocationBound`
+of remaining life — [ADR-033](#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)'s
+330 seconds, composed from the 300-second lifetime [§11.3](11-identity-authorization.md)
+states and the 30-second `ClockSkew` beside it. The number becomes a constant
+in `Common.Web` because something now reads it, and
+`RealmImportTests` reads the same constant instead of its own literal.
+
+**This gates remaining life and does not enforce the issued lifetime, which is
+the whole of what the title says and the reason it says it.** A five-hour token
+is refused for four hours and fifty-four minutes and then admitted for its last
+330 seconds — contained, not detected. So **[#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+stays open in full**: a deployed realm still owes `accessTokenLifespan` 300 and
+no client-level override, and nothing here establishes that it has them. What
+this record buys is that a realm which ignores that obligation can no longer
+have any one of its tokens accepted for more than the bound. ADR-034's
+refresh-token rule is untouched and stays an obligation on the same terms.
+
+**Why.** ADR-033 and ADR-034 state platform-wide security guarantees whose
+settings live in a realm. `RealmImportTests` pins them against
+`deploy/compose/keycloak/realm-export.json` — [§14.1](14-local-development.md)'s
+Compose realm, the only one this repository owns. Every chart points at
+`https://id.example.com/realms/commerce`, an externally provisioned authority
+this repository holds no configuration for and runs no deploy-time check
+against. So a deployed realm could issue five-hour access tokens while every
+sentence in §11.2, §11.3, ADR-033 and ADR-034 still read as a platform
+guarantee and the suite stayed green
+([#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)).
+
+**A token is where the realm's answer is observable without credentials this
+repository does not have.** The three shapes #157 named all wanted something
+the platform lacks: a pipeline check needs admin credentials in CI, a startup
+assertion reads a discovery document that does not expose token lifetimes at
+all, and committing a production realm makes somebody's operational input into
+this repository's artefact. The tokens themselves need none of that — whatever
+the realm was configured to do, a token that reaches a host carries how long it
+has left, and every host already validates one on every request.
+
+**Remaining life against this host's clock, and not `exp - iat`.** The exact
+form is sharper and was not taken. It needs `iat`, which RFC 7519 makes
+optional, so an issuer omitting the claim would switch the control off by
+omission — a control any subject can decline is not one. Reading it also means
+naming a token type from a package this assembly does not pin, where `ValidTo`
+is on `SecurityToken` itself and `exp` is already mandatory, because
+`ValidateLifetime` refuses a token without one before the check runs.
+
+**The cost of the inexact form is stated rather than hidden.** A host whose
+clock lags the issuer's sees a fresh token as having more life left than it
+has, so the ceiling is the **bound** — lifetime plus skew — and not the
+lifetime. A realm at 330 seconds passes and one at 320 passes; five hours,
+thirty minutes and six minutes do not, which is the class of misconfiguration
+this closes and the class #157 describes.
+
+**So the skew is spent twice, and the number that follows is 360 rather than
+330.** A token admitted at the ceiling has `RevocationBound` left to live, and
+`ValidateLifetime` then accepts it until `exp` plus `ClockSkew` — so the
+longest window this control admits is the bound **plus** the skew. **That does
+not move ADR-033's bound**, which is produced for a conforming realm by the
+realm's 300 and this platform's 30 and against which this check never binds at
+all. What the 360 bounds is a *non-conforming* token's acceptance, where the
+alternative was hours.
+
+**Capping the ceiling at `AccessTokenLifetime` would make the two equal and was
+rejected**, because it is a knife-edge rather than a tighter bound. A host
+whose clock lags the issuer's by δ reads a fresh 300-second token as having
+300 + δ left, so **any** δ above zero refuses every token a correct realm
+issues — and the 30 seconds that would have absorbed it is the term the cap
+removes. There is no third value: the exact form is `exp - iat`, which the
+paragraph above declines for a reason that has not changed.
+
+**Consequences.**
+
+- **A realm that violates the bound fails loudly at every host rather than
+  quietly widening the revocation window.** This is the posture
+  `AddJwtAuthentication` already takes for metadata over plain HTTP outside
+  Development: a platform that accepts what it says it does not accept has a
+  decorative guarantee. It is an availability cost taken deliberately — a
+  misconfigured realm 401s everything instead of weakening a security property
+  nobody can see — and the failure message names the number and the setting
+  behind it.
+- **300 becomes a constant in `Common.Web`, and the sentence that refused one
+  is why.** `RealmImportTests` carried the literal and said outright that "a
+  constant nothing reads would be a registration standing in for a control,
+  which is the shape ADR-033 was written to withdraw". That was right while the
+  number was only asserted against the shipped realm. The condition changed
+  rather than the taste: something reads it now, so one declaration is what
+  keeps the control and the realm assertion from disagreeing.
+- **The enforced ceiling and the stated bound are two numbers, and both are
+  real.** 330 is what a conforming realm produces and what ADR-033 promises;
+  360 is the longest window this control will admit, because the skew is spent
+  once on the ceiling and once by `ValidateLifetime`. Reporting only the
+  smaller one would be the overclaim this record exists to remove, so
+  `JwtAuthenticationTests` asserts the sum rather than restating the bound.
+- **330 is composed in the control and written down in exactly one place.**
+  `RevocationBound` is `AccessTokenLifetime + AllowedClockSkew`, and the skew is
+  the same field `TokenValidationParameters.ClockSkew` is set from: a literal
+  330 beside a 300 and a 30 is the arithmetic nobody redoes when one of them
+  moves. The one place is `JwtAuthenticationTests`, which asserts the sum
+  *equals* 330 — deliberately, because a composition nothing pins can be
+  recomposed wrongly and still look composed. **"A literal nowhere" is the
+  claim to avoid**: the control hard-codes nothing and the suite hard-codes it
+  once, on purpose.
+- **Neither of ADR-033's nor ADR-034's realm obligations is discharged, and
+  saying otherwise was this record's first mistake.** A five-hour token is
+  admitted in its final window, so the lifetime obligation is contained rather
+  than checked; a refresh token passes between the browser and Keycloak and
+  never reaches a service, so `use.refresh.tokens`, `standardFlowEnabled` and
+  `directAccessGrantsEnabled` cannot be seen at all. Both remain obligations on
+  whoever provisions a deployed realm — the division
+  [§15.4](15-cicd-deployment.md) draws for every Secret, undiminished — and
+  #157 stays open for the whole of it.
+- **The exact form is `exp - iat` with an absent `iat` failing closed, and it
+  is deferred rather than refused.** That would enforce the issued lifetime,
+  remove the double-spent skew, and need no clock of this platform's at all,
+  since both terms come from the issuer. What it costs is a token type from a
+  package `Common.Web` does not pin — so a licence-register row and a
+  dependency decision — and a hard refusal of any issuer that omits a claim RFC
+  7519 makes optional. Both are decisions rather than details, which is why
+  they belong to the record that takes them and not to this one.
+- **Nothing about the shipped realm changes**, and the two suites still agree:
+  the realm sets 300, the control admits up to 330 of remaining life, and
+  `RealmImportTests` reads the constant the control is built from. A realm
+  edited to 400 fails that test, and its tokens would be refused for all but
+  the last 330 seconds of each — which is one misconfiguration caught twice,
+  and neither catch is the deploy-time check #157 asks for.
 
 ---
 

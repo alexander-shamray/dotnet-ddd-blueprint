@@ -278,6 +278,7 @@ decision rather than a gap.**
 | **31** | `fix(messaging): the broker has a per-service identity` | — | — | — |
 | **32** | `fix(common): §8.5's durable idempotency marker` | — | — | — |
 | **33** | `fix(common): the marker and its claim are ordered by construction` | — | — | — |
+| **34** | `fix(common): the marker's purge asks the claim rather than out-counting it` | — | — | — |
 
 **Nothing in this file would produce a number for them.** Every estimate above
 was quoted before any code existed, against a specification that was already

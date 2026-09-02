@@ -122,7 +122,7 @@ map you have to open in order to find a directory is not a map.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..037),
+                             15-cicd-deployment, appendix A (ADR-001..040),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided
@@ -268,9 +268,22 @@ the claim's window plus an allowance (ADR-038). A row records that, and the
 size of the diff is not what earned it — which is why no inventory of that diff
 appears here: the sentence's whole point is that the count is irrelevant, and a
 count written beside it is one more figure nothing recomputes.
+**PR-34 is PR-33's kind against PR-33's own row, and it also carries a gap**:
+ADR-038 stated the clock term it could not close, filed #171 rather than
+folding the fix into a PR about something else, and closing it moved that rule
+again — the floor now bounds how long §8.5's guarantee lasts rather than
+whether it holds (ADR-039). The gap travelling with it is ADR-033's, a control
+the plan never claimed to close: the token lifetime was verified in one realm
+and stated everywhere else, and no host now accepts a token with more than the
+revocation bound left to live (ADR-040). **That contains the gap and does not
+close it** — the guard gates *remaining* life, so a five-hour token is refused
+for most of its life and admitted in its last window, and #157 stays open in
+full for the deploy-time check it actually asks for. **Two kinds in one row is
+not a fourth kind** — one pull request is one row, which is the rule PR-32's
+and PR-33's rows already state.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,095 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,115 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -351,18 +364,32 @@ window is the only one of the three with a floor, because purging it early
 re-opens the duplicate at a boundary set by a housekeeping setting.
 
 **Since PR-33 that floor is the claim's window exactly, and the ordering of
-the two *start* events holds by construction rather than by a margin** — the
-two windows are still counted by Redis's clock and the database's, which is
-[#171](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171). It carried a
-five-minute allowance for two terms nothing bounded — the claim was re-armed
-after a commit the marker was stamped before, and one row was aged across two
-pods' clocks — and both are closed at the source
+the two *start* events holds by construction rather than by a margin.** It
+carried a five-minute allowance for two terms nothing bounded — the claim was
+re-armed after a commit the marker was stamped before, and one row was aged
+across two pods' clocks — and both are closed at the source
 ([ADR-038](docs/backend-architecture/appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)):
 §8.5's completion preserves what the claim had left, and `CommittedAt` is
 written and compared on the database's clock. **The marker is the one retention
 table aged that way**, and §9.5 keeps the outbox and the inbox on the registered
 `TimeProvider` deliberately, so a change moving all three to one clock is a
 change to a decision rather than a tidy-up.
+
+**Since PR-34 the purge does not out-count the claim at all — it asks it — and
+that is the third margin this mechanism has refused**
+([ADR-039](docs/backend-architecture/appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)).
+The two windows were still counted by Redis's clock and the database's with
+nothing coupling the rates, so a forward step of the database's purged a marker
+whose claim was live — worst at the floor, which is the value §8.5 recommends
+narrowing towards. `RetentionPurgeService` now **selects** markers with the
+same server-clock cutoff, asks `IIdempotencyStore.UnheldAsync` which of those
+keys the claim store has let go, and deletes only those. **So the floor's job
+changed and the code says so in three places**: it bounds how long the
+guarantee lasts, not whether it holds, and the refusal message on
+`RetentionPolicy.IdempotencyWindow` had to be rewritten because its stated
+reason had become false. A shorter window no longer re-opens the duplicate; it
+asks for a guarantee shorter than the claim already gives. **#127 is now the
+only residual of the three**, and no value of that floor reaches it.
 
 **Two commands opt in and the third is a decision, not an omission.**
 `PlaceOrderCommand` and `PublishProductCommand` carry a `CommandId` and
@@ -427,7 +454,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 869 of 1,095, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 874 of 1,115, no daemon
 ```
 
 **[`docs/testing.md`](docs/testing.md) is the operational reference and this is
@@ -478,9 +505,9 @@ defect in the branch.
 
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
-category runs a smaller suite and says which. `Category!=Integration` is 869 of
-the 1,095 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 226, needing the daemon
+category runs a smaller suite and says which. `Category!=Integration` is 874 of
+the 1,115 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 241, needing the daemon
 exactly as before.
 
 Adding a migration needs the pinned tool and a startup project:
@@ -665,7 +692,7 @@ to reach both, and the guide is the master copy.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-039) and keep the
+  (currently ADR-041) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

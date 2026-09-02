@@ -10,9 +10,10 @@ namespace Common.Infrastructure.Tests;
 
 /// <summary>
 /// §8.5's store against a real server. The behaviour's own suite proves which
-/// store call happens on which path; this proves the four calls mean what the
-/// port says they mean — and two of the claims can only be made here, because
-/// an in-memory double cannot disagree with itself about atomicity or a TTL.
+/// store call happens on which path; this proves the five calls mean what the
+/// port says they mean — and three of the claims can only be made here, because
+/// an in-memory double cannot disagree with itself about atomicity, a TTL, or
+/// whether a key it was never told about is still held.
 /// </summary>
 /// <remarks>
 /// Each test takes its own key, so the shared container never couples them.
@@ -435,6 +436,161 @@ public sealed class RedisIdempotencyStoreTests(RedisFixture fixture)
 
         (await store.TryClaimAsync("acl-freed", Retention, TestContext.Current.CancellationToken))
             .ShouldNotBeNull("a release that never ran would hold the key for its whole retention");
+    }
+
+    [Fact]
+    public async Task A_key_this_store_never_saw_is_unheld()
+    {
+        // The purge's ordinary case, and the one the port names as its only
+        // available answer: absent and expired are indistinguishable here, and
+        // the caller only ever asks about keys that were claimed once.
+        await using ServiceProvider provider = fixture.BuildProvider("idem");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        IReadOnlyCollection<string> unheld =
+            await store.UnheldAsync(["never-claimed"], TestContext.Current.CancellationToken);
+
+        unheld.ShouldBe(["never-claimed"]);
+    }
+
+    [Fact]
+    public async Task A_live_claim_is_held()
+    {
+        // ADR-039's whole point, stated at the store: while this answers "held",
+        // §9.5's purge keeps the marker behind the key however old the row is,
+        // and no clock is consulted by either side.
+        await using ServiceProvider provider = fixture.BuildProvider("idem");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        await ClaimedAsync(store, "unheld-live", Retention);
+
+        IReadOnlyCollection<string> unheld =
+            await store.UnheldAsync(["unheld-live"], TestContext.Current.CancellationToken);
+
+        unheld.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_recorded_outcome_is_held_for_what_the_claim_had_left()
+    {
+        // A completed key is still an entry, and this is the state the purge
+        // meets in practice: the command committed, CompleteAsync wrote the
+        // payload under KEEPTTL, and the marker must outlive that remainder.
+        // Reading only the in-progress state would purge every marker the
+        // moment its command succeeded, which is the opposite of the guarantee.
+        await using ServiceProvider provider = fixture.BuildProvider("idem");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        string claim = await ClaimedAsync(store, "unheld-complete", Retention);
+        await store.CompleteAsync("unheld-complete", claim, "42", TestContext.Current.CancellationToken);
+
+        IReadOnlyCollection<string> unheld =
+            await store.UnheldAsync(["unheld-complete"], TestContext.Current.CancellationToken);
+
+        unheld.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_released_claim_is_unheld()
+    {
+        // The lost-acknowledgement path leaves exactly this state — the work
+        // committed, the exception released the claim — and the marker is what
+        // refuses the retry. Nothing here keeps the marker alive beyond its own
+        // window once the key is free, which is correct: the window is what
+        // bounds the guarantee, and this member only stops it ending early.
+        await using ServiceProvider provider = fixture.BuildProvider("idem");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        string claim = await ClaimedAsync(store, "unheld-released", Retention);
+        await store.ReleaseAsync("unheld-released", claim, TestContext.Current.CancellationToken);
+
+        IReadOnlyCollection<string> unheld =
+            await store.UnheldAsync(["unheld-released"], TestContext.Current.CancellationToken);
+
+        unheld.ShouldBe(["unheld-released"]);
+    }
+
+    [Fact]
+    public async Task An_expired_claim_becomes_unheld_without_anybody_deleting_it()
+    {
+        // The property ADR-039 preserved and shape 1 of #171 would have cost:
+        // a claim expires on its own, so the marker behind it becomes purgeable
+        // without a second mechanism having to notice. Brief rather than the
+        // shipped 24 hours for the reason that constant states.
+        await using ServiceProvider provider = fixture.BuildProvider("idem");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        await ClaimedAsync(store, "unheld-expiring", Brief);
+
+        // Polled rather than slept, on WaitForClaimAsync's terms: a fixed wait
+        // is either slower than it needs to be or short on a loaded runner.
+        //
+        // AND IT THROWS ON THE DEADLINE RATHER THAN ASSERTING PAST IT, which is
+        // that helper's other half and the part the first draft of this test
+        // dropped. Falling out of the loop left `unheld` holding the last
+        // answer — empty — so a runner too loaded to expire a one-second key in
+        // fifteen seconds failed with "expected [unheld-expiring], was []",
+        // which reads as a broken store rather than as a slow machine. This
+        // suite shares four containers with twelve other projects; the
+        // difference decides whether the next red run is diagnosed or retried.
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+
+        while (true)
+        {
+            IReadOnlyCollection<string> unheld =
+                await store.UnheldAsync(["unheld-expiring"], TestContext.Current.CancellationToken);
+
+            if (unheld.Count == 1)
+            {
+                unheld.ShouldBe(["unheld-expiring"], "the claim's own TTL is what frees the key");
+                return;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException(
+                    "'unheld-expiring' was still held 30 seconds after a one-second claim. The " +
+                    "store answered, so this is the machine rather than the contract — a Redis " +
+                    "container starved of CPU expires keys late.");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task A_mixed_set_is_answered_key_by_key()
+    {
+        // The batch case, and the one a per-key loop could get wrong by
+        // returning the right COUNT against the wrong keys — the answers are
+        // zipped back by position, so a reordering inside the implementation
+        // would swap held for unheld and delete the wrong markers.
+        await using ServiceProvider provider = fixture.BuildProvider("idem");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        await ClaimedAsync(store, "mixed-held-one", Retention);
+        await ClaimedAsync(store, "mixed-held-two", Retention);
+
+        IReadOnlyCollection<string> unheld = await store.UnheldAsync(
+            ["mixed-gone-one", "mixed-held-one", "mixed-gone-two", "mixed-held-two"],
+            TestContext.Current.CancellationToken);
+
+        unheld.ShouldBe(["mixed-gone-one", "mixed-gone-two"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task No_keys_is_no_question()
+    {
+        // An empty pass is the steady state once a service's markers are
+        // drained, and it must cost nothing rather than a round trip per hour
+        // per service.
+        await using ServiceProvider provider = fixture.BuildProvider("idem");
+        IIdempotencyStore store = provider.GetRequiredService<IIdempotencyStore>();
+
+        IReadOnlyCollection<string> unheld =
+            await store.UnheldAsync([], TestContext.Current.CancellationToken);
+
+        unheld.ShouldBeEmpty();
     }
 
     /// <summary>

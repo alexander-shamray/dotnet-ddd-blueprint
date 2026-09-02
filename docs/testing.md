@@ -280,12 +280,12 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 
 > **Measured rather than assumed, because the propagation is the load-bearing
 > half.** On `Common.Infrastructure.Tests`, `Category=Integration` selects the
-> twenty-seven tests of the three classes in the collection and
-> `Category!=Integration` selects the other seventy-two — 99 in total, with no
+> thirty-four tests of the three classes in the collection and
+> `Category!=Integration` selects the other seventy-two — 106 in total, with no
 > third state and nothing counted twice. Those figures read ten/81, then
 > twenty/91, then twenty-three/94, then twenty-four/95, then twenty-six/97,
-> then twenty-six/98, and
-> every retake up to the last two was the suite growing while the callout did
+> then twenty-six/98, then twenty-seven/99, and
+> every retake up to the last three was the suite growing while the callout did
 > not —
 > the drift the paragraph below is about, arriving in the paragraph above it.
 > **How many retakes is not written down**, for the reason the figures keep
@@ -322,17 +322,28 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > own cases were rewritten rather than added to, which is why only one of the
 > two numbers moved.
 >
+> **And it moved once more, by more, on the branch that stopped the purge
+> counting at all.** The port gained a fifth member — `UnheldAsync`, which
+> §9.5's marker pass asks instead of comparing two clocks
+> ([ADR-039](backend-architecture/appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it))
+> — and its seven cases all need the server they interrogate, so the fast half
+> is unchanged at seventy-two for the third retake running and the total is
+> 106. **Three consecutive retakes moving one number and not the other is the
+> propagation working**, not a coincidence to note: joining the container
+> collection is what carries the category, so a case that needs a container
+> cannot land in the fast half by forgetting an attribute.
+>
 > **Those are the runner's numbers, and `--list-tests` answers a different
 > question.** For this project the two now agree — discovery and execution both
-> report 99, measured rather than assumed on each retake — and they have not
+> report 106, measured rather than assumed on each retake — and they have not
 > always: the gap was 82 against 81 when this callout was written, and mixing a
 > partition quoted from `--list-tests` with a total from `dotnet test` is how it
-> first came to claim 72 and 82. The 1,095 is summed from `dotnet test`
+> first came to claim 72 and 82. The 1,115 is summed from `dotnet test`
 > output, so quote what ran. **Agreement today is a measurement and not a
 > guarantee** —
 > which is why the rule outlives the discrepancy that produced it.
 >
-> Across the solution the split is **869 and 226 of 1,095**, and the fast half
+> Across the solution the split is **874 and 241 of 1,115**, and the fast half
 > runs in about 76 seconds.
 >
 > **No container starts in that run**, which is the half worth proving rather
@@ -368,7 +379,7 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 `dotnet test` invocations, not two, and the seams answer different questions:
 the first is architecture gates versus everything else, for the instrumentation
 reason under Coverage below, and the second is `Category=Integration`. Measured
-on this repository they are **18**, **851** and **226**, summing to the 1,095
+on this repository they are **18**, **856** and **241**, summing to the 1,115
 the whole suite runs — which is the arithmetic the callout below asks for. The
 architecture stage is the one that has not moved: it is 18 gates, measured
 again on the branch that took the other two figures.
@@ -410,8 +421,8 @@ two, which wants one place to be merged.
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing
 > different clothes.** A missing test adapter makes `dotnet test` report no
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
-> counts above are what makes the difference visible — 869 and 226 summing to
-> 1,095 — so whoever writes the staged pipeline should assert a floor on each
+> counts above are what makes the difference visible — 874 and 241 summing to
+> 1,115 — so whoever writes the staged pipeline should assert a floor on each
 > stage's count rather than trusting a green exit. That assertion is PR-25's
 > quality gate and is named here because this PR is what created the way to
 > get it wrong.

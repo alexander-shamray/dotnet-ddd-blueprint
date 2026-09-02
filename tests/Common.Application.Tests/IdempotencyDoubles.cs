@@ -104,6 +104,18 @@ internal sealed class RecordingIdempotencyStore : IIdempotencyStore
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyCollection<string>> UnheldAsync(
+        IReadOnlyCollection<string> keys,
+        CancellationToken ct)
+    {
+        Calls.Add($"unheld {keys.Count}");
+        Tokens["unheld"] = ct;
+
+        IReadOnlyCollection<string> unheld = [.. keys.Where(key => !_entries.ContainsKey(key))];
+
+        return Task.FromResult(unheld);
+    }
+
     /// <summary>
     /// Plants a completed entry, standing in for an earlier attempt that
     /// committed. The behaviour's replay path is what reads it.

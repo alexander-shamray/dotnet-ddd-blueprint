@@ -78,13 +78,26 @@ Validation is cheap; assume the network is hostile.
 > nothing here checks that it has it. ADR-034 states the obligation and its
 > limit.
 >
+> **The access-token lifetime beside it is in the same position, and what
+> changed is only what an unchecked realm costs.** Since
+> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+> every host refuses an inbound token carrying more remaining life than the
+> bound §11.3 derives — which **bounds** the exposure without reading the realm,
+> since a long-lived token is admitted once it approaches expiry. **A refresh
+> token affords not even that**: it passes between the browser and Keycloak and
+> never reaches a service, so there is nothing at a host to observe it with.
+> Both settings remain obligations on whoever provisions the deployed realm, and
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> stays open for both.
+>
 > **Continuity is a silent renewal against the authorization endpoint**, bounded
 > by the SSO session, so the user sees a login when that session has ended
 > rather than when the access token expires. **The residual is an access token,
 > and it is stated rather than closed:** an XSS still yields one, which a
 > service will accept for up to the 330 seconds §11.3 derives below — the
-> lifetime plus the skew, not the lifetime alone. What bounds it is that
-> number and nothing else — there is no revocation path
+> lifetime plus the skew, not the lifetime alone, and since ADR-040 a ceiling
+> every host enforces rather than a figure it assumes the realm honoured. What
+> bounds it is that number and nothing else — there is no revocation path
 > ([ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)),
 > which is the same fact §11.3 states from the other side.
 >
@@ -106,11 +119,22 @@ Validation is cheap; assume the network is hostile.
 > **A deployed realm must turn it off, and nothing here establishes that one
 > has.** That is a requirement rather than a description — this repository
 > owns the Compose realm and no other, so the sentence above states an
-> obligation on whoever provisions the deployed one, exactly as the lifetime
-> and the refresh-token attribute do. It is listed with them in
-> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157);
-> writing it as a fact would have been the third security property in this
-> chapter to read as enforced while being true only locally.
+> obligation on whoever provisions the deployed one, exactly as the
+> refresh-token attribute does. **The lifetime is the third item on that list
+> and stays on it**:
+> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+> holds every inbound token to the bound at every host, which bounds what an
+> unchecked realm can cost rather than checking it — a long-lived token is
+> admitted in its final window, so the realm's answer to that question is still
+> nobody's to read here. A flow
+> flag affords nothing of the kind: `standardFlowEnabled` and
+> `directAccessGrantsEnabled` decide how a token is *obtained*, and a token
+> that arrives at a service does not say which grant minted it. So
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> stays open for these flags and for the refresh-token attribute rather than
+> closed by a change that covers only the lifetime; writing any of them as a
+> fact would have been the third security property in this chapter to read as
+> enforced while being true only locally.
 
 ## 11.3 Service configuration
 
@@ -121,6 +145,14 @@ a host. Every service registers it, because every service re-validates (§11.2).
 ```csharp
 public const string Audience = "commerce-api";
 public const string AuthorityKey = "Identity:Authority";
+
+// §11.3's lifetime and the skew beside it, declared here because something now
+// reads them. RevocationBound is composed rather than written down: a literal 330
+// beside a 300 and a 30 is the arithmetic nobody redoes when one of them moves.
+public static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromSeconds(300);
+private static readonly TimeSpan AllowedClockSkew = TimeSpan.FromSeconds(30);
+
+public static TimeSpan RevocationBound => AccessTokenLifetime + AllowedClockSkew;
 
 public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplicationBuilder builder)
 {
@@ -179,13 +211,53 @@ public static IHostApplicationBuilder AddJwtAuthentication(this IHostApplication
             // one into the other.
             options.MapInboundClaims = true;
 
+            // ADR-033's bound, enforced rather than stated (#157, ADR-040). A
+            // token is where the realm's answer is observable without admin
+            // credentials this repository does not hold: whatever the realm was
+            // configured to do, a token reaching a host carries how long it has
+            // left. REMAINING life against this host's clock, not `exp - iat` —
+            // `iat` is optional in RFC 7519, so an issuer omitting it would
+            // switch the control off by omission. Refused rather than logged,
+            // for the reason RequireHttpsMetadata above is.
+            options.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = context =>
+                {
+                    TimeProvider clock = context.Options.TimeProvider ?? TimeProvider.System;
+
+                    // SpecifyKind because DateTimeOffset reads an Unspecified
+                    // Kind as LOCAL, which on a host east of UTC would subtract
+                    // hours from the remaining life and pass everything.
+                    DateTimeOffset expires =
+                        new(DateTime.SpecifyKind(context.SecurityToken.ValidTo, DateTimeKind.Utc));
+
+                    if (expires - clock.GetUtcNow() <= RevocationBound)
+                        return Task.CompletedTask;
+
+                    // Two causes, and naming only the first sends an operator
+                    // to change a realm that is correct: the comparison reads
+                    // THIS host's clock, so an issuer running more than the
+                    // skew ahead of it makes a conforming token look long-lived.
+                    context.Fail(
+                        $"The token has more than {RevocationBound.TotalSeconds} seconds of life " +
+                        "left, which is longer than the revocation bound this platform states " +
+                        "(ADR-033). Either the realm that issued it sets an access-token " +
+                        "lifetime, or a client-level override, above what §11.3 requires — or " +
+                        "this host's clock is running behind the issuer's by more than the " +
+                        "skew, which makes a conforming token read as a long-lived one. Check " +
+                        "the clocks before changing the realm.");
+
+                    return Task.CompletedTask;
+                }
+            };
+
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
                 ValidateAudience = true,
                 ValidateLifetime = true,
                 ValidateIssuerSigningKey = true,
-                ClockSkew = TimeSpan.FromSeconds(30),
+                ClockSkew = AllowedClockSkew,
                 NameClaimType = "preferred_username",
                 RoleClaimType = "roles"
             };
@@ -211,6 +283,15 @@ it.** Five minutes, normative — not a realm default nobody chose, and not
 `ClockSkew`'s coincidentally equal *default* two paragraphs up, which is a
 different quantity that happens to share a number.
 
+**Since [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+it is also a constant, because something reads it.**
+`AuthenticationExtensions.AccessTokenLifetime` is that declaration, and
+`RealmImportTests` compares the shipped realm against the field rather than
+against a literal of its own. The test used to argue that a constant nothing
+read would be a registration standing in for a control, which is the shape
+ADR-033 was written to withdraw — and that was right while the number was only
+ever asserted. What changed is the condition, not the taste.
+
 **The revocation window is 330 seconds, and it is the lifetime plus the skew
 rather than the lifetime.** `ClockSkew` is 30 seconds here, and a lifetime
 check accepts a token until `exp` **plus** the skew — so logging a user out,
@@ -218,6 +299,49 @@ disabling a compromised account, or responding to a stolen token at Keycloak
 has **no effect** on an access token already issued for up to five and a half
 minutes. Two settings decide that number and only one of them is the realm's,
 which is why shortening the exposure means reading both.
+
+**That window is now held to at every host rather than assumed of the realm.**
+`RevocationBound` is `AccessTokenLifetime + AllowedClockSkew` — composed, and
+written down as 330 nowhere in the control itself, though
+`JwtAuthenticationTests` pins the sum at exactly that once, because a
+composition nothing asserts can be recomposed wrongly and still look composed.
+Every host that composes `AddCommonWebDefaults`
+refuses an inbound token carrying more remaining life than that. The
+measurement is remaining life against this host's clock and **not** `exp - iat`:
+`iat` is optional in RFC 7519, so an issuer omitting the claim would switch the
+control off by omission, and a control any subject can decline is not one.
+`ValidTo` is on `SecurityToken` itself, and `exp` is already mandatory here
+because `ValidateLifetime` refuses a token without one before the check runs.
+
+**The inexact form costs something, and the ceiling is where that cost is
+paid.** A host whose clock lags the issuer's sees a fresh token as having more
+life left than it has, so what is refused is life beyond the *bound* — lifetime
+plus skew — rather than beyond the lifetime: a realm at 330 seconds passes and
+one at 320 passes; five hours, thirty minutes and six minutes do not, which is
+the class of misconfiguration this catches. **It is refused
+rather than logged**, which is the posture `RequireHttpsMetadata` and the
+authority guard below already take — a realm above the bound 401s every request
+instead of quietly widening the window between a revocation and its effect, and
+that availability cost is taken deliberately.
+
+> **The skew is spent twice, so the window this control admits is 360 seconds
+> and not the 330 above.** A token admitted at the ceiling has
+> `RevocationBound` left to live, and `ValidateLifetime` then accepts it until
+> `exp` plus `ClockSkew` again. **That does not move the bound this section
+> states**: for a conforming realm the 330 is produced by the realm's 300 and
+> this platform's 30, and the check never binds at all. What the 360 bounds is
+> a *non-conforming* token's acceptance, where the alternative was hours.
+>
+> **Capping the ceiling at the lifetime would make the two equal, and it is a
+> knife-edge rather than a tighter bound.** A host whose clock lags the
+> issuer's by δ reads a fresh 300-second token as having 300 + δ left, so any δ
+> above zero refuses every token a correct realm issues — and the 30 seconds
+> that would absorb it is the term the cap removes. The exact form is
+> `exp - iat`, declined above for a reason that has not changed, so there is no
+> third value.
+> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+> takes the trade and `JwtAuthenticationTests` asserts the sum, so the 360 is
+> measured rather than inferred from this paragraph.
 
 > **This section separated the two quantities and then failed to add them.**
 > The paragraph above was written to stop a reader mistaking `ClockSkew`'s
@@ -257,17 +381,57 @@ listing of a token denylist among Redis's contents.
 > the lifetime itself. A premise a number depends on is part of the number.
 > A client-level `access.token.lifespan` overrides the realm outright, so the
 > suite checks for that too; both were found by review rather than by design.
+> **Neither would now lengthen the window, because the ceiling above does not
+> care which setting produced the token** — a 900-second implicit-flow token is
+> refused at every host exactly as a 900-second ordinary one is. The suite
+> still names them: a 401 on every request is a worse way to discover a
+> checkbox than a red test is.
 >
 > **Every one of those checks reads the local realm, and none reads a deployed
 > one.** `RealmImportTests` parses [§14.1](14-local-development.md)'s
 > `realm-export.json`; the charts point at an externally provisioned authority
-> this repository holds no configuration for. So the number above is normative
-> for the platform and *verified* only where the platform provisions its own
-> identity provider, which is locally. A deployed realm owes the same
-> settings, and
+> this repository holds no configuration for. That is still true of the suite
+> and it stopped settling the question, which is the correction
+> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+> makes to the sentence that used to follow it.
+>
+> **That sentence said the number above is *verified* only where the platform
+> provisions its own identity provider, which is locally, and it is still
+> true.** No check in this repository reads a deployed realm: a pipeline check
+> needs admin credentials CI does not hold, a startup assertion reads a
+> discovery document that publishes no token lifetime at all, and committing a
+> production realm makes somebody's operational input into this repository's
+> artefact. What ADR-040 adds is not verification but **containment** — every
+> service already validates a token on every request, and a token carries how
+> long it has left whatever the realm was configured to do, so no host will
+> accept one with more than the bound remaining.
+>
+> **Containment is weaker than verification and the difference is worth being
+> exact about, because a first draft of this callout was not.** The control
+> gates *remaining* life, not the *issued* lifetime: a realm set to five hours
+> has its tokens refused for four hours and fifty-four minutes and then
+> admitted for the last 330 seconds. That is a large reduction in what a stolen
+> token is worth and it is **not** the deploy-time check
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> asks for, so the issue stays open. A realm edited to 400 fails
+> `RealmImportTests` — which reads the constant the control is built from — and
+> would still serve requests in each token's final window.
+>
+> **The refresh-token attribute and the flow flags stay where this callout put
+> them, and the asymmetry is a property of what a host can see.**
+> `use.refresh.tokens`, `standardFlowEnabled` and `directAccessGrantsEnabled`
+> decide what Keycloak issues and to whom; a refresh token never reaches a
+> service, and the grant that minted a token that does reach one leaves no
+> trace in it. So a deployed realm still owes those settings, and
+> [ADR-034](appendix-a-adrs.md#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)
+> records that obligation as one this repository states and cannot check — the
+> division §15.4 already draws for every Secret, which
 > [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
-> records that obligation as one this repository states and cannot check —
-> the division §15.4 already draws for every Secret, applied to the realm.
+> records for the lifetime as well. ADR-040 does not discharge that half — it
+> gates *remaining* life rather than the *issued* lifetime, so it contains what
+> an unchecked realm costs without reading one — and
+> [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
+> stays open in full.
 
 **The authority is read eagerly and the throw names the key**, which is the
 posture `AddSqlServer` and `AddMassTransitMessaging` already take: a host that

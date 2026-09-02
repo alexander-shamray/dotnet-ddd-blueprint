@@ -30,8 +30,24 @@ namespace Common.Infrastructure.Messaging;
 /// a purged idempotency marker loses a <em>correctness</em> property, because
 /// it is what refuses a retry of a command that already committed. That is why
 /// <see cref="RetentionPolicy.IdempotencyWindow"/> has a floor the other two do
-/// not, and why this pass deletes on age alone with no predicate to get wrong:
-/// every row here records work that finished.
+/// not, and why its pass is the only one that asks something before deleting.
+/// </para>
+/// <para>
+/// <b>Age is necessary there and no longer sufficient.</b> The other two
+/// compare a column against a cutoff and are done; the marker's compares a
+/// column against a cutoff to find <em>candidates</em>, asks
+/// <see cref="Common.Application.IIdempotencyStore"/> which of them it has
+/// already let go of, and then deletes each row by <em>identity</em> — its key
+/// and the <c>CommittedAt</c> the select returned. A key names a command
+/// rather than a row, so a retry can commit a fresh marker under one this pass
+/// already chose; three successive predicates were tried against that and each
+/// fell to a different clock movement, which is why the delete names the write
+/// instead of describing it. Deleting on age alone put the claim's window and
+/// the marker's on two servers' clocks with nothing coupling their rates, so a
+/// forward step of the database's deleted the row while the claim it backs up
+/// was still live
+/// (<see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/171">#171</see>,
+/// ADR-039). What replaces the comparison is the fact it stood in for.
 /// </para>
 /// </remarks>
 public sealed class RetentionPurgeService : BackgroundService
@@ -55,7 +71,28 @@ public sealed class RetentionPurgeService : BackgroundService
             new EventId(2, nameof(PurgeFailed)),
             "Retention purge failed; retrying next pass.");
 
+    // Rows per DELETE, and the number is SQL Server's rather than this
+    // platform's. Each row costs TWO parameters — its key and the version that
+    // identifies it — and the server refuses a statement carrying more than
+    // 2,100, so a pass at the default BatchSize of 5,000 would fail on the
+    // batch rather than on the configuration. Chunking here keeps BatchSize
+    // meaning what it says — rows considered per batch — instead of quietly
+    // capping it at a limit belonging to a different layer.
+    //
+    // 900 rather than 1,000 for that reason and no other: 1,800 parameters
+    // leaves room under the ceiling, where 2,000 does not leave much.
+    //
+    // Private because it is not a knob, and coupled to a test that says so.
+    // `A_batch_spanning_more_than_one_delete_chunk_is_deleted_whole` stages
+    // 1,001 markers, in both service suites, and is the only case that reaches
+    // the second chunk at all. RAISING THIS NUMBER ABOVE 1,001 MAKES THAT TEST
+    // PASS WHILE COVERING NOTHING, so move it in the same change — a gate that
+    // silently stops covering its surface is this repository's most-repeated
+    // failure, and this comment is the half of the couple that lives here.
+    private const int RowsPerDelete = 900;
+
     private readonly IServiceScopeFactory _scopes;
+    private readonly IIdempotencyStore _claims;
     private readonly RetentionPolicy _policy;
     private readonly ILogger<RetentionPurgeService> _log;
 
@@ -64,17 +101,23 @@ public sealed class RetentionPurgeService : BackgroundService
     // and no other.
     private readonly string _outboxSql;
     private readonly string _inboxSql;
-    private readonly string _idempotencySql;
+    private readonly string _idempotencyCandidateSql;
+
+    // Not a statement: the delete's is composed per chunk, because its VALUES
+    // list is as long as the chunk. This is the qualified table name it needs.
+    private readonly string _markerTable;
 
     public RetentionPurgeService(
         IServiceScopeFactory scopes,
         OutboxTable outbox,
         InboxTable inbox,
         IdempotencyMarkerTable markers,
+        IIdempotencyStore claims,
         RetentionPolicy policy,
         ILogger<RetentionPurgeService> log)
     {
         _scopes = scopes;
+        _claims = claims;
         _policy = policy;
         _log = log;
 
@@ -104,32 +147,93 @@ public sealed class RetentionPurgeService : BackgroundService
             WHERE HandledAt < @Before;
             """;
 
-        // Age alone again, and for a stronger version of the inbox's reason:
-        // a marker records a command that committed, so there is no unfinished
-        // state a predicate could protect. What protects it is the window,
-        // which RetentionPolicy refuses to set below the life of the Redis
-        // claim it backs up (§8.5).
+        // The marker is TWO statements where the other two are one, and the
+        // split is this pass's whole subject rather than a batching detail.
+        // Age is still necessary on both of them and is no longer SUFFICIENT
+        // on either: what decides is IIdempotencyStore.UnheldAsync agreeing
+        // that the claim behind the row is gone (#171, ADR-039).
         //
-        // The cutoff is computed HERE and not by the caller, which is the one
-        // place this service departs from the two statements above and is
-        // #167's fix. CommittedAt is written by a SYSDATETIMEOFFSET() column
-        // default, so it is the server's own clock whichever replica ran the
-        // command — that is the whole point, and a cutoff computed from this
-        // pod's TimeProvider would age the row across two clocks, and §15.3
-        // ships three replicas of each service. A purger leading the writer by
-        // δ deletes the marker δ early, the claim then expires into a table
-        // that has forgotten the commit, and the next retry runs the command a
-        // second time. Both ends on the server's clock removes the term rather
-        // than bounding it (ADR-038).
+        // The window alone used to decide it, and that put two clocks either
+        // side of one comparison. Redis expires the claim after
+        // IdempotencyRetention.Window elapsed by REDIS'S clock; this statement
+        // deleted after IdempotencyWindow elapsed by SQL SERVER'S. Nothing
+        // couples the two rates, so a forward step of the database's — an NTP
+        // correction, a host migration, a resumed snapshot — carried the
+        // cutoff past a marker whose claim was still live, and the retry after
+        // that claimed a free key and ran a committed command a second time.
+        // Two attempts to bound that with a margin are why there is no third:
+        // a step is bounded by nothing this repository can assert, so the
+        // purge asks the store that owns the claim instead of racing it.
+        //
+        // The cutoff is still computed HERE rather than by the caller, which
+        // is where this pass departs from the two above and is #167's fix.
+        // CommittedAt is written by a SYSDATETIMEOFFSET() column default, so
+        // the row's own age is one clock's arithmetic whichever of §15.3's
+        // three replicas wrote it — and that is now an ordering over ROWS
+        // rather than against the claim: it decides which markers have served
+        // their window, and the store decides which of those may go.
         //
         // The outbox and the inbox deliberately keep the parameterised form:
         // their windows are housekeeping, and a substitutable TimeProvider is
         // worth more there than a clock nothing can move (§9.5).
-        _idempotencySql =
+        //
+        // Oldest first, so a batch that cannot be fully deleted leaves the
+        // rows likeliest to still hold a claim — the newest — at the tail
+        // where the pass stops rather than at the head where it would block.
+        _idempotencyCandidateSql =
             $"""
-            DELETE TOP (@BatchSize) FROM {markers.QualifiedName}
-            WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
+            SELECT TOP (@BatchSize) [Key], CommittedAt FROM {markers.QualifiedName}
+            WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())
+            ORDER BY CommittedAt;
             """;
+
+        // Delimited, because Key is a reserved word in T-SQL and the column is
+        // named for what it holds rather than around the parser.
+        //
+        // THE VERSION BOUND IS WHAT MAKES THIS SAFE, and neither a key alone
+        // nor a re-evaluated age is. A key names a command, not a row: past the
+        // guarantee the key is claimable again, so a retry can re-run the
+        // command and commit a FRESH marker under the same key between this
+        // pass's SELECT and its DELETE. §15.3 ships three replicas, so two
+        // purgers can select the same row and the second one's delete arrives
+        // after the first has removed it and after the replacement exists.
+        //
+        // A key-only delete removes that replacement — a row inside its window
+        // with a live claim behind it — and the retry after that runs the
+        // command a third time. **Repeating the age cutoff does not fix it
+        // either**, which is the correction worth carrying: that predicate
+        // re-reads SYSDATETIMEOFFSET(), so a forward step of the database's
+        // clock before the stale delete makes the replacement look old enough
+        // and it goes anyway. An age against a moving clock is not an ABA
+        // guard, and this pull request exists because that clock moves.
+        //
+        // SO THE DELETE NAMES THE ROW IT SELECTED, and nothing weaker will do.
+        // Three predicates were tried before this one and each failed to a
+        // different clock movement, which is the argument for identity rather
+        // than a fourth: a key alone deletes a replacement outright; the age
+        // cutoff re-reads a clock that a FORWARD step has moved on; a bound on
+        // the newest selected CommittedAt is defeated by a BACKWARD step; and
+        // the two together fall to a backward step followed by a correction,
+        // because the replacement is then both below the bound and past a
+        // re-read cutoff. An arbitrary clock cannot be out-predicated.
+        //
+        // (Key, CommittedAt) is the row's identity here BY CONSTRUCTION: the
+        // key names the command and the timestamp names the write, and a
+        // replacement is a different write stamped at a different instant. That
+        // is the property the single statement had for free and the split had
+        // to buy back.
+        //
+        // By construction and not by constraint, which is the limit worth
+        // knowing. CommittedAt is a datetimeoffset(7) with no uniqueness on it,
+        // so a replacement stamped at the very tick the selected row carries
+        // would be matched. That needs the clock set to an exact historical
+        // instant rather than drifted by a magnitude, which is why it is
+        // #173 and a rowversion rather than a fourth predicate here.
+        //
+        // Composed per chunk because the VALUES list is as long as the chunk.
+        // The only interpolation is the table name, whose shape
+        // IdempotencyMarkerTable checks, and the row count — never a value.
+        _markerTable = markers.QualifiedName;
     }
 
     // stoppingToken, not ct: CA1725 requires an override to keep the base's
@@ -195,6 +299,30 @@ public sealed class RetentionPurgeService : BackgroundService
             ct);
         Purged(_log, inbox, "inbox", null);
 
+        // The third takes no `now` at all — neither this pod's nor the
+        // server's is compared against the claim any more. Its own method,
+        // because selecting, asking and deleting is three steps where the two
+        // above are one (#171, ADR-039).
+        int idempotency = await PurgeMarkersAsync(connection, ct);
+        Purged(_log, idempotency, "idempotency", null);
+
+        return (outbox, inbox, idempotency);
+    }
+
+    /// <summary>
+    /// §8.5's markers: the rows past their window whose claim the store has
+    /// already let go. Selects, asks, deletes — and deletes nothing the store
+    /// still holds a claim for.
+    /// </summary>
+    /// <remarks>
+    /// <b>The store is asked rather than out-counted, and that is the whole
+    /// of ADR-039.</b> A window compared against a window put Redis's clock on
+    /// one side and SQL Server's on the other with nothing coupling their
+    /// rates; asking the store that owns the claim replaces the comparison
+    /// with the fact it was standing in for.
+    /// </remarks>
+    private async Task<int> PurgeMarkersAsync(IDbConnection connection, CancellationToken ct)
+    {
         // The window as a duration and not a cutoff, because the statement
         // computes the cutoff from the server's own clock (#167, ADR-038). An
         // int rather than a long: RetentionPolicy caps a window at ten years,
@@ -202,23 +330,154 @@ public sealed class RetentionPurgeService : BackgroundService
         //
         // Rounded UP, and a cast would have rounded down. The window is a
         // caller-supplied TimeSpan with sub-second resolution, so a cast sends
-        // 24 hours for a configured 24 hours and 500 milliseconds — purging the
-        // marker fractionally before the window the operator asked for, which
-        // is the one direction this setting may not be wrong in. Ceiling keeps
-        // the row slightly longer than asked instead, which costs nothing: the
-        // floor is a lower bound, so exceeding it is always admissible.
-        int idempotency = await DeleteAsync(
-            connection,
-            _idempotencySql,
-            new
-            {
-                _policy.BatchSize,
-                WindowSeconds = (int)Math.Ceiling(_policy.IdempotencyWindow.TotalSeconds),
-            },
-            ct);
-        Purged(_log, idempotency, "idempotency", null);
+        // 24 hours for a configured 24 hours and 500 milliseconds — selecting
+        // the marker fractionally before the window the operator asked for,
+        // which is the one direction this setting may not be wrong in. Ceiling
+        // keeps the row slightly longer than asked instead, which costs
+        // nothing: the floor is a lower bound, so exceeding it is always
+        // admissible.
+        int windowSeconds = (int)Math.Ceiling(_policy.IdempotencyWindow.TotalSeconds);
 
-        return (outbox, inbox, idempotency);
+        int total = 0;
+
+        for (int batch = 0; batch < _policy.MaxBatchesPerPass; batch++)
+        {
+            MarkerCandidate[] candidates = [.. await connection.QueryAsync<MarkerCandidate>(
+                new CommandDefinition(
+                    _idempotencyCandidateSql,
+                    new { _policy.BatchSize, WindowSeconds = windowSeconds },
+                    cancellationToken: ct))];
+
+            if (candidates.Length == 0)
+                break;
+
+            // Keys for the store, which answers about commands; the rows
+            // themselves go to the delete, which acts on writes.
+            string[] keys = [.. candidates.Select(candidate => candidate.Key)];
+
+            // Not caught, and the caller's `catch` is why that is safe: an
+            // unreachable store leaves every marker in place and the pass is
+            // logged and retried next interval. Treating a failed lookup as
+            // "no claim" would delete the row that refuses a duplicate, which
+            // is the failure this call exists to remove.
+            IReadOnlyCollection<string> unheld = await _claims.UnheldAsync(keys, ct);
+
+            // Back to the rows, because the delete names a version and not just
+            // a key. A HashSet rather than a scan per candidate: the batch is
+            // five thousand by default.
+            HashSet<string> gone = [.. unheld];
+
+            int deleted = await DeleteRowsAsync(
+                connection,
+                [.. candidates.Where(candidate => gone.Contains(candidate.Key))],
+                ct);
+            total += deleted;
+
+            // Two ways to stop, and the second asks the STORE rather than the
+            // database. A short SELECT means the table holds no further
+            // candidates. A batch the store released nothing from means every
+            // row it returned is still claimed, and the next SELECT would
+            // return those same rows — ordered oldest first, with nothing about
+            // them changed — so continuing would re-read and re-ask for no
+            // deletions.
+            //
+            // Two earlier spellings were wrong, in opposite directions.
+            // `deleted < candidates.Length` rested on a premise that reads as
+            // obvious and is false: a PARTIALLY deleted batch is not returned
+            // unchanged, because TOP refills the deleted slots with the
+            // next-oldest candidates. One held key at the head therefore ended
+            // a pass after about one batch — 4,999 rows where the ceiling
+            // allows 100,000.
+            //
+            // `deleted == 0` then read a zero from the wrong side of a race.
+            // §15.3 ships three replicas, so another purger can delete every
+            // row this one selected before its own DELETE runs; the zero is
+            // then concurrent PROGRESS rather than a batch nobody may touch,
+            // and stopping on it hands the backlog to the next hourly pass —
+            // or to nobody, if the winning replica has since exited.
+            //
+            // `gone` is the reading that does not depend on who won: it is what
+            // the claim store released, so an empty one is the only state where
+            // continuing is certain to be futile.
+            //
+            // What is left is bounded rather than absent: at BatchSize 1, a
+            // held oldest key stops every pass until its claim expires, which
+            // is a day at IdempotencyRetention.Window. Nothing starves for
+            // longer than a claim lives, and a batch of one is not a
+            // configuration this platform ships.
+            if (candidates.Length < _policy.BatchSize || gone.Count == 0)
+                break;
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// Deletes the rows matching the given (key, version) pairs, chunked to
+    /// stay inside SQL Server's parameter limit. Returns the rows actually
+    /// removed.
+    /// </summary>
+    /// <remarks>
+    /// <b>Identity rather than a predicate, because an arbitrary clock cannot
+    /// be out-predicated.</b> A key names a command and not a row, so a retry
+    /// can commit a fresh marker under a key this pass has already selected;
+    /// the statement's own comment records the three predicates that were tried
+    /// and which clock movement defeated each. A count lower than the number of
+    /// rows handed in means another replica got there first, which is ordinary.
+    /// <para>
+    /// <b>The pair identifies a write by construction rather than by
+    /// constraint</b>, so a replacement stamped at the selected row's exact
+    /// tick would still match — the residual
+    /// <see href="https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173">#173</see>
+    /// carries, and what a <c>rowversion</c> would close.
+    /// </para>
+    /// </remarks>
+    private async Task<int> DeleteRowsAsync(
+        IDbConnection connection,
+        IReadOnlyCollection<MarkerCandidate> rows,
+        CancellationToken ct)
+    {
+        int deleted = 0;
+
+        foreach (MarkerCandidate[] chunk in rows.Chunk(RowsPerDelete))
+        {
+            DynamicParameters parameters = new();
+
+            for (int index = 0; index < chunk.Length; index++)
+            {
+                parameters.Add($"k{index}", chunk[index].Key, DbType.String);
+                parameters.Add($"v{index}", chunk[index].CommittedAt, DbType.DateTimeOffset);
+            }
+
+            deleted += await connection.ExecuteAsync(
+                new CommandDefinition(DeleteSql(chunk.Length), parameters, cancellationToken: ct));
+        }
+
+        return deleted;
+    }
+
+    /// <summary>
+    /// The delete for a chunk of <paramref name="rows"/> rows, joining the
+    /// table to the (key, version) pairs the pass selected.
+    /// </summary>
+    /// <remarks>
+    /// <b>The row count is the only thing that varies, and it is an int.</b>
+    /// Every value travels as a parameter; the table name is
+    /// <c>IdempotencyMarkerTable</c>'s, shape-checked where it is composed.
+    /// </remarks>
+    private string DeleteSql(int rows)
+    {
+        string pairs = string.Join(
+            ", ",
+            Enumerable.Range(0, rows).Select(index => $"(@k{index}, @v{index})"));
+
+        return $"""
+            DELETE marker
+            FROM {_markerTable} marker
+            INNER JOIN (VALUES {pairs}) AS selected([Key], CommittedAt)
+                ON marker.[Key] = selected.[Key]
+                AND marker.CommittedAt = selected.CommittedAt;
+            """;
     }
 
     /// <summary>
@@ -251,4 +510,15 @@ public sealed class RetentionPurgeService : BackgroundService
 
         return total;
     }
+
+    /// <summary>
+    /// One row of the marker pass's selection: the key to delete by, and the
+    /// <c>CommittedAt</c> that identifies the row rather than the command.
+    /// </summary>
+    /// <remarks>
+    /// A record rather than the bare key, because the key alone cannot tell a
+    /// marker from its own replacement — which is the whole of the delete's
+    /// version bound.
+    /// </remarks>
+    private sealed record MarkerCandidate(string Key, DateTimeOffset CommittedAt);
 }
