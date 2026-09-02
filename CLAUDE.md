@@ -122,7 +122,7 @@ map you have to open in order to find a directory is not a map.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..040),
+                             15-cicd-deployment, appendix A (ADR-001..041),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided
@@ -281,9 +281,23 @@ for most of its life and admitted in its last window, and #157 stays open in
 full for the deploy-time check it actually asks for. **Two kinds in one row is
 not a fourth kind** — one pull request is one row, which is the rule PR-32's
 and PR-33's rows already state.
+**PR-35 is PR-32's kind and the third consecutive row to close the residual the
+row above it named**: ADR-039 bought back the atomicity its own split cost by
+making the delete name the rows the select returned, and said in the same
+consequences that `(Key, CommittedAt)` names them *by construction and not by
+constraint* — nothing enforces uniqueness on a `datetimeoffset(7)`, so a
+replacement stamped at the selected row's exact tick was deleted with its claim
+live (#173). Closing it moved that rule to a constraint of the schema: the
+delete joins a `rowversion`, which is unique and monotonic per database and
+reads no clock (ADR-041). **It is a fifth clock fault of a different kind from
+the four before it** — those need a drift of sufficient magnitude and were each
+closed at the source, where this one needs an exact coincidence and cannot be
+out-predicated at all. **Three rows have now each closed what the row above
+named, and this is the first with nothing to hand on**: #127 is §8.5's, it is
+unchanged, and it is the only residual left on this mechanism.
 
 `Platform.slnx` holds thirty-three projects, thirteen of them test projects,
-and `dotnet test` runs 1,115 tests — so the build rules and the drift rules
+and `dotnet test` runs 1,119 tests — so the build rules and the drift rules
 below are live and a green run means something.
 
 **That number is a claim to reconcile rather than a fact to read**, exactly
@@ -454,7 +468,7 @@ dotnet tool restore                # dotnet-ef, pinned in .config/
 dotnet restore Platform.slnx
 dotnet build Platform.slnx
 dotnet test  Platform.slnx         # needs a running Docker daemon
-dotnet test  Platform.slnx --filter "Category!=Integration"   # 874 of 1,115, no daemon
+dotnet test  Platform.slnx --filter "Category!=Integration"   # 874 of 1,119, no daemon
 ```
 
 **[`docs/testing.md`](docs/testing.md) is the operational reference and this is
@@ -506,8 +520,8 @@ defect in the branch.
 **Since PR-22 they are *categorised*, which is the opposite of a skip and used
 to be refused alongside it.** A skip runs the suite and reports a pass; a
 category runs a smaller suite and says which. `Category!=Integration` is 874 of
-the 1,115 and starts no container — measured with `docker events`, not
-inferred — and `Category=Integration` is the other 241, needing the daemon
+the 1,119 and starts no container — measured with `docker events`, not
+inferred — and `Category=Integration` is the other 245, needing the daemon
 exactly as before.
 
 Adding a migration needs the pinned tool and a startup project:
@@ -692,7 +706,7 @@ to reach both, and the guide is the master copy.
   chapter table in `docs/backend-architecture/README.md`, the nav footers of
   both neighbours, and any `§n` cross-references that shift.
 - **New ADRs** append to `appendix-a-adrs.md` with the next free number
-  (currently ADR-041) and keep the
+  (currently ADR-042) and keep the
   `**Decision.** / **Why.** / **Consequences.**` three-part form. ADRs are
   never renumbered; supersede rather than rewrite.
 - **New dependencies** — whether mentioned in a chapter or added to

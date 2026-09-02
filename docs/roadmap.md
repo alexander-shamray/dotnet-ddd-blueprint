@@ -126,7 +126,7 @@ PR-11 has since landed, and it changes what PR-18 is an estimate *of* rather
 than what it costs. The scaffold renders the wiring and none of the domain
 ([§4.5](backend-architecture/04-solution-structure.md)): a new service arrives
 with its five projects, its migrator, its schema migration, both images, its
-Compose pair and eighty-three passing tests, and with no aggregate, no command,
+Compose pair and eighty-nine passing tests, and with no aggregate, no command,
 no query and no endpoint. So PR-18's three days are now three days of Ordering's
 *domain* — which is the shape the estimate always assumed, and was the first
 thing on this page that could be checked against a delivered pull request rather
@@ -279,6 +279,7 @@ decision rather than a gap.**
 | **32** | `fix(common): §8.5's durable idempotency marker` | — | — | — |
 | **33** | `fix(common): the marker and its claim are ordered by construction` | — | — | — |
 | **34** | `fix(common): the marker's purge asks the claim rather than out-counting it` | — | — | — |
+| **35** | `fix(common): the marker purge identifies a row by a rowversion` | — | — | — |
 
 **Nothing in this file would produce a number for them.** Every estimate above
 was quoted before any code existed, against a specification that was already
