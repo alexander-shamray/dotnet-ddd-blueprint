@@ -1197,21 +1197,27 @@ of those keys it has already let go of, and deletes only those:
 -- Oldest first, so a batch the store will not let go of entirely leaves the
 -- rows likeliest to still hold a claim — the newest — at the tail where the
 -- pass stops rather than at the head where they would block it.
-SELECT TOP (@BatchSize) [Key] FROM ordering.IdempotencyMarkers
+SELECT TOP (@BatchSize) [Key], CommittedAt FROM ordering.IdempotencyMarkers
 WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())
 ORDER BY CommittedAt;
 
 -- Delimited, because Key is a reserved word in T-SQL and the column is named
 -- for what it holds rather than around the parser.
 --
--- THE AGE PREDICATE IS REPEATED, and leaving it out was an ABA hole rather
--- than saved work. A key names a command, not a row: past the guarantee the
--- key is claimable again, so a retry can commit a FRESH marker under a key
+-- THE VERSION BOUND IS WHAT MAKES THIS SAFE, and neither a key alone nor a
+-- re-evaluated age is. A key names a command, not a row: past the guarantee
+-- the key is claimable again, so a retry can commit a FRESH marker under a key
 -- this pass already selected, and §15.3's three replicas can have a second
 -- purger's delete arrive after that. A key-only delete removes the
--- replacement. The single statement this split replaced matched on age and
--- could not; repeating the cutoff restores exactly that. It couples nothing —
--- both ends are the same server's clock, as in the SELECT above.
+-- replacement; repeating the age cutoff does not save it either, because that
+-- predicate re-reads SYSDATETIMEOFFSET() and a forward clock step before the
+-- stale delete makes the replacement look old enough to go. An age against a
+-- moving clock is not an ABA guard, and this section exists because that clock
+-- moves.
+--
+-- @SelectedThrough is the newest CommittedAt the SELECT returned — a value
+-- taken from the rows in hand, which no later clock movement can change. A
+-- replacement committed afterwards is stamped above it and cannot be reached.
 --
 -- Chunked at a thousand keys by the caller. Dapper expands `IN @Keys` into one
 -- parameter per element and SQL Server refuses more than 2,100 of them, where
@@ -1220,7 +1226,7 @@ ORDER BY CommittedAt;
 -- to a different layer.
 DELETE FROM ordering.IdempotencyMarkers
 WHERE [Key] IN @Keys
-    AND CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
+    AND CommittedAt <= @SelectedThrough;
 ```
 
 > **Two statements are a window one statement did not have, and one half of it
@@ -1230,15 +1236,20 @@ WHERE [Key] IN @Keys
 > attempts are past `Retention` from the original commit either way, which is
 > where this section's guarantee ends by design.
 >
-> **The other half was a genuine regression and is closed rather than
-> tolerated.** A key names a command and not a row, so the retry can *commit*
-> under that key — and with [§15.3](15-cicd-deployment.md)'s three replicas, a
-> second purger holding the same selected key can delete the replacement: a row
-> inside its window with a live claim behind it, after which the next retry
-> runs the command a third time. The single statement could not do that,
-> because it matched on age and a replacement is stamped `now`. The `DELETE`
-> above therefore repeats the cutoff, which is what makes the split safe rather
-> than merely equivalent.
+> **The other half was a genuine regression and is closed by a version bound
+> rather than by a predicate.** A key names a command and not a row, so the
+> retry can *commit* under that key — and with
+> [§15.3](15-cicd-deployment.md)'s three replicas, a second purger holding the
+> same selected key can delete the replacement: a row inside its window with a
+> live claim behind it, after which the next retry runs the command a third
+> time. **Repeating the age cutoff looked like the fix and is not one**, which
+> is worth stating because it was the first attempt: that predicate re-reads
+> `SYSDATETIMEOFFSET()`, so a forward step of the database's clock before the
+> stale delete makes the replacement satisfy it. An age against a moving clock
+> cannot guard against an ABA, in the one section whose whole subject is that
+> the clock moves. The `DELETE` above therefore bounds on `@SelectedThrough` —
+> the newest `CommittedAt` the `SELECT` actually returned — which is fixed at
+> selection and beyond any clock's reach.
 
 > **The floor is the claim's window exactly, and it was the claim's window
 > *plus* an allowance until both of the things that reordered the two expiries

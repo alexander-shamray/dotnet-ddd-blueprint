@@ -37,9 +37,10 @@ namespace Common.Infrastructure.Messaging;
 /// compare a column against a cutoff and are done; the marker's compares a
 /// column against a cutoff to find <em>candidates</em>, asks
 /// <see cref="Common.Application.IIdempotencyStore"/> which of them it has
-/// already let go of, and then re-checks the same cutoff as it deletes — a key
-/// names a command rather than a row, so a retry can commit a fresh marker
-/// under one this pass already selected. Deleting on age alone put the claim's
+/// already let go of, and then deletes no row newer than the newest it
+/// selected — a key names a command rather than a row, so a retry can commit a
+/// fresh marker under one this pass already chose, and only a bound taken from
+/// the rows in hand excludes it. Deleting on age alone put the claim's
 /// window and the
 /// marker's on two servers' clocks with nothing coupling their rates, so a
 /// forward step of the database's deleted the row while the claim it backs up
@@ -175,7 +176,7 @@ public sealed class RetentionPurgeService : BackgroundService
         // where the pass stops rather than at the head where it would block.
         _idempotencyCandidateSql =
             $"""
-            SELECT TOP (@BatchSize) [Key] FROM {markers.QualifiedName}
+            SELECT TOP (@BatchSize) [Key], CommittedAt FROM {markers.QualifiedName}
             WHERE CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET())
             ORDER BY CommittedAt;
             """;
@@ -183,28 +184,33 @@ public sealed class RetentionPurgeService : BackgroundService
         // Delimited, because Key is a reserved word in T-SQL and the column is
         // named for what it holds rather than around the parser.
         //
-        // THE AGE PREDICATE IS REPEATED HERE, and leaving it out was an ABA
-        // hole rather than saved work. A key names a command, not a row: past
-        // the guarantee the key is claimable again, so a retry can re-run the
+        // THE VERSION BOUND IS WHAT MAKES THIS SAFE, and neither a key alone
+        // nor a re-evaluated age is. A key names a command, not a row: past the
+        // guarantee the key is claimable again, so a retry can re-run the
         // command and commit a FRESH marker under the same key between this
         // pass's SELECT and its DELETE. §15.3 ships three replicas, so two
         // purgers can select the same row and the second one's delete arrives
-        // after the first has removed it and after the replacement exists. A
-        // key-only delete removes that replacement — a row inside its window
-        // with a live claim behind it — and the retry after that runs the
-        // command a third time.
+        // after the first has removed it and after the replacement exists.
         //
-        // The single statement this split replaced could not do that, because
-        // it matched on age and a replacement is stamped `now`. Repeating the
-        // cutoff restores exactly that property. It couples nothing: both ends
-        // of this comparison are the same server's clock, as they are in the
-        // SELECT, and a step in either direction can only spare rows — which is
-        // the direction a marker may err in.
+        // A key-only delete removes that replacement — a row inside its window
+        // with a live claim behind it — and the retry after that runs the
+        // command a third time. **Repeating the age cutoff does not fix it
+        // either**, which is the correction worth carrying: that predicate
+        // re-reads SYSDATETIMEOFFSET(), so a forward step of the database's
+        // clock before the stale delete makes the replacement look old enough
+        // and it goes anyway. An age against a moving clock is not an ABA
+        // guard, and this pull request exists because that clock moves.
+        //
+        // @SelectedThrough is the newest CommittedAt the SELECT actually
+        // returned — a value captured from the rows in hand, which no later
+        // clock movement can change. Every row this pass chose is at or below
+        // it by construction, and a replacement committed afterwards is stamped
+        // above it, so the delete cannot reach one however the clock behaves.
         _idempotencyDeleteSql =
             $"""
             DELETE FROM {markers.QualifiedName}
             WHERE [Key] IN @Keys
-                AND CommittedAt < DATEADD(second, -@WindowSeconds, SYSDATETIMEOFFSET());
+                AND CommittedAt <= @SelectedThrough;
             """;
     }
 
@@ -314,7 +320,7 @@ public sealed class RetentionPurgeService : BackgroundService
 
         for (int batch = 0; batch < _policy.MaxBatchesPerPass; batch++)
         {
-            string[] candidates = [.. await connection.QueryAsync<string>(
+            MarkerCandidate[] candidates = [.. await connection.QueryAsync<MarkerCandidate>(
                 new CommandDefinition(
                     _idempotencyCandidateSql,
                     new { _policy.BatchSize, WindowSeconds = windowSeconds },
@@ -323,14 +329,21 @@ public sealed class RetentionPurgeService : BackgroundService
             if (candidates.Length == 0)
                 break;
 
+            // The version bound, taken from the rows rather than from a clock.
+            // ORDER BY CommittedAt makes the last one the newest, and the
+            // delete below refuses anything above it — which is what stops a
+            // replacement committed after this SELECT being deleted by it.
+            DateTimeOffset selectedThrough = candidates[^1].CommittedAt;
+            string[] keys = [.. candidates.Select(candidate => candidate.Key)];
+
             // Not caught, and the caller's `catch` is why that is safe: an
             // unreachable store leaves every marker in place and the pass is
             // logged and retried next interval. Treating a failed lookup as
             // "no claim" would delete the row that refuses a duplicate, which
             // is the failure this call exists to remove.
-            IReadOnlyCollection<string> unheld = await _claims.UnheldAsync(candidates, ct);
+            IReadOnlyCollection<string> unheld = await _claims.UnheldAsync(keys, ct);
 
-            int deleted = await DeleteKeysAsync(connection, unheld, windowSeconds, ct);
+            int deleted = await DeleteKeysAsync(connection, unheld, selectedThrough, ct);
             total += deleted;
 
             // Two ways to stop and both are needed. A short SELECT means the
@@ -352,17 +365,17 @@ public sealed class RetentionPurgeService : BackgroundService
     /// inside SQL Server's parameter limit. Returns the rows actually removed.
     /// </summary>
     /// <remarks>
-    /// <b>The window is re-checked rather than trusted from the selection.</b>
-    /// A key names a command and not a row, so a retry can commit a fresh
-    /// marker under a key this pass has already selected — and a delete
-    /// matching on the key alone would remove it. See the statement's own
-    /// comment; this is why the count returned can be lower than the number of
-    /// keys handed in.
+    /// <b>The selection's own newest timestamp bounds it, rather than a
+    /// re-read clock.</b> A key names a command and not a row, so a retry can
+    /// commit a fresh marker under a key this pass has already selected — and
+    /// neither a key-only delete nor one re-evaluating an age against a moving
+    /// clock excludes it. See the statement's own comment; this is why the
+    /// count returned can be lower than the number of keys handed in.
     /// </remarks>
     private async Task<int> DeleteKeysAsync(
         IDbConnection connection,
         IReadOnlyCollection<string> keys,
-        int windowSeconds,
+        DateTimeOffset selectedThrough,
         CancellationToken ct)
     {
         int deleted = 0;
@@ -372,7 +385,7 @@ public sealed class RetentionPurgeService : BackgroundService
             deleted += await connection.ExecuteAsync(
                 new CommandDefinition(
                     _idempotencyDeleteSql,
-                    new { Keys = chunk, WindowSeconds = windowSeconds },
+                    new { Keys = chunk, SelectedThrough = selectedThrough },
                     cancellationToken: ct));
         }
 
@@ -409,4 +422,15 @@ public sealed class RetentionPurgeService : BackgroundService
 
         return total;
     }
+
+    /// <summary>
+    /// One row of the marker pass's selection: the key to delete by, and the
+    /// <c>CommittedAt</c> that identifies the row rather than the command.
+    /// </summary>
+    /// <remarks>
+    /// A record rather than the bare key, because the key alone cannot tell a
+    /// marker from its own replacement — which is the whole of the delete's
+    /// version bound.
+    /// </remarks>
+    private sealed record MarkerCandidate(string Key, DateTimeOffset CommittedAt);
 }

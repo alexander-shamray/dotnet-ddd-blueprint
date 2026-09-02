@@ -225,12 +225,26 @@ constant without saying which would read as the reverse.
   already selected — and with three purge replicas, a second purger's key-only
   delete removes that replacement: a row inside its window with a live claim
   behind it. The statement this split replaced matched on age and could not.
-  The `DELETE` now repeats the cutoff, which restores the property rather than
-  adding one. **The lesson is the one this repository keeps paying for**: a
-  refactor that splits an atomic statement has to be checked against what the
-  atomicity was buying, and "the same race existed before" was true of one half
-  and hid the other. Found by the fifth review round; no test stages it, because
-  the interleaving needs three purgers and a retry.
+  **The lesson is the one this repository keeps paying for**: a refactor that
+  splits an atomic statement has to be checked against what the atomicity was
+  buying, and "the same race existed before" was true of one half and hid the
+  other.
+- **The first fix for it was wrong in a way worth keeping**, because the
+  reasoning is more instructive than the defect. Repeating the age cutoff in
+  the `DELETE` restores exactly what the single statement matched on — and it
+  re-reads `SYSDATETIMEOFFSET()` to do it, so a forward step of the database's
+  clock between the two statements makes the replacement look old enough and
+  the stale delete takes it regardless. **An age against a moving clock cannot
+  guard an ABA**, in a pull request whose entire subject is that the clock
+  moves: the fix assumed away the fault the change exists to survive. The
+  delete bounds on `@SelectedThrough` instead — the newest `CommittedAt` the
+  `SELECT` returned, captured from the rows in hand — which nothing the clock
+  does afterwards can move.
+- **Two review rounds were needed to reach that**, and neither the defect nor
+  the wrong fix could have been caught by the suite: the interleaving needs
+  three purgers, a retry and a clock step, and nothing here stages one. What
+  the tests do cover is that a version-bounded delete still deletes — the
+  1,001-row chunking case runs through the same statement.
 
 ## PR-33 — the two terms an allowance stood in for, and what closed them
 

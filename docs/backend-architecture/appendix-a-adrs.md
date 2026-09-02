@@ -2668,20 +2668,28 @@ This decision keeps the TTL and moves the question instead.
   deleted and the retry's transaction reads no marker. What bounds it is that
   both attempts are already past `Window` from the original commit, which is
   where §8.5's guarantee ends by design.
-- **The other half WAS a regression, and the `DELETE` repeats the age predicate
-  because of it.** A key names a command and not a row. Past the guarantee the
-  key is claimable, so a retry can *commit* under it and write a fresh marker —
-  and with [§15.3](15-cicd-deployment.md)'s three replicas, a second purger
-  holding the same selected key can then delete that replacement: a row inside
-  its window with a live claim behind it, after which the next retry runs the
-  command a third time. The single statement could not do it, because it
-  matched on age and a replacement is stamped `now`. **A key-only delete was
-  therefore weaker than what it replaced**, which is the one thing this split
-  was not allowed to be. Repeating the cutoff couples nothing — both ends are
-  the same server's clock, exactly as in the `SELECT` — and a step in either
-  direction can only spare rows, which is the direction a marker may err in.
-  Found by review rather than by a test: the interleaving needs three purgers
-  and a retry, and nothing here stages one.
+- **The other half WAS a regression, and it is closed by a version bound
+  rather than by a predicate.** A key names a command and not a row. Past the
+  guarantee the key is claimable, so a retry can *commit* under it and write a
+  fresh marker — and with [§15.3](15-cicd-deployment.md)'s three replicas, a
+  second purger holding the same selected key can then delete that replacement:
+  a row inside its window with a live claim behind it, after which the next
+  retry runs the command a third time. The single statement could not do it,
+  because it matched on age and a replacement is stamped `now`. **A key-only
+  delete was therefore weaker than what it replaced**, which is the one thing
+  this split was not allowed to be.
+- **Repeating the age cutoff was the first fix and was wrong, which is recorded
+  because the reasoning is the trap.** It restores what the single statement
+  matched on, and it re-reads `SYSDATETIMEOFFSET()` to do it — so a forward
+  step of the database's clock between the two statements makes the replacement
+  look old enough and the stale delete takes it anyway. **An age against a
+  moving clock cannot guard an ABA**, and this record exists because that clock
+  moves; a fix that assumes it does not is this decision arguing against
+  itself. The `DELETE` bounds on `@SelectedThrough` instead — the newest
+  `CommittedAt` the `SELECT` returned, captured from the rows in hand and
+  immune to anything the clock does afterwards. Both the defect and the wrong
+  fix were found by review rather than by a test: the interleaving needs three
+  purgers, a retry and a clock step, and nothing here stages one.
 - **The candidates are ordered oldest first, and the pass stops on a batch it
   could not fully delete.** A batch the store still holds keys from would be
   returned unchanged by the next `SELECT` — nothing about those rows has moved
