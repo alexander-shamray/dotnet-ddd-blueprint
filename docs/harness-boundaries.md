@@ -703,9 +703,9 @@ steer an edit to any undenied path, unattended, inside `/ship`'s loop (#52,
 to write, and `allowed-tools` withholds nothing. What closed it was a
 **split**: a `review-adjudicator` profile with `Read`, `Grep` and `Glob`
 reads the review and returns a structured record, and the writing invocation
-carries `Read(suggestions.md)` and the three machinery trees in
-`disallowed-tools`, so the review is refused to the step that writes by the
-harness rather than by a callout. The record is the residual — it is one hop
+carries the three machinery trees in `disallowed-tools`, so a finding whose
+fix lands in the machinery is refused to the step that writes by the harness
+rather than by a callout. The record is the residual — it is one hop
 from the prose and the parent's context receives it — and what bounds an
 accepted row is a predicate on the file (its quoted text is at its site) and
 the rule that an edit stays inside the row's own sites. **The

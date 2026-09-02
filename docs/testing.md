@@ -149,8 +149,13 @@ that the conversion exclusion reaches its own child rather than only its
 source — the second helper of the kind that never shipped wrong, whose title
 did; and **#17**, that every credential-bearing `docker run` in the reviewer
 joins the internal network and only the proxy reaches the bridge, which is
-the whole of the egress confinement and the one part of it a text gate can
-hold.
+the whole of the egress confinement's width and the one part of it a text
+gate can hold. Its depth is `test_egress_proxy.py` in the same directory,
+which the same `discover` picks up: it runs the proxy on loopback and drives
+a socket at it, so the allowed tunnel relays, a host off the list, an
+allowed host on another port, a plain `GET` and an upstream that refuses
+are each answered as the file says, and the log line never carries the
+request as the reviewer wrote it.
 
 **Two of those took their counterfactual somewhere other than the previous
 commit, and that is worth knowing before trusting them.** #140's read-side

@@ -56,7 +56,8 @@ What is under test, and which issue each half closes:
         crosses on the fallback path could be posted anywhere. Closed by an
         internal network and a CONNECT-only proxy; these cases keep every
         credential-bearing `docker run` on that network, which is the whole
-        of the confinement.
+        of the confinement's width, and `test_egress_proxy.py` beside this
+        file exercises the proxy itself at the socket, which is its depth.
   #56   /review-copilot read three comment feeds and filtered none of them,
         holding `Edit`, in a loop /ship runs unattended. The cases cover what a
         feed helper admits, that a dropped item's BODY reaches neither stream,

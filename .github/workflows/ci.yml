@@ -101,7 +101,9 @@ jobs:
   # create` no free parameter and that the conversion exclusion reaches its
   # own child rather than only its source; and #17, that every
   # credential-bearing `docker run` in the reviewer joins the internal
-  # network and only the proxy reaches the bridge.
+  # network and only the proxy reaches the bridge, and — in a second module
+  # the same discover picks up — that the proxy itself answers a socket the
+  # way its file says, on loopback and with no network.
   #
   # Two of those take their counterfactual somewhere other than the previous
   # commit: #140's read-side cases are green against main and have to be, since
