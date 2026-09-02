@@ -691,6 +691,45 @@ class TheAuthorityDecidesWhichRealmIsRead(unittest.TestCase):
                 realm_check.split_authority(authority)
             self.assertIn("query or a fragment", str(stop.exception))
 
+    def test_every_strvals_metacharacter_is_refused(self):
+        """Derived from the constant, so a character added to it is covered.
+
+        Listing the cases by hand is how the next entry arrives untested. Each
+        one goes in the realm segment, which is the part of an authority a
+        cluster-held value can most freely choose.
+        """
+        for character in realm_check.STRVALS_METACHARACTERS:
+            with self.subTest(character=character):
+                with self.assertRaises(SystemExit) as stop:
+                    realm_check.split_authority(
+                        f"https://id.example.com/realms/commerce{character}x")
+                self.assertIn("strvals", str(stop.exception))
+
+    def test_the_comma_injection_is_refused_in_its_concrete_form(self):
+        """The shape the refusal exists for, spelled out rather than generated.
+
+        `--set-string identity.authority=<value>` is parsed by Helm's strvals,
+        where a comma separates assignments — so this authority is TWO of them
+        and the second overrides a registry nobody checked. It is the tag
+        preflight's failure one value over, and `canary.py validate-tag` exists
+        because this repository has already paid for it once.
+        """
+        with self.assertRaises(SystemExit) as stop:
+            realm_check.split_authority(
+                "https://id.example.com/realms/commerce,image.registry=attacker.example")
+        message = str(stop.exception)
+        self.assertIn("strvals", message)
+        # The comma AND the `=` are both named: the injected assignment needs
+        # both, and a message that reported only one would understate what the
+        # value carries.
+        self.assertIn(",=", message)
+
+    def test_a_compliant_authority_still_passes(self):
+        """The control: the refusal must not have swallowed the ordinary case."""
+        root, realm = realm_check.split_authority(
+            "https://id.example.com/realms/commerce")
+        self.assertEqual((root, realm), ("https://id.example.com", "commerce"))
+
     def test_a_realm_name_with_a_separator_in_it_stops(self):
         with self.assertRaises(SystemExit) as stop:
             realm_check.split_authority("https://id.example.com/realms/commerce/../master")

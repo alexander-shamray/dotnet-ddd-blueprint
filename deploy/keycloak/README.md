@@ -71,7 +71,7 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   see, so a filtered list and a complete one look the same and no ceiling or
   page boundary can tell them apart. What is checked instead is the premise:
   `read_admin.py` reads the roles out of its own token and stops before asking
-  unless the account holds `view-clients`, `view-realm` or `realm-admin`. The
+  unless the account holds `view-clients` or `realm-admin`. The
   token is decoded and **not verified**, which is safe because nothing is
   authorised on it — the server issued it and the server enforces the roles;
   it is read to find out whether this account could see the whole realm.
