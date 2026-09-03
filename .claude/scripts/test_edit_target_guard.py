@@ -378,8 +378,17 @@ class ALinkIsNotTheFileItIsSpelledAs(GuardCase):
             print("8.3 aliases are disabled on this volume; case has no "
                   "subject", file=sys.stderr)
             return
+        # **Which refusal fires depends on how much of the path the volume
+        # aliases, and the case asserts the outcome rather than the wording.**
+        # Where only the leaf is shortened the prefix still matches an anchor
+        # and the ordinary spelling-versus-resolution test refuses it; where
+        # `GetShortPathNameW` shortens the whole path — which is what the CI
+        # runner does — no anchor recognises the spelling and the refusal comes
+        # from the rule for a name that lands inside a checkout it cannot be
+        # placed in. Pinning one message made this case red on the runner for a
+        # difference that is the volume's.
         reason = self.assertRefused(os.path.join(short, "a.md"))
-        self.assertIn("resolves elsewhere in it", reason)
+        self.assertIn(os.path.basename(long_name), reason)
 
     def test_a_notebook_path_is_judged_too(self):
         # `NotebookEdit` carries its target under another key, and a guard that
