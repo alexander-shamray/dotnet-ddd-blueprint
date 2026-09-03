@@ -103,7 +103,13 @@ jobs:
   # credential-bearing `docker run` in the reviewer joins the internal
   # network and only the proxy reaches the bridge, and — in a second module
   # the same discover picks up — that the proxy itself answers a socket the
-  # way its file says, on loopback and with no network.
+  # way its file says, on loopback and with no network. A THIRD module the
+  # same discover picks up carries #181, the edit-target guard: that a link
+  # inside an allowed tree is refused whatever it points at, that a denied
+  # tree spelled as ITSELF is admitted there rather than judged twice, and
+  # that a checkout reached through a link is not refused wholesale. It needs
+  # a real link on disk, and takes a junction where Windows refuses a
+  # symbolic one rather than skipping a property it never tested.
   #
   # Two of those take their counterfactual somewhere other than the previous
   # commit: #140's read-side cases are green against main and have to be, since

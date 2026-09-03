@@ -93,6 +93,14 @@ What is under test, and which issue each half closes:
   #150  what suppresses a sweep finding was prose in two files. The cases cover
         the helper's three exit codes, that neither sweep can read an issue's
         author at all, and that the one legitimate output stays writable.
+  #181  a path deny is matched on the SPELLING, so an edit through a link
+        inside an allowed tree lands where no deny has judged it. Its cases
+        live in `test_edit_target_guard.py` beside this file, which the same
+        discover picks up — a link into a denied tree, a link out of the
+        checkout, a denied tree spelled as ITSELF (admitted, because the guard
+        holds no copy of any deny list), and a checkout reached through a link
+        (admitted, or every edit in a worktree under a linked temp root would
+        be refused).
 
 **This inventory is a third copy of a list `ci.yml` and `docs/testing.md` also
 keep, and it went stale exactly as a redundant copy does** — it ended at #57
