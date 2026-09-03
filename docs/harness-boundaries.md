@@ -645,6 +645,31 @@ rather than one written where the guard can read it — `F=--output=x; git log
 $F`, or `N=2; git log -${N}`. Closing that needs the argv after expansion,
 which no hook is given.
 
+**One construct puts that residual inside a word a caller types literally, and
+it is refused for exactly that reason.** `$"…"` is a *translated*
+double-quoted string: bash resolves it through gettext against `TEXTDOMAIN`
+and `TEXTDOMAINDIR`, both ordinary environment variables, so a catalogue
+placed in the checkout decides what the word says. Measured with a hand-built
+`.mo` — `$"safe"` printed `printf`, and in command position `$"safe" RAN`
+executed it; the same lookup can return `git`. Raised in review, against a
+guard that had already met this form once and refused only the *expansions*
+inside it, as though `$"safe"` were the word `safe`. Every locale quote is
+refused now. The cost is a construct nothing in this repository writes, and
+`$'…'` is unaffected: its escapes are decoded, and one outside the decoded set
+was already refused.
+
+**A crash in the guard is a fail-open, so a crash now refuses the command it
+crashed on.** `PreToolUse` reads empty stdout as non-blocking, and a
+traceback is empty stdout — so each of the four crash paths found here (two
+`str.index`, one `list.index`, one recursion) admitted whatever the command
+was, including a force push. Fixing them one at a time leaves the next one
+open, so the direction is set at the door instead. **This is not the same
+answer as the malformed-event case beside it, and the two differ on purpose**:
+an unreadable hook event has established nothing about any command, so
+refusing there would stop the session for a defect in this file, while a crash
+while judging *this* command says this command broke the parser — and refusing
+one command is proportionate, states why, and puts the traceback on stderr.
+
 **Each of those readings was found by measurement, not by reasoning**, and the
 paragraph that stood here reasoned. It claimed every unresolved shape fails
 closed; the second command disproved that, and then four more readings

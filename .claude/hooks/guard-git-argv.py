@@ -78,6 +78,7 @@ import json
 import re
 import shlex
 import sys
+import traceback
 
 # Flags that write or execute rather than inspect. Matched on a PREFIX, so
 # `--exec-path=<dir>` — a directory of binaries for git to run — is the same act
@@ -268,7 +269,16 @@ def _heredoc_delimiter(word):
             quote = word[peek]
             close = word.index(quote, peek + 1)
             body = word[peek + 1:close]
-            if quote == "'" and "\\" in body:
+            # **Either sigil, and an earlier revision refused only the
+            # ANSI-C one.** `<<$"E\\"OF"` names `E"OF` to bash, where
+            # `word.index` finds the ESCAPED quote and derives `E\\OF` — a
+            # delimiter that matches nothing, so a line the payload plants
+            # can close the body early or late and take an intervening
+            # push with it. Raised in review; measured, and the reasoning
+            # that let the two sigils differ was that a locale quote
+            # "carries double-quote semantics", which is exactly why its
+            # closer is not the first quote.
+            if "\\" in body:
                 return None, False
             out.append(body)
             index = close + 1
@@ -1035,26 +1045,6 @@ def decode_ansi_c(body):
     return text.split("\0", 1)[0]
 
 
-def decode_locale_quote(body):
-    """The text `$"<body>"` names — double-quote semantics, so this cannot fail.
-
-    Bash translates the string and then reads it as a double-quoted one, where
-    a backslash is special only before `$`, a backtick, `"`, `\\` or a newline
-    and is otherwise literal.
-    """
-    out, index = [], 0
-    while index < len(body):
-        char = body[index]
-        if char == "\\" and index + 1 < len(body) and body[index + 1] in "$`\"\\\n":
-            if body[index + 1] != "\n":
-                out.append(body[index + 1])
-            index += 2
-            continue
-        out.append(char)
-        index += 1
-    return "".join(out)
-
-
 def single_quoted(text):
     """`text` as a single-quoted shell word, whatever it contains."""
     return "'" + text.replace("'", "'\"'\"'") + "'"
@@ -1071,21 +1061,32 @@ def undecodable_dollar_quote(command):
     the whole command down the `ValueError` path, where the push allow-list
     does not run.
 
-    **Both forms can fail, for different reasons.** `$'…'` can carry an escape
-    outside the set `decode_ansi_c` knows. And `$"…"` is a *translated
-    double-quoted string*, so bash performs the expansions inside it —
-    `git $"$(echo push)" origin +HEAD:main` runs the push. Freezing that body
-    as a literal made an expansion inert and admitted it, so a locale quote
-    carrying one is refused rather than read. Found by an adversarial audit;
-    the earlier claim that this form "cannot fail" was true of its backslash
-    rules and false of its semantics.
+    **Both forms can fail, and the locale one always does.** `$'…'` can carry
+    an escape outside the set `decode_ansi_c` knows, so it fails when it does.
+    `$"…"` fails unconditionally, and the word *translated* is why.
+
+    **The translation is a lookup in a catalogue this hook is not given**, and
+    the first version of this paragraph named the wrong half of the problem. It
+    said `$"…"` is a translated double-quoted string and then refused only the
+    expansions inside it — as though `$"safe"` were the word `safe` once no
+    substitution was present. It is not: bash resolves `$"…"` through gettext
+    against `TEXTDOMAIN` and `TEXTDOMAINDIR`, both ordinary environment
+    variables, so a catalogue placed in the checkout decides what the word
+    says. Measured with a hand-built `.mo`: `$"safe"` printed `printf`, and in
+    command position `$"safe" RAN` **executed** it. The same lookup can return
+    `git`. Raised in review.
+
+    So this is the residual `docs/harness-boundaries.md` names — text the shell
+    is *told* rather than text it is given — arriving in a construct a caller
+    can type literally, and the answer is the one that file already states for
+    a script on disk: what cannot be read is not judged, and what is not judged
+    is refused. The cost is every `$"…"`, which nothing in this repository
+    writes.
     """
     for start, end, ansi_c in dollar_quotes(command):
-        body = command[start + 2:end - 1]
-        if ansi_c:
-            if decode_ansi_c(body) is None:
-                return True
-        elif "$(" in body or "${" in body or "`" in body:
+        if not ansi_c:
+            return True
+        if decode_ansi_c(command[start + 2:end - 1]) is None:
             return True
     return False
 
@@ -1099,13 +1100,16 @@ def strip_dollar_quotes(command):
     flags and `ext::` were all skipped at once.
 
     The escapes are decoded rather than dropped, so `$'\\x67it'` becomes `git`
-    and is judged as one. An ANSI-C body this file cannot read is refused
-    before this runs, so the `None` case cannot arrive here.
+    and is judged as one. A body this file cannot read is refused before this
+    runs — which is every locale-quoted one, and an ANSI-C one carrying an
+    escape outside the decoded set — so neither the `None` case nor the
+    translated form can arrive here.
     """
     out, cursor = [], 0
     for start, end, ansi_c in dollar_quotes(command):
-        body = command[start + 2:end - 1]
-        text = decode_ansi_c(body) if ansi_c else decode_locale_quote(body)
+        if not ansi_c:
+            continue
+        text = decode_ansi_c(command[start + 2:end - 1])
         if text is None:
             continue
         out.append(command[cursor:start])
@@ -1980,8 +1984,17 @@ def unmodelled_printer(tokens):
         if not shells:
             continue
         for run in group[:max(shells)]:
-            name = program_name(leading_command(run))
-            arguments = run[run.index(leading_command(run)) + 1:]
+            # **A run can be assignments and nothing else**, and `leading_command`
+            # answers `""` for one — which `list.index` does not find, so
+            # `X=1 | bash` raised `ValueError` out of the hook. A crash is
+            # empty stdout, which `PreToolUse` treats as non-blocking: this
+            # was a fail-open on a shape a caller can type. Raised in review;
+            # verified as a crash.
+            command_word = leading_command(run)
+            if not command_word:
+                continue
+            name = program_name(command_word)
+            arguments = run[run.index(command_word) + 1:]
             if name == "printf" and any("%" in element for element in arguments):
                 return True
             if name == "echo" and any(element.startswith("-") and "e" in element
@@ -2083,10 +2096,26 @@ def stdin_scripts(command):
         while word < len(command) and not boundary(word):
             word += 1
         if consumed:
+            # **A here-string is quote-removed before the shell runs it, and
+            # `shlex` has no rule for either dollar quote.** So
+            # `bash <<<$'git push origin +HEAD:main'` handed the recursion
+            # `$git push …` — a name `program_name` does not match — while bash
+            # ran the push. `$'' + BS + BS + 'x67it …'` and the locale spelling did the
+            # same. Raised in review; verified allowed.
+            #
+            # An undecodable one is yielded whole rather than normalised: the
+            # recursive judge applies the same fail-closed check to it and
+            # refuses with the reason that check states, which keeps one
+            # sentence for one decision.
+            text = command[cursor:word]
+            if undecodable_dollar_quote(text):
+                yield text
+                index = max(word, index + 3)
+                continue
             try:
-                parts = shlex.split(command[cursor:word], posix=True)
+                parts = shlex.split(strip_dollar_quotes(text), posix=True)
             except ValueError:
-                parts = [command[cursor:word]]
+                parts = [text]
             if parts:
                 yield " ".join(parts)
         index = max(word, index + 3)
@@ -2639,7 +2668,27 @@ def main():
     if not isinstance(command, str):
         return 0
 
-    reason = offence(command)
+    try:
+        reason = offence(command)
+    except Exception:  # noqa: BLE001 - the direction is the point
+        # **A crash is empty stdout, and `PreToolUse` reads empty stdout as
+        # non-blocking**, so every defect in this file has been a fail-open.
+        # Four have been found by review and audit — a `ValueError` out of
+        # `list.index`, two out of `str.index`, and one recursion — and each
+        # admitted whatever the command was.
+        #
+        # **This is not the malformed-event case above and the two answers
+        # differ on purpose.** An unreadable event says nothing about any
+        # command, so refusing there would stop the session for a defect in
+        # this file; a crash while judging THIS command says this command
+        # broke the parser, and refusing one command is proportionate and
+        # tells the caller exactly that.
+        traceback.print_exc(file=sys.stderr)
+        reason = (
+            "this command crashed the guard that judges it, so nothing about "
+            "it has been established; refusing rather than admitting what "
+            "could not be read. The traceback is on stderr."
+        )
     if reason is None:
         return 0
 

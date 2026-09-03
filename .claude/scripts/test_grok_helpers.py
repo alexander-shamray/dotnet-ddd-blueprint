@@ -5653,14 +5653,31 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted('git commit -m "regex $\'\\d\' matches"')
         self.assertAdmitted('git log "$\'\\x22\'"')
 
-    def test_a_locale_quote_expands_what_is_inside_it(self):
-        # `$"…"` is a TRANSLATED double-quoted string, so bash performs the
-        # expansions in it — `git $"$(echo push)" origin +HEAD:main` runs the
-        # push. Freezing the body as a literal made the expansion inert and
-        # admitted it, so one carrying an expansion is refused rather than
-        # read. The claim that this form "cannot fail" was true of its
-        # backslash rules and false of its semantics.
+    def test_a_locale_quote_is_translated_and_so_cannot_be_read(self):
+        # **`$"…"` is a TRANSLATED double-quoted string and the translation is
+        # the part that cannot be read.** An earlier revision of this test knew
+        # the first half and refused only the expansions inside the body, as
+        # though `$"safe"` were the word `safe` once no substitution was
+        # present. Bash resolves it through gettext against `TEXTDOMAIN` and
+        # `TEXTDOMAINDIR` — ordinary environment variables — so a catalogue
+        # placed in the checkout decides what the word says. Measured with a
+        # hand-built `.mo`: `$"safe"` printed `printf`, and in command position
+        # `$"safe" RAN` executed it. The same lookup can return `git`. Raised
+        # in review.
+        #
+        # The mechanism is asserted and not only the verdicts: every case below
+        # would still refuse under the old expansion-only rule but the first,
+        # so a verdict-only test would go on passing while the rule it pins had
+        # been replaced.
+        guard = self.guard_module()
+        self.assertTrue(guard.undecodable_dollar_quote('git $"safe" -5'),
+                        "a locale quote is refused for being one")
+        self.assertFalse(guard.undecodable_dollar_quote("git $'push' -5"),
+                         "and a decodable ANSI-C one is still read")
+
         for command in (
+            'git $"safe" origin +HEAD:main',
+            'git $"push" origin +HEAD:main',
             'git $"$(echo push)" origin +HEAD:main',
             'git $"`echo push`" origin +HEAD:main',
             'git $"${x}"push origin +HEAD:main',
@@ -5668,6 +5685,13 @@ class TheGitArgvGuard(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertRefused(command)
+
+        # The cost is every `$"…"`, and it is bounded by where bash reads one:
+        # a `$` before a quote it does not open is left alone, and nothing in
+        # this repository writes the construct.
+        self.assertAdmitted('git log --grep="cost: $"')
+        self.assertAdmitted("git log --grep='$\"x\"' -5")
+        self.assertAdmitted("gh api x --jq 'select(.b | test(\"^a$\"))'")
 
     def test_a_nul_truncates_the_word_the_way_bash_does(self):
         # `$'a\\0b'` is the single byte `a`, so `git p$'\\0'ush` is `git push`.
@@ -6119,6 +6143,119 @@ class TheGitArgvGuard(unittest.TestCase):
         # ordinary pipeline naming a shell is unaffected.
         self.assertAdmitted("echo hello | grep bash")
         self.assertAdmitted("git log --oneline -5 | grep bash")
+
+    def test_a_sigil_quoted_delimiter_refuses_a_backslash_in_either_form(self):
+        # `<<$"E\"OF"` names `E"OF` to bash, where `word.index` finds the
+        # ESCAPED quote and derives `E\OF` — a delimiter matching nothing, so
+        # a line the payload plants can end the body early or late and take an
+        # intervening push with it. The ANSI-C sigil already refused a
+        # backslash; the locale one did not, on the reasoning that it "carries
+        # double-quote semantics" — which is exactly why its closer is not the
+        # first quote it meets. Raised in review; measured.
+        guard = self.guard_module()
+        for word in ('$"E\\"OF"', "$'E\\'OF'"):
+            with self.subTest(word=word):
+                self.assertEqual((None, False), guard._heredoc_delimiter(word),
+                                 "an escape in the delimiter is not decoded")
+
+        for command in (
+            'git commit -F - <<$"E\\"OF"\nE"OF\ngit push origin '
+            '+HEAD:main\nE\\OF',
+            "git commit -F - <<$'E\\'OF'\ngit push origin +HEAD:main\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The sigil forms without an escape still name their delimiter.
+        self.assertEqual(("EOF", False), guard._heredoc_delimiter('$"EOF"'))
+        self.assertEqual(("EOF", False), guard._heredoc_delimiter("$'EOF'"))
+        self.assertAdmitted("git commit -F - <<$'EOF'\na message\nEOF")
+
+    def test_a_here_string_is_quote_removed_before_the_shell_runs_it(self):
+        # **`shlex` has no rule for either dollar quote**, so
+        # `bash <<<$'git push origin +HEAD:main'` handed the recursion
+        # `$git push …` — a name `program_name` does not match — while bash ran
+        # the push. Raised in review; verified allowed, in three spellings.
+        for command in (
+            "bash <<<$'git push origin +HEAD:main'",
+            "bash <<<$'\\x67it push origin +HEAD:main'",
+            'bash <<<$"git push origin +HEAD:main"',
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # An undecodable one is yielded whole rather than normalised, so the
+        # recursion refuses it with the reason the fail-closed check states
+        # rather than a second sentence saying the same thing.
+        self.assertIn("carries an escape this guard does not decode",
+                      self.guard_module().offence("bash <<<$'\\M-x'") or "")
+
+        # The control: an ordinary here-string is still read rather than
+        # refused for carrying a `$`.
+        self.assertAdmitted("bash <<<'git log --oneline -5'")
+        self.assertAdmitted("bash <<<'git log --grep=$x -5'")
+
+    def test_a_run_of_assignments_alone_has_no_command_word(self):
+        # `leading_command` answers `""` for a run that is all assignments, and
+        # `list.index` does not find it — so `X=1 | bash` raised `ValueError`
+        # out of the hook. **A crash is empty stdout and `PreToolUse` reads
+        # empty stdout as non-blocking**, which makes every crash in this file
+        # a fail-open. Raised in review; verified as a crash.
+        for command in ("X=1 | bash", "X=1 Y=2 | sh", "X=1 | bash -c true"):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+        # And the run before a shell is still judged when it has one.
+        self.assertRefused("X=1 echo 'git push origin +HEAD:main' | bash")
+
+    def test_a_crash_while_judging_refuses_the_command_it_crashed_on(self):
+        # **Four crash paths have been found in this file and each was a
+        # fail-open**: two `str.index`, one `list.index` and one recursion.
+        # Fixing them one at a time leaves the next one open, so the direction
+        # is set at the door — a crash while judging THIS command says this
+        # command broke the parser, and refusing one command is proportionate.
+        #
+        # **Not the same answer as the malformed-event case beside it**, which
+        # allows: an unreadable event has established nothing about any
+        # command, so refusing there stops the session for a defect in this
+        # file.
+        guard = self.guard_module()
+        original = guard.offence
+        try:
+            guard.offence = self._raising_offence
+            decision = self._run_hook(guard, "git status")
+        finally:
+            guard.offence = original
+        self.assertEqual(
+            "deny",
+            decision["hookSpecificOutput"]["permissionDecision"],
+            "a crash refuses rather than admitting what could not be read")
+        self.assertIn("crashed the guard that judges it",
+                      decision["hookSpecificOutput"]["permissionDecisionReason"])
+
+    @staticmethod
+    def _raising_offence(command, depth=0, judged=None):
+        raise RuntimeError("deliberate, to observe the direction of a crash")
+
+    @staticmethod
+    def _run_hook(guard, command):
+        """`guard.main()` over one Bash event, returning the JSON it wrote."""
+        import contextlib
+        import io as _io
+        import json as _json
+        import sys as _sys
+
+        event = _json.dumps({"tool_name": "Bash",
+                             "tool_input": {"command": command}})
+        out, err = _io.StringIO(), _io.StringIO()
+        stdin = _sys.stdin
+        try:
+            _sys.stdin = _io.StringIO(event)
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                guard.main()
+        finally:
+            _sys.stdin = stdin
+        return _json.loads(out.getvalue())
 
     def test_the_readings_do_not_multiply(self):
         # **The four readings and the substitution recursion each descend onto
