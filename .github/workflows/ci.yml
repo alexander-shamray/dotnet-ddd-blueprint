@@ -148,6 +148,36 @@ jobs:
       - name: Test the review helpers
         run: python -m unittest discover -s .claude/scripts
 
+  # **The edit-target guard has branches no Linux runner can reach**, and the
+  # job above is `ubuntu-latest`, so every one of them could regress with every
+  # required check green. Three are Windows' own: the junction fallback, which
+  # is the only link primitive an unprivileged Windows session gets; `..` after
+  # a link, which Windows collapses before the filesystem sees it where POSIX
+  # resolves it against the link's target; and the case-insensitive comparison
+  # `realpath` forces by answering with the on-disk case. Raised by Copilot,
+  # and the fix found a defect the review had not: the suite read the `..`
+  # semantics off which link primitive existed, which is the same answer only
+  # while symbolic links and POSIX coincide — a privileged Windows runner has
+  # both and would have failed a case the guard is right about.
+  #
+  # **One module rather than the whole `discover`**, and that is a property of
+  # the module rather than a preference: `test_edit_target_guard.py` needs
+  # nothing but Python and a filesystem, where the suite beside it needs
+  # `bash`, `grep`, `git` and `jq` and a `gh` stub on PATH. Widening this job
+  # to the directory would be adopting that whole toolchain on a second
+  # platform to reach three branches.
+  edit-target-guard-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test the edit-target guard on Windows
+        run: python -m unittest discover -s .claude/scripts -p "test_edit_target_guard.py" -v
+
   # PR-25's inventory gates, and they sit beside the licence gate rather than
   # inside `build` for the same reason it does: stdlib Python over text, so
   # they need no restore and cannot be skipped by a build failure.

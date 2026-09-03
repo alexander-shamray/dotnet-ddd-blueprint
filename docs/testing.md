@@ -147,9 +147,16 @@ that a link inside an allowed tree is refused whatever it points at, that a
 denied tree spelled as *itself* is admitted here rather than judged twice, and
 that a checkout reached through a link is not refused wholesale, with its cases
 in `test_edit_target_guard.py` beside the others and picked up by the same
-`discover`; it is the one suite that needs a real link on disk, and takes a
-symbolic one where the platform grants it and a junction where Windows does
-not — never a skip, which would report a pass for a property it never tested;
+`discover`; it is the one suite that needs a real link on disk, and runs every
+case against **each** primitive the platform grants — a symbolic link, a
+junction, or both — never a skip, which would report a pass for a property it
+never tested. It is also the one module CI runs **twice**: `review-helpers` on
+Linux and `edit-target-guard-windows` on Windows, because the junction
+fallback, `..` after a link and the case-insensitive comparison are Windows'
+own semantics and no Linux runner can reach them. That job runs the module
+alone rather than the directory, because this module needs nothing but Python
+and a filesystem where the suite beside it needs `bash`, `grep`, `git`, `jq`
+and a `gh` stub;
 **#150**, that what suppresses a
 sweep finding is decided by a helper rather than by a reader; **#75**
 again, that the issue helper leaves `gh issue create` no free parameter and

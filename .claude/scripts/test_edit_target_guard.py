@@ -35,6 +35,15 @@ JUNCTIONS = None
 
 
 def setUpModule():
+    """Find every link primitive this platform grants, not the first one.
+
+    **Every case below runs against all of them**, and taking the first was a
+    defect rather than a simplification: a Windows runner whose account holds
+    `SeCreateSymbolicLinkPrivilege` gets symbolic links, so the junction
+    fallback — the only primitive an unprivileged Windows session has — would
+    have gone unexercised on the one platform that needs it. Raised by Copilot
+    against the CI coverage; found by the fix.
+    """
     global SYMLINKS, JUNCTIONS
     probe = tempfile.mkdtemp()
     target = os.path.join(probe, "target")
@@ -45,14 +54,13 @@ def setUpModule():
         SYMLINKS = True
     except (OSError, NotImplementedError, AttributeError):
         SYMLINKS = False
-    if not SYMLINKS:
-        try:
-            from _winapi import CreateJunction
-        except ImportError:
-            CreateJunction = None
-        if CreateJunction is not None:
-            CreateJunction(target, os.path.join(probe, "junction"))
-            JUNCTIONS = CreateJunction
+    try:
+        from _winapi import CreateJunction
+    except ImportError:
+        CreateJunction = None
+    if CreateJunction is not None:
+        CreateJunction(target, os.path.join(probe, "junction"))
+        JUNCTIONS = CreateJunction
 
     if not SYMLINKS and JUNCTIONS is None:
         raise AssertionError(
@@ -62,6 +70,25 @@ def setUpModule():
 
     if not HOOK.exists():
         raise AssertionError(f"the hook is missing: {HOOK}")
+
+
+def linkers():
+    """The link primitives available here, by name. Never empty."""
+    names = []
+    if SYMLINKS:
+        names.append("symlink")
+    if JUNCTIONS is not None:
+        names.append("junction")
+    return names
+
+
+# **The two platforms disagree about `..` after a link, and the discriminator
+# is the PLATFORM rather than the primitive.** POSIX resolves `..` against the
+# link's target; Windows' path parser collapses it before the filesystem is
+# consulted, through a junction and through a symbolic link alike. Reading that
+# off `SYMLINKS` — as the first version did — is right only while symbolic
+# links and POSIX coincide, which a privileged Windows runner breaks.
+DOTDOT_IS_LEXICAL = os.name == "nt"
 
 
 class GuardCase(unittest.TestCase):
@@ -82,19 +109,20 @@ class GuardCase(unittest.TestCase):
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(text)
 
-    def link_to(self, name, real_target):
+    def link_to(self, name, real_target, linker):
         """A path spelled under `docs/` whose resolution is `real_target`.
 
         With symbolic links the link IS the target's spelling. With junctions —
-        which is all Windows grants an unprivileged process — the link is the
-        target's *directory* and the file is named beneath it. Both produce a
-        path inside an allowed tree that resolves outside it, which is the
-        property every case here is about; neither is a weaker form of the
-        other, and writing the tests against this helper is what keeps the
-        Windows run from being a different suite.
+        which is all Windows grants an unprivileged process, and which take a
+        directory only — the link is the target's *directory* and the file is
+        named beneath it. Both produce a path inside an allowed tree that
+        resolves outside it, which is the property every case here is about;
+        neither is a weaker form of the other, and running every case against
+        each primitive the platform grants is what keeps the Windows run from
+        being a different suite.
         """
-        linkpath = os.path.join(self.root, "docs", name)
-        if SYMLINKS:
+        linkpath = os.path.join(self.root, "docs", f"{name}-{linker}")
+        if linker == "symlink":
             os.symlink(real_target, linkpath,
                        target_is_directory=os.path.isdir(real_target))
             return linkpath
@@ -103,6 +131,15 @@ class GuardCase(unittest.TestCase):
             return linkpath
         JUNCTIONS(os.path.dirname(real_target), linkpath)
         return os.path.join(linkpath, os.path.basename(real_target))
+
+    def link_dir(self, name, real_target, linker):
+        """The same for a directory target, where both primitives agree."""
+        linkpath = os.path.join(self.root, "docs", f"{name}-{linker}")
+        if linker == "symlink":
+            os.symlink(real_target, linkpath, target_is_directory=True)
+        else:
+            JUNCTIONS(real_target, linkpath)
+        return linkpath
 
     def judge(self, file_path, tool="Edit", cwd=None, key="file_path"):
         """The hook's verdict on one call: the reason, or `None` for allowed."""
@@ -145,32 +182,36 @@ class ALinkIsNotTheFileItIsSpelledAs(GuardCase):
         # under `docs/` pointing into the machinery is a path the deny never
         # sees and a write the machinery receives.
         target = os.path.join(self.root, ".claude", "scripts", "helper.sh")
-        reason = self.assertRefused(self.link_to("pwned", target))
-        self.assertIn("resolves elsewhere in it", reason)
-        self.assertIn("helper.sh", reason)
+        for linker in linkers():
+            with self.subTest(link=linker):
+                reason = self.assertRefused(
+                    self.link_to("pwned", target, linker))
+                self.assertIn("resolves elsewhere in it", reason)
+                self.assertIn("helper.sh", reason)
 
     def test_a_link_out_of_the_checkout_is_refused(self):
         # The other half of the issue's sentence, and the one a tree deny could
         # never have covered: no repository-relative pattern says anything
         # about a path that stops being repository-relative on resolution.
-        reason = self.assertRefused(
-            self.link_to("escape", os.path.join(self.outside, "loot.txt")))
-        self.assertIn("outside the checkout", reason)
+        loot = os.path.join(self.outside, "loot.txt")
+        for linker in linkers():
+            with self.subTest(link=linker):
+                reason = self.assertRefused(
+                    self.link_to("escape", loot, linker))
+                self.assertIn("outside the checkout", reason)
 
     def test_a_link_in_the_middle_of_the_path_is_refused(self):
         # The component that is a link need not be the last one, and a guard
         # that only stats the leaf would admit this. Under junctions this is
         # the shape every case takes; under symlinks it is a case of its own,
         # which is why it is written out rather than left to the helper.
-        linkdir = os.path.join(self.root, "docs", "tree")
-        if SYMLINKS:
-            os.symlink(os.path.join(self.root, ".claude"), linkdir,
-                       target_is_directory=True)
-        else:
-            JUNCTIONS(os.path.join(self.root, ".claude"), linkdir)
-        reason = self.assertRefused(
-            os.path.join(linkdir, "scripts", "helper.sh"))
-        self.assertIn("resolves elsewhere in it", reason)
+        machinery = os.path.join(self.root, ".claude")
+        for linker in linkers():
+            with self.subTest(link=linker):
+                linkdir = self.link_dir("tree", machinery, linker)
+                reason = self.assertRefused(
+                    os.path.join(linkdir, "scripts", "helper.sh"))
+                self.assertIn("resolves elsewhere in it", reason)
 
     def test_a_dotdot_after_a_link_is_judged_the_way_the_kernel_resolves_it(self):
         # **The two platforms genuinely disagree here, and the guard follows
@@ -186,26 +227,31 @@ class ALinkIsNotTheFileItIsSpelledAs(GuardCase):
         #
         # So the assertion is the platform's own semantics, and a guard that
         # refused on Windows would be refusing a write that is exactly what it
-        # says it is.
-        linkdir = os.path.join(self.root, "docs", "tree")
+        # says it is. **The discriminator is `os.name` and not which primitive
+        # exists**: the first version read it off `SYMLINKS`, which is the same
+        # answer only while symbolic links and POSIX coincide — a privileged
+        # Windows runner has both and would have failed this case for a
+        # difference that is the platform's rather than the guard's.
         real = os.path.join(self.root, ".claude", "scripts")
-        if SYMLINKS:
-            os.symlink(real, linkdir, target_is_directory=True)
-        else:
-            JUNCTIONS(real, linkdir)
-        spelled = os.path.join(linkdir, "..", "settings.json")
-        if SYMLINKS:
-            self.assertIn("resolves elsewhere in it", self.assertRefused(spelled))
-        else:
-            self.assertAdmitted(spelled)
+        for linker in linkers():
+            with self.subTest(link=linker):
+                linkdir = self.link_dir("updir", real, linker)
+                spelled = os.path.join(linkdir, "..", "settings.json")
+                if DOTDOT_IS_LEXICAL:
+                    self.assertAdmitted(spelled)
+                else:
+                    self.assertIn("resolves elsewhere in it",
+                                  self.assertRefused(spelled))
 
     def test_a_notebook_path_is_judged_too(self):
         # `NotebookEdit` carries its target under another key, and a guard that
         # reads only `file_path` would wave the whole tool through while the
         # matcher says it is covered.
         target = os.path.join(self.root, ".claude", "scripts", "helper.sh")
-        self.assertRefused(self.link_to("book", target),
-                           tool="NotebookEdit", key="notebook_path")
+        for linker in linkers():
+            with self.subTest(link=linker):
+                self.assertRefused(self.link_to("book", target, linker),
+                                   tool="NotebookEdit", key="notebook_path")
 
 
 class TheOrdinaryWriteIsNotDisturbed(GuardCase):
@@ -253,13 +299,15 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
         # comparing the raw resolution against the raw spelling would refuse
         # every edit in it. The anchor is resolved too, which is what makes
         # this pass.
-        alias = os.path.join(self.outside, "checkout")
-        if SYMLINKS:
-            os.symlink(self.root, alias, target_is_directory=True)
-        else:
-            JUNCTIONS(self.root, alias)
-        self.assertAdmitted(os.path.join(alias, "docs", "chapter.md"),
-                            cwd=alias)
+        for linker in linkers():
+            with self.subTest(link=linker):
+                alias = os.path.join(self.outside, f"checkout-{linker}")
+                if linker == "symlink":
+                    os.symlink(self.root, alias, target_is_directory=True)
+                else:
+                    JUNCTIONS(self.root, alias)
+                self.assertAdmitted(
+                    os.path.join(alias, "docs", "chapter.md"), cwd=alias)
 
     def test_the_case_of_a_windows_spelling_is_not_a_difference(self):
         # Windows' `realpath` answers with the on-disk case, so `DOCS` comes
@@ -284,9 +332,11 @@ class WhatThisGuardIsNotTheSubjectOf(GuardCase):
 
     def test_a_tool_that_does_not_write_is_not_judged(self):
         target = os.path.join(self.root, ".claude", "scripts", "helper.sh")
-        link = self.link_to("read-me", target)
-        self.assertAdmitted(link, tool="Read")
-        self.assertAdmitted(link, tool="Bash")
+        for linker in linkers():
+            with self.subTest(link=linker):
+                link = self.link_to("read-me", target, linker)
+                self.assertAdmitted(link, tool="Read")
+                self.assertAdmitted(link, tool="Bash")
 
     def test_a_write_with_no_path_to_judge_is_refused(self):
         # The other direction from the fail-open below, and deliberately so: an
