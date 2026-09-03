@@ -5974,6 +5974,55 @@ class TheGitArgvGuard(unittest.TestCase):
             "git commit -F - <<$\\\n'EOF'\nEOF\ngit push origin +HEAD:main\n$EOF")
         self.assertAdmitted("git commit -F - <<$\\\n'EOF'\na message\nEOF")
 
+    def test_a_delimiter_fragment_ends_at_an_unescaped_quote(self):
+        # `<<"E\\"OF"` names `E"OF` to bash. The fragment closed at the
+        # ESCAPED quote, the scan then ran on across the newline and took the
+        # next line into the word, and the delimiter came out as nonsense.
+        # Raised in review; and the verdict was already a refusal, which is why
+        # the parse is asserted here and not just the answer — that direction
+        # happened to refuse, while the mirror of it, where the nonsense
+        # delimiter matches a line the payload plants, swallows whatever sits
+        # between.
+        guard = self.guard_module()
+        command = 'git commit -F - <<"E\\"OF"\nE"OF\ngit push origin +HEAD:main\nE\\OF'
+        match = guard.HEREDOC.match(command, 16)
+        self.assertIsNotNone(match)
+        self.assertEqual(
+            'E"OF', guard._heredoc_delimiter(match.group("word"))[0],
+            "the delimiter bash uses, not the one an early closer gives")
+        self.assertRefused(command)
+
+        # A delimiter may not span a line either, which is the second half of
+        # the same fix, and the ordinary quoted forms still work.
+        self.assertAdmitted("git commit -F - <<\"EOF\"\na message\nEOF")
+        self.assertAdmitted("git commit -F - <<'EOF'\na message\nEOF")
+
+    def test_a_stdin_script_that_builds_itself_is_refused(self):
+        # **A substitution inside a script a shell will run supplies the
+        # command itself**, and no reading models that:
+        # `bash <<<"$(printf git) push origin +HEAD:main"` runs the push, while
+        # the inner `printf git` is judged as the data it is and the
+        # empty-substitution reading leaves a bare `push …`. Raised in review;
+        # verified allowed.
+        #
+        # The same answer `unmodelled_printer` gives, for the same reason: the
+        # text that decides is not in the source. Quoting the here-string does
+        # not help, because the inner shell performs the substitution when it
+        # runs the line.
+        for command in (
+            'bash <<<"$(printf git) push origin +HEAD:main"',
+            "bash <<<'$(printf git) push origin +HEAD:main'",
+            'bash <<EOF\n$(printf git) push origin +HEAD:main\nEOF',
+            'sh <<<"`printf git` log --output=/tmp/x"',
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # And the control: a stdin script that says what it does is still read
+        # rather than refused for being one.
+        self.assertAdmitted("bash <<<'git log --oneline -5'")
+        self.assertAdmitted("bash <<'EOF'\ngit status\nEOF")
+
     def test_the_readings_do_not_multiply(self):
         # **The four readings and the substitution recursion each descend onto
         # a string barely shorter than the one they came from, so a command

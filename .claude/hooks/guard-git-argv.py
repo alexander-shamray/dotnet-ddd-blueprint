@@ -196,10 +196,21 @@ PROTECTED_BRANCHES = {"main"}
 # on the raw command, before it, and must, because a heredoc body is not a
 # command line. Raised in an adversarial audit; verified allowed, on `main` as
 # well. `\\\n` leads the alternatives because `\\.` cannot match a newline.
+#
+# **A quoted fragment ends at an UNESCAPED quote and never spans a line.**
+# `<<"E\\"OF"` names `E"OF` to bash; the fragment closed at the escaped quote,
+# the scan then ran on across the newline and took the next line into the
+# word, and the delimiter came out as nonsense — so `heredoc_spans` found no
+# body at all. That direction happened to refuse; the mirror of it, where the
+# nonsense delimiter matches a line the payload plants, swallows whatever sits
+# between. Raised in review.
 HEREDOC = re.compile(
     r"<<(?P<dash>-?)[ \t]*"
-    r"(?P<word>(?:\\\n|\$?\x27[^\x27]*\x27|\$?\x22[^\x22]*\x22|\\.|"
-    r"[^\s;&|<>()\x27\x22\\])+)"
+    r"(?P<word>(?:\\\n"
+    r"|\$?\x27[^\x27\n]*\x27"
+    r"|\$?\x22(?:[^\x22\\\n]|\\[^\n])*\x22"
+    r"|\\[^\n]"
+    r"|[^\s;&|<>()\x27\x22\\])+)"
 )
 
 
@@ -263,10 +274,28 @@ def _heredoc_delimiter(word):
             index = close + 1
             quoted = True
             continue
-        if char in "'\"":
+        if char == "'":
             close = word.index(char, index + 1)
             out.append(word[index + 1:close])
             index = close + 1
+            quoted = True
+            continue
+        if char == '"':
+            # Double quotes carry escapes, so the closer is the first UNESCAPED
+            # one and `\"` contributes a quote rather than ending the fragment.
+            scan, body = index + 1, []
+            while scan < len(word):
+                if word[scan] == "\\" and scan + 1 < len(word):
+                    body.append(word[scan + 1] if word[scan + 1] in '$`"\\'
+                                else word[scan:scan + 2])
+                    scan += 2
+                    continue
+                if word[scan] == '"':
+                    break
+                body.append(word[scan])
+                scan += 1
+            out.append("".join(body))
+            index = scan + 1
             quoted = True
             continue
         if char == "\\" and word[index + 1:index + 2] == "\n":
@@ -2290,6 +2319,20 @@ def _offence(command, depth, judged):
                 return f"with {description}: {refusal}"
 
     for script in stdin_scripts(command):
+        # **A substitution inside a script a shell will run supplies the
+        # command itself**, and no reading here models that:
+        # `bash <<<"$(printf git) push origin +HEAD:main"` runs the push, while
+        # the inner `printf git` is judged as the data it is and the
+        # empty-substitution reading leaves a bare `push …`. The same answer
+        # `unmodelled_printer` gives, for the same reason — the text that
+        # decides is not in the source. Raised in review; verified allowed.
+        if substitutions(script):
+            return (
+                "a script handed to a shell on stdin builds part of itself "
+                "with a command substitution, so what that shell runs cannot "
+                "be read; refusing rather than judging the source instead of "
+                "the result."
+            )
         refusal = offence(script, depth + 1, judged)
         if refusal is not None:
             return f"in a script handed to a shell on stdin: {refusal}"
