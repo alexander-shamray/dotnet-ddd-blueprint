@@ -158,7 +158,11 @@ macOS' default, and no Linux runner reaches any of them. That job runs the
 module alone rather than the directory, because this module needs nothing but
 Python and a filesystem where the suite beside it needs `bash`, `grep`, `git`,
 `jq` and a `gh` stub; it runs verbose, because the module prints which link
-primitives it exercised and a green run does not say;
+primitives it exercised and a green run does not say — **measured on the
+runners rather than assumed**: `windows-latest` reports `symlink, junction`,
+so that account holds `SeCreateSymbolicLinkPrivilege` and only the
+run-against-every-primitive rule reaches the junction fallback there, and
+`macos-latest` reports `symlink`;
 **#150**, that what suppresses a
 sweep finding is decided by a helper rather than by a reader; **#75**
 again, that the issue helper leaves `gh issue create` no free parameter and
