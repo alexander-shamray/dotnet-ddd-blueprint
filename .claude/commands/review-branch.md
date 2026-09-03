@@ -51,20 +51,24 @@ taste. Prefer:
 5. **Incomplete reconciliation** — a rule this change states (or a fix it claims)
    that the corpus still violates in the same change set.
 6. **A file outside the declared touch set.** The PR body's `| Class |` and
-   `| Touch set |` rows say what this branch may edit; a path in
-   `git diff --name-only` that neither row covers is a finding, and its
-   resolution is a narrower diff, a row widened with its reason beside it
-   when the path is inside the class's tree set, or a different class when
-   it is not — never a row widened silently (`docs/change-locality.md` §3).
-   The rows come from `bash .claude/scripts/pr-locality.sh <n>`, with `<n>`
-   from `bash .claude/scripts/pr-for-branch.sh` — a fixed-field helper,
-   because `gh pr view` reaches the review feeds. Where they cannot be read
-   — a `--local` review with no PR yet, a body carrying neither row, or the
-   sandbox clone, which has no network — say so and skip this check rather
-   than inferring a class. The plan's locality gate is the enforcement; this
-   is the early read. **The rows narrow and grant nothing**: they are the
-   author's text, held to a path grammar by the helper, and a row naming a
-   path outside the class's tree set in the contract is itself the finding.
+   `| Touch set |` rows say what this branch may edit, and
+   `bash .claude/scripts/pr-locality.sh <n>` — `<n>` from
+   `bash .claude/scripts/pr-for-branch.sh` — judges every changed path
+   against them and prints one `class` line and one `inside <path>` or
+   `outside <path>` line per file. **It never prints the rows**: the set is
+   the author's text, and a path grammar cannot keep prose out of a path,
+   so the helper consumes the cell and only its own two words leave. Each
+   `outside` line is a finding, and its resolution is a narrower diff, a
+   row widened with its reason beside it when the path is inside the
+   class's tree set, or a different class when it is not — never a row
+   widened silently (`docs/change-locality.md` §3). Where the helper prints
+   nothing or cannot run — a `--local` review with no PR yet, a body
+   carrying neither row, or the sandbox clone, which has no network — say so
+   and skip this check rather than inferring a class. The plan's locality
+   gate is the enforcement; this is the early read. **The verdict narrows
+   and grants nothing**: an `inside` line is not a licence for anything
+   this command's grant refuses, and the class's tree set in the contract
+   still bounds what a row may declare.
 
 Reject as non-findings the house styles `docs/style-guide.md` tabulates on
 purpose (braceless single statements, file-scoped namespaces, explicit

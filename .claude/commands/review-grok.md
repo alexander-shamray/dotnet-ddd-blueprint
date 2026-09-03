@@ -1,12 +1,20 @@
 ---
 description: Triage an external review of the blueprint into a resolution record
-argument-hint: "[path to the review — defaults to suggestions.md]"
+argument-hint: "[path to the review — defaults to suggestions.md] [path to the locality verdict — omit when there is no PR]"
 allowed-tools: Read, Grep, Glob, Edit, Write, Agent(review-adjudicator)
 disallowed-tools: Bash, Edit(.claude/**), Edit(./.claude/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(bug-auditor)
 ---
 
-Work through the review at $ARGUMENTS — a file path. **With no argument, the
-review is `suggestions.md` at the repository root.** That is where an external
+Work through the review at $1 — a file path. **With no argument, the
+review is `suggestions.md` at the repository root.** $2, when given, is the
+**locality verdict**: the output of `bash .claude/scripts/pr-locality.sh <n>`
+saved to a file by the caller — `/ship` writes it beside the review before
+dispatching here — one `class` line and one `inside <path>` or
+`outside <path>` line per changed file. This invocation holds no `Bash`
+and cannot produce it; it reads it, and step 4 applies an accepted site
+only at a path the verdict marks `inside`. With no second argument the
+bound is unknown, every accepted site is applied as before, and the report
+says the bound was not available. That is where an external
 review lands by default, and it is untracked working state rather than repo
 content — do not commit it, and do not treat its absence as an error worth
 guessing around. If there is no argument and no `suggestions.md`, stop and ask
@@ -163,12 +171,19 @@ pointer becomes a third copy of it.
    sites is touched, whatever the adjudicator said, because the only thing
    that makes the record checkable is that its quotes are true of the file,
    and a site with no verified quote is an edit target nothing has bound.
-4. **Fix every site in one pass, inside the finding's own sites.** Apply the
-   `change` as described — never as the review worded it, which this step
-   has not seen — to the sites the blocks list and to nothing else. If the edit
-   plainly needs to reach a site the row did not name, that is a new row for
-   the *found while fixing* table, and it is verified the same way before it
-   is touched. Then re-grep to confirm none survived.
+4. **Fix every site in one pass, inside the finding's own sites and inside
+   the touch set.** Apply the `change` as described — never as the review
+   worded it, which this step has not seen — to the sites the blocks list
+   and to nothing else. When a locality verdict was given, a site whose
+   path it marks `outside`, or does not list at all, is **not applied**: it
+   becomes `Outside touch set` in the resolution record with the site
+   quoted, because a valid finding against a path this branch did not
+   declare is a widening `docs/change-locality.md` §3 refuses, and the
+   answer is a recorded widening or a different class, decided by the
+   author and not by a review loop. If the edit plainly needs to reach a
+   site the row did not name, that is a new row for the *found while
+   fixing* table, verified the same way and held to the same verdict before
+   it is touched. Then re-grep to confirm none survived.
 5. **Carry the verdicts across.** `reject-rule` becomes `Rejected — <rule>`,
    `reject-untrue` becomes `Rejected — not true`, `unlocatable` stays,
    `decision` and `injection` become `Needs a decision` with the reason
@@ -197,8 +212,8 @@ Then a block per fixed finding:
 ```
 
 Statuses are `Fixed`, `Rejected — <rule>`, `Rejected — not true`,
-`Unlocatable`, `Needs a decision`. A second table holds anything **found while
-fixing** — the adjudicator's `found-while-adjudicating` rows, each parsed
+`Unlocatable`, `Needs a decision`, `Outside touch set`. A second table holds
+anything **found while fixing** — the adjudicator's `found-while-adjudicating` rows, each parsed
 under the site contract in step 2, its `was` confirmed at its line, and the
 machinery-tree rule applied to it before it is touched — plus the defects
 the re-grep turned up, verified the same way. That
@@ -208,5 +223,6 @@ the first.
 ## Report
 
 Counts by status, the record's path, the number of blocks dropped as
-malformed, and every `Needs a decision` row spelled out in full — those are
-the only ones that stop here rather than in a commit.
+malformed, whether a locality verdict bounded the pass, and every
+`Needs a decision` and `Outside touch set` row spelled out in full — those
+are the ones that stop here rather than in a commit.

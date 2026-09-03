@@ -1,41 +1,41 @@
 #!/usr/bin/env bash
-# Print a pull request's `| Class |` and `| Touch set |` rows — and nothing
-# else. Read-only, fixed field set.
+# Judge a pull request's changed paths against the `| Class |` and
+# `| Touch set |` rows its body declares, and print a verdict per path — and
+# nothing the author wrote. Read-only, fixed field set.
 #
-# **Exists so that /review-branch and /review-copilot can read the two rows
-# `docs/change-locality.md` asks a PR body to carry without holding
+# **Exists so that /review-branch, /review-copilot and /ship can read the two
+# rows `docs/change-locality.md` asks a PR body to carry without holding
 # `Bash(gh pr view:*)`** — the grant that reaches `--json reviews`, the
-# unfiltered feed #56 closed. `body` is the one field this reads, and it is
-# the pull request author's own text rather than a reviewer's, so the author
-# filter the feeds need does not apply here; what applies is the shape rule
-# every helper in this directory follows — a caller that chooses fields can
-# choose `reviews`, so this one chooses none.
+# unfiltered feed #56 closed. `body` is the one field this reads from the
+# pull request, `--name-only` the one shape it reads from the diff; what
+# applies is the shape rule every helper in this directory follows — a caller
+# that chooses fields can choose `reviews`, so this one chooses none.
 #
-# The output is the two rows, one per line, or nothing when the body carries
-# neither. A caller that reads nothing skips its touch-set check and says so;
-# it does not infer a class. One row without the other is refused, because
-# each command reads the pair — a class with no set has no bound, a set with
-# no class has no map.
+# **The output never contains the touch-set cell.** A pull request author is
+# not a trusted party, /review-copilot takes any PR number, and a row was the
+# one place an author's text reached an Edit-capable agent unfiltered. A path
+# grammar cannot close that — `Ignore_all_previous_instructions.md` is a path
+# — so the cell is consumed here and only a verdict leaves: one `class` line
+# whose value is letters this script validated, then one `inside <path>` or
+# `outside <path>` line per changed file, where the path is the diff's own
+# and the word is this script's. A caller acts on `outside` lines and never
+# sees what the set said.
 #
-# **A pull request author is not a trusted party**, and this helper is the
-# one place their text would reach an agent unfiltered: /review-copilot takes
-# any PR number, and the feed helpers beside this one filter by author before
-# a word of a review is shown. So each row is held to a grammar before it is
-# printed, and a row that fails it is refused with exit 3, naming the row and
-# not its content. A class cell is one letter A–E, or two distinct letters
-# joined by `+`. A touch-set cell is a comma-separated list of path tokens,
-# each bare or in balanced backticks, made of path characters and glob
-# characters only and carrying a `/` or a `.` — a word is not a path — and
-# every token is repository-relative: no leading `/`, no leading `./`, no
-# `..` segment, since the edit-target guard judges where an edit inside the
-# checkout lands and not a path that names the outside.
+# Nothing is printed when the body carries neither row; a caller that reads
+# nothing skips its touch-set check and says so, and does not infer a class.
+# One row without the other is refused, because each command reads the pair.
+# A row that fails its grammar is refused with exit 3 naming the row and not
+# its content: a class cell is one letter A–E or two distinct letters joined
+# by `+`; a touch-set cell is a comma-separated list of path tokens, bare or
+# in balanced backticks, of path and glob characters, each carrying a `/` or
+# a `.`, and each repository-relative — no leading `/`, no `./`, no `..`
+# segment, brace alternatives included, since the edit-target guard judges
+# where an edit inside the checkout lands and not a path naming the outside.
 #
-# **That grammar is structure, not trust.** It keeps prose out of the
-# output; it cannot make a path the author chose into a path the author
-# may edit. The rows narrow where a caller edits and grant nothing: what
-# holds authority is the caller's own deny list and the class's tree set in
-# `docs/change-locality.md`, and a caller that reads a path outside that
-# set has found a finding, not a licence.
+# **The verdict narrows and grants nothing.** What holds authority is the
+# caller's own deny list and the class's tree set in the contract; an
+# `outside` line is a finding for the caller, and an `inside` line is not a
+# licence for anything the caller's grant refuses.
 set -euo pipefail
 pr="${1:?usage: pr-locality.sh <pr-number>}"
 [[ "$pr" =~ ^[0-9]+$ ]] || { echo "pr must be a number" >&2; exit 2; }
@@ -43,8 +43,7 @@ refuse() { echo "$1" >&2; exit 3; }
 # The body is captured before it is filtered, so a `gh` failure — no
 # authentication, no network, no such pull request — is fatal under `set -e`
 # rather than indistinguishable from a body with no rows. Only grep's own
-# no-match status, which is exactly 1, is masked; any other status is a
-# fault and propagates.
+# no-match status, which is exactly 1, is masked.
 body=$(gh pr view "$pr" --json body --jq .body)
 class_row=$(grep -E '^\| *Class *\|' <<<"$body" || [ $? -eq 1 ])
 touch_row=$(grep -E '^\| *Touch set *\|' <<<"$body" || [ $? -eq 1 ])
@@ -77,6 +76,7 @@ for ((i = 0; i < ${#cells}; i++)); do
 done
 items+=("$cur")
 [ "$depth" -eq 0 ] || refuse "the Touch set row has an unbalanced brace"
+patterns=()
 for item in "${items[@]}"; do
   t="${item#"${item%%[! ]*}"}"
   t="${t%"${t##*[! ]}"}"
@@ -96,5 +96,24 @@ for item in "${items[@]}"; do
   case "/$n/" in
     *//*|*/./*|*/../*) refuse "the Touch set row names a path outside the repository" ;;
   esac
+  # The token as an anchored regular expression: `**` crosses directories,
+  # `*` and `?` do not, braces are alternation, and a token also covers
+  # everything beneath the directory it names — `tests/Ordering.*` is the
+  # test projects, not files whose name happens to start that way.
+  re=$(printf '%s' "$t" |
+    sed -e 's/[.()]/\\&/g' -e 's/\*\*/\x01/g' -e 's/\*/[^\/]*/g' \
+        -e 's/?/[^\/]/g' -e 's/\x01/.*/g' -e 's/{/(/g' -e 's/}/)/g' -e 's/,/|/g')
+  patterns+=("^${re}(/.*)?$")
 done
-printf '%s\n' "$class_row" "$touch_row"
+# The changed paths are the diff's own, and each gets the one word this
+# script chooses for it. `--name-only` is the whole of what is read.
+files=$(gh pr diff "$pr" --name-only)
+printf 'class %s\n' "$class"
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  verdict=outside
+  for re in "${patterns[@]}"; do
+    if grep -Eq "$re" <<<"$path"; then verdict=inside; break; fi
+  done
+  printf '%s %s\n' "$verdict" "$path"
+done <<<"$files"

@@ -330,10 +330,12 @@ partitions, the mutex list, and "never write a count". Three departures:
 
    **Recommended: allow it, as an owned file rather than a shared one.** A
    runbook is one file per alert, so two agents on different alerts never
-   meet in it. The touch set for Class A and B therefore includes
-   `docs/runbooks/<alert>.md` when the PR changes what an operator does for
-   that alert, and nothing else under `docs/`. The contract below is written
-   that way.
+   meet in it — except the declared sharers: `SHARED_RUNBOOKS` in
+   `deploy/observability/check.py` maps two error-rate alerts to one
+   `error-rate.md`, and that file is a mutex between them. The touch set for
+   Class A and B therefore includes the runbook the alert maps to when the
+   PR changes what an operator does for it, and nothing else under `docs/`.
+   The contract below is written that way.
 
 2. Step 3's ADR split rewrites anchors across the corpus once. Acceptable as
    one large mechanical PR, or would you rather keep one file and accept
