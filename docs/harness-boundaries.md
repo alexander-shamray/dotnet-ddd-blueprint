@@ -786,6 +786,22 @@ Requiring agreement is also what makes an environment-supplied
 `CLAUDE_PROJECT_DIR` safe to take as given, since an added anchor can then
 only narrow the guard and never widen it.
 
+**A spelling can also evade the matcher through the path grammar rather than
+through a link, and one of those is measured here.** Windows' extended-length
+(`\\?\`) and device (`\\.\`) prefixes exist precisely to skip the
+normalisation a permission rule's matcher depends on. Measured in this
+checkout with `.claude/sandbox/**` denied: a `Write` to
+`\\?\C:\dev\ashamray\.claude\sandbox\probe-unc.txt` **was created**, where the
+plain spelling of the same file is refused. The guard refuses that prefix
+outright — it can only allow or deny, so it cannot hand the matcher the plain
+spelling it would have judged — and nothing here emits one, since the prefix
+is for paths past `MAX_PATH`. **The 8.3 alias is the same class in the other
+alphabet and needs no special case**: `.claude` has the alias `CLAUDE~1` on
+this volume, `realpath` answers with the long name, and the spelling therefore
+disagrees with the file. Whether the matcher alone would have refused *that*
+one is untested — the hook runs first — so it stands as defence in depth
+rather than as a measured gap.
+
 **A `..` that traverses no link is admitted, and the reason is a measurement
 of the harness rather than a judgement about paths.** The case for refusing it
 is that `docs/../.claude/hooks/x` carries no `.claude/**` spelling, so a

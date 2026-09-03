@@ -80,6 +80,24 @@ EDITING_TOOLS = ("Edit", "Write", "NotebookEdit", "MultiEdit")
 # this file cannot see is one it has established nothing about.
 PATH_KEYS = ("file_path", "notebook_path")
 
+# Windows' extended-length (`\\?\`) and device (`\\.\`) prefixes exist to skip
+# the path normalisation every other spelling goes through, which is exactly
+# what a permission rule's matcher relies on. **Measured in this checkout with
+# `.claude/sandbox/**` denied: a `Write` to
+# `\\?\C:\dev\ashamray\.claude\sandbox\probe-unc.txt` was CREATED**, where the
+# plain spelling of the same file is refused. So the prefix is a spelling that
+# names a denied target and is judged by nothing — the class this file exists
+# for, arriving through the path grammar rather than through a link.
+#
+# Refused rather than resolved, because this hook can only allow or deny: it
+# cannot hand the matcher the plain spelling it would have judged. Nothing in
+# this repository emits one — the prefix is for paths past `MAX_PATH`, which
+# the harness does not produce — so the cost is a spelling nobody uses and the
+# gain is that a denied tree cannot be reached by asking for it in Windows'
+# other alphabet. The forward-slash forms are covered because Windows accepts
+# them interchangeably.
+DEVICE_PREFIXES = ("\\\\?\\", "\\\\.\\")
+
 
 def case_insensitive(path):
     """Whether `path`'s filesystem resolves a differently-cased spelling to it.
@@ -248,6 +266,15 @@ def offence(event):
             f"guard-edit-target: {tool} carries no file path this guard can "
             "read, so nothing has been established about where it writes. "
             "Refusing rather than waving it through."
+        )
+
+    if spelled[:4].replace("/", "\\") in DEVICE_PREFIXES:
+        return (
+            f"guard-edit-target: {spelled} is spelled with Windows' "
+            "extended-length or device prefix, which skips the normalisation a "
+            "permission rule's matcher depends on — measured, a denied "
+            "directory accepted a write spelled that way. Name the file the "
+            "ordinary way, which is the spelling every rule judges."
         )
 
     cwd = event.get("cwd")

@@ -297,6 +297,56 @@ class ALinkIsNotTheFileItIsSpelledAs(GuardCase):
                     os.path.join(linkdir, "helper.sh"), cwd=linkdir)
                 self.assertIn("resolves elsewhere in it", reason)
 
+    def test_a_device_prefixed_spelling_is_refused(self):
+        # **Windows' extended-length and device prefixes exist to SKIP the path
+        # normalisation a permission matcher depends on**, which makes them a
+        # spelling that names a denied target and is judged by nothing.
+        # Measured in the real checkout with `.claude/sandbox/**` denied: a
+        # `Write` to the extended-length spelling of a file under it was
+        # CREATED, where the plain spelling of the same file is refused.
+        #
+        # Refused rather than resolved, because a hook can only allow or deny —
+        # it cannot hand the matcher the plain spelling it would have judged.
+        # Asserted on every platform because the check is textual: a POSIX file
+        # whose name begins with those characters is not a real caller.
+        plain = os.path.join(self.root, "docs", "chapter.md")
+        for prefix in ("\\\\?\\", "\\\\.\\", "//?/", "//./"):
+            with self.subTest(prefix=prefix):
+                reason = self.assertRefused(prefix + plain)
+                self.assertIn("prefix", reason)
+
+        # The control: the same file named the ordinary way is admitted, so the
+        # case is about the prefix rather than about the path.
+        self.assertAdmitted(plain)
+
+    def test_an_eight_dot_three_spelling_is_refused_where_one_exists(self):
+        # The same class in Windows' other alphabet: `CLAUDE~1` is a different
+        # string from `.claude`, so a matcher comparing strings does not see
+        # the denied tree — and this guard refuses it without a special case,
+        # because `realpath` answers with the long name and the spelling
+        # therefore disagrees with the file.
+        #
+        # 8.3 alias creation can be disabled per volume, so the case reports
+        # when the platform gave it nothing to test rather than pretending to
+        # have tested it. Measured in the real checkout, where it is enabled:
+        # `.claude` has the alias `CLAUDE~1`, and the guard refuses a write
+        # through it.
+        if os.name != "nt":
+            return
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(1024)
+        long_name = os.path.join(self.root, "documentation-directory")
+        os.makedirs(long_name, exist_ok=True)
+        size = ctypes.windll.kernel32.GetShortPathNameW(
+            long_name, buffer, len(buffer))
+        short = buffer.value if size else long_name
+        if short == long_name:
+            print("8.3 aliases are disabled on this volume; case has no "
+                  "subject", file=sys.stderr)
+            return
+        reason = self.assertRefused(os.path.join(short, "a.md"))
+        self.assertIn("resolves elsewhere in it", reason)
+
     def test_a_notebook_path_is_judged_too(self):
         # `NotebookEdit` carries its target under another key, and a guard that
         # reads only `file_path` would wave the whole tool through while the
