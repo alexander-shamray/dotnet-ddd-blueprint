@@ -1831,22 +1831,25 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         self.assertEqual([], self.calls())
 
     TRAILER = "Filed by an authorised sweep and verified at filing by a second read-only auditor."
+    HAND_TRAILER = "Filed by hand rather than by a sweep: no second auditor verified it at filing."
     STDIN = f"a title\n\nthe body\n\n{TRAILER}\n"
+    HAND_STDIN = f"a title\n\nthe body\n\n{HAND_TRAILER}\n"
 
     def test_no_arguments_prints_the_usage_line(self):
         result = self.run_helper()
         self.assert_refused_before_gh(result)
         self.assertIn(
-            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body ending in the trailer",
+            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> <sweep|hand> < title, blank line, body ending in the trailer",
             result.stderr,
         )
 
-    def test_the_argument_count_is_exactly_two(self):
+    def test_the_argument_count_is_exactly_three(self):
         # A title on the command line is the free parameter the fifth review
         # round named: it crossed the parent's shell before the helper ran.
         self.assert_refused_before_gh(self.run_helper("bug", body=self.STDIN))
-        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", body=self.STDIN))
-        self.assert_refused_before_gh(self.run_helper("bug", "low", "--repo", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", "sweep", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", "--repo", body=self.STDIN))
 
     def test_a_kind_outside_the_vocabulary_is_refused(self):
         # `documentation` is a real label on this tracker and is refused on
@@ -1854,36 +1857,74 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         # sweeps' and not the tracker's.
         for kind in ("documentation", "Security", "security --force", "-R other/repo", ""):
             with self.subTest(kind=kind):
-                self.assert_refused_before_gh(self.run_helper(kind, "high", body=self.STDIN))
+                self.assert_refused_before_gh(self.run_helper(kind, "high", "sweep", body=self.STDIN))
 
     def test_a_severity_outside_the_four_is_refused(self):
         for severity in ("info", "High", "high --force", "-R other/repo", ""):
             with self.subTest(severity=severity):
-                self.assert_refused_before_gh(self.run_helper("bug", severity, body=self.STDIN))
+                self.assert_refused_before_gh(self.run_helper("bug", severity, "sweep", body=self.STDIN))
 
     def test_an_empty_title_is_refused(self):
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="\n\nthe body\n"))
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body=""))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="\n\nthe body\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body=""))
 
     def test_a_body_without_the_blank_separator_is_refused(self):
         # A body piped without its title line would otherwise file under its
         # own first sentence, with the second sentence lost into the title.
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="the body\nand more\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="the body\nand more\n"))
 
     def test_a_stdin_that_ends_before_the_separator_is_refused(self):
         # The sixth review round's case: `read` fails at EOF and leaves the
         # separator unset, which an `|| true` read as blank and filed with an
         # empty body.
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n"))
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="a title\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="a title"))
+
+    def test_a_route_outside_the_two_is_refused(self):
+        # #184: the route decides which fixed line the body must end with, and
+        # it is a closed set like the other two. A spelling outside it is
+        # refused rather than defaulted — a default is precisely how the
+        # unconditional provenance claim would come back.
+        for route in ("sweeps", "Sweep", "auto", "sweep --force", "-R other/repo", ""):
+            with self.subTest(route=route):
+                self.assert_refused_before_gh(
+                    self.run_helper("bug", "low", route, body=self.STDIN))
+
+    def test_each_route_requires_the_line_that_is_true_of_it(self):
+        # **The point of #184, stated as a test rather than as a sentence.**
+        # The helper was the only sanctioned route to file an issue and it
+        # required every body to claim a sweep filed it and a second read-only
+        # auditor confirmed it. An issue filed by hand out of a review triage
+        # was made to assert both, and #183 carried that claim until it was
+        # edited afterwards.
+        #
+        # So neither line is accepted under the other's route. That is what
+        # keeps the sentence worth reading: a claim every issue makes is a
+        # claim that distinguishes nothing.
+        self.assert_refused_before_gh(
+            self.run_helper("bug", "low", "hand", body=self.STDIN))
+        self.assert_refused_before_gh(
+            self.run_helper("bug", "low", "sweep", body=self.HAND_STDIN))
+
+    def test_a_hand_filing_reaches_gh_with_its_own_trailer(self):
+        # And the positive control on the other half: the hand route files,
+        # rather than merely refusing the sweep's sentence. The body reaching
+        # `gh` is the one that was piped in, trailer included.
+        result = self.run_helper("bug", "low", "hand", body=self.HAND_STDIN)
+        self.assertEqual(0, result.returncode, result.stderr)
+        d = Path(self.dir)
+        self.assertEqual(
+            f"the body\n\n{self.HAND_TRAILER}\n",
+            (d / "body").read_text(encoding="utf-8"),
+        )
 
     def test_a_body_without_the_trailer_is_refused(self):
         # The detector for an early heredoc close: a body cut short by a
         # repository line equal to the delimiter has lost its last line.
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n\nthe body\n"))
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="a title\n\nthe body\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="a title\n\n"))
         self.assert_refused_before_gh(
-            self.run_helper("bug", "low", body=f"a title\n\n{self.TRAILER}\n\nmore after it\n")
+            self.run_helper("bug", "low", "sweep", body=f"a title\n\n{self.TRAILER}\n\nmore after it\n")
         )
 
     def test_a_repository_line_equal_to_a_naive_delimiter_is_the_hazard_and_the_token_is_the_rule(self):
@@ -1902,7 +1943,7 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         env["PATH"] = self.dir + os.pathsep + env["PATH"]
         script = (
             'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
-            f"bash {str(self.HELPER)!r} bug high <<'ISSUE_BODY_END'\n"
+            f"bash {str(self.HELPER)!r} bug high sweep <<'ISSUE_BODY_END'\n"
             "a title\n"
             "\n"
             f"{body}"
@@ -1933,7 +1974,7 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         env["PATH"] = self.dir + os.pathsep + env["PATH"]
         script = (
             'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
-            f"bash {str(self.HELPER)!r} security high <<'ISSUE_BODY_END'\n"
+            f"bash {str(self.HELPER)!r} security high sweep <<'ISSUE_BODY_END'\n"
             f"{title}\n"
             "\n"
             "the body\n"
@@ -1955,7 +1996,7 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         # everything would pass every case above.
         title = "`/security-sweep` files a title that begins with a slash"
         body = f"the body\n\n{self.TRAILER}\n"
-        result = self.run_helper("security", "high", body=f"{title}\n\n{body}")
+        result = self.run_helper("security", "high", "sweep", body=f"{title}\n\n{body}")
         self.assertEqual(0, result.returncode, result.stderr)
         create = [c for c in self.calls() if c.startswith("issue create ")]
         self.assertEqual(1, len(create), self.calls())

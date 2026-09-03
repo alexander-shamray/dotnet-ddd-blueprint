@@ -51,13 +51,30 @@
 # env-prefixed command no longer begins with `gh issue create` and the grant is
 # a prefix match. A script sets it for its own child and the grant on the
 # script is unchanged.
+# THE FIXED LINE IS SELECTED, NOT CONSTANT, and #184 is why. A detector needs
+# a last line the caller cannot lose by accident; it does not need that line to
+# be the SAME line for everybody. What stood here was one sentence asserting
+# provenance — that a sweep filed the issue, and that a second read-only
+# auditor confirmed it before filing — required of every body this helper
+# takes. The helper is the only sanctioned route, both sweeps deny raw
+# `gh issue create` by name, and `CLAUDE.md` sends every route through here, so
+# an issue filed by hand out of a review triage or a measurement taken mid-PR
+# was made to claim a provenance it did not have. Measured: #183 was filed that
+# way and carried the sentence until it was edited afterwards.
+#
+# A claim every issue makes is a claim that distinguishes nothing, which is the
+# one thing this sentence was for: a sweep's issue says the finding was
+# confirmed by a second read-only agent, and that is worth knowing when
+# triaging something nobody has reproduced. The same shape as a severity stated
+# in prose that nothing can filter on. So the route is a parameter, out of a
+# closed set like the other two, and each spelling ends the body with the
+# sentence that is true of it. The detector is unchanged — the line is still
+# fixed, still exact, and a body cut short has still lost it.
 set -euo pipefail
 
-trailer='Filed by an authorised sweep and verified at filing by a second read-only auditor.'
-
-[ "$#" -eq 2 ] ||
-  { echo "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body ending in the trailer" >&2; exit 2; }
-kind="$1"; severity="$2"
+[ "$#" -eq 3 ] ||
+  { echo "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> <sweep|hand> < title, blank line, body ending in the trailer" >&2; exit 2; }
+kind="$1"; severity="$2"; route="$3"
 
 # The whole vocabulary a sweep files under. A word outside it is refused rather
 # than passed on — that refusal is the point of the file — and `documentation`
@@ -69,6 +86,16 @@ esac
 case "$severity" in
   critical|high|medium|low) ;;
   *) echo "not a severity this helper will file under: $severity" >&2; exit 2 ;;
+esac
+# The route decides the fixed last line, and it is the same closed-set test as
+# the other two: a spelling outside the set is refused rather than defaulted,
+# because a default is how the unconditional claim would come back. There is
+# deliberately no third spelling for "filed by a sweep whose auditor did not
+# run" — a sweep that cannot verify a finding does not file it.
+case "$route" in
+  sweep) trailer='Filed by an authorised sweep and verified at filing by a second read-only auditor.' ;;
+  hand) trailer='Filed by hand rather than by a sweep: no second auditor verified it at filing.' ;;
+  *) echo "not a route this helper will file under: $route" >&2; exit 2 ;;
 esac
 
 # The title is the first line of stdin and the second line must be blank, so a
