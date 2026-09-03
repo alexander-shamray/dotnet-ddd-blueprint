@@ -750,7 +750,8 @@ Each round is the review done once, end to end:
    severity — **every one of those composed from the verdict record's fields
    in that order, and from nothing the parent read in `$work`**, because it
    read nothing there. **Pipe the title and the body together to
-   `bash .claude/scripts/gh-issue-create.sh bug <severity> sweep` on stdin** in a
+   `bash .claude/scripts/gh-issue-create.sh bug <severity> sweep` on stdin**
+   in a
    quoted heredoc — the title as its first line, then a blank line, then the
    body — so nothing is written to disk and the command needs no `Write`
    grant, and so **nothing composed from the record crosses this shell's
@@ -759,9 +760,10 @@ Each round is the review done once, end to end:
    here. Inside the quoted heredoc nothing expands. An inline `--body`
    mangles the wrapping, and a temp file would need the very write capability
    this command withholds. The helper resolves the repository from the
-   checkout, refuses a kind, a severity or a route outside its three closed sets, refuses a
-   stdin whose second line is not blank, and ensures both labels through
-   `gh-label-ensure.sh` itself. Say in the body that the verifier **read
+   checkout, refuses a kind, a severity or a route outside its three closed
+   sets, refuses a stdin whose second line is not blank, and ensures both
+   labels through `gh-label-ensure.sh` itself. Say in the body that the
+   verifier **read
    rather than executed**, and name the commit pinned — a defect claim that
    never ran the code should say so where whoever picks it up will read it —
    and then end the body with this line, exactly, as its last non-blank line,

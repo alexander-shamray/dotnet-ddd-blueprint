@@ -1839,7 +1839,8 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         result = self.run_helper()
         self.assert_refused_before_gh(result)
         self.assertIn(
-            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> <sweep|hand> < title, blank line, body ending in the trailer",
+            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low>"
+            " <sweep|hand> < title, blank line, body ending in the trailer",
             result.stderr,
         )
 
@@ -5180,6 +5181,18 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted(
             'sh -c "$(echo \'git push origin +HEAD:main\')"')
 
+        # **And the direction that residual fails in depends on where the
+        # unresolved word lands**, which the paragraph in
+        # `docs/harness-boundaries.md` claimed uniformly and wrongly until this
+        # was measured. A computed descriptor mid-command costs a positional
+        # and refuses; the same one in front of the subcommand is admitted,
+        # because `push_offence` stops at the first non-flag it does not
+        # recognise. Both are written here so the claim and the code cannot
+        # drift apart — if the second starts being refused, that paragraph is
+        # what needs rewriting.
+        self.assertRefused("git push origin ${N}>&1 main")
+        self.assertAdmitted("git ${N}>&1 push origin +HEAD:main")
+
     def test_a_redirection_is_not_an_argument_to_the_program(self):
         # **#183, and the file descriptor is the whole of it.**
         # `shlex(punctuation_chars=True)` emits a maximal run of `();<>|&` as
@@ -5265,12 +5278,52 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("git commit -m 'git push origin 2>&1 +HEAD:main'")
         self.assertRefused("git commit -m x; git push origin '2>&1' +HEAD:main")
 
-    def test_a_heredoc_introducer_survives_the_redirection_strip(self):
-        # `strip_heredocs` leaves the introducer standing on purpose, so that
-        # the rest of the line still tokenises. `<<` is therefore NOT a
-        # redirection this strip removes: taking it would leave the delimiter
-        # behind as a stray word, which is the defect being fixed rather than a
-        # fix for it.
+    def test_a_named_descriptor_is_a_descriptor_too(self):
+        # **The descriptor grammar is not only digits, and reading it as digits
+        # alone left a force push admitted.** Bash takes `{name}>&1` as well,
+        # so `git {fd}>&1 push origin +HEAD:main` had `>&1` removed, `{fd}`
+        # left standing, and `push_offence` took that word for the subcommand
+        # and stopped looking. Raised in review on the change that closed the
+        # digit half; verified allowed before the fix, and allowed on `main`
+        # before this file grew a strip at all.
+        for command in (
+            "git {fd}>&1 push origin +HEAD:main",
+            "git {fd}>&1 log --output=/tmp/probe",
+            "git push origin {fd}>&1 +HEAD:main",
+            "git {n}>/dev/null push origin --mirror",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # And the boundary, which is bash's: `{name}` is an identifier, so a
+        # leading digit is not one and `${N}` is not one either — the brace
+        # there does not begin a word. Both stay whole, which costs a
+        # positional and refuses rather than admits.
+        self.assertAdmitted("git push origin fix/some-branch {fd}>&1")
+        self.assertRefused("git push origin ${N}>&1 main")
+
+    def test_a_heredoc_introducer_goes_with_its_delimiter(self):
+        # **Leaving the introducer standing was a fail-open, and this test used
+        # to assert the opposite.** `strip_heredocs` takes the body and leaves
+        # `<<EOF` behind so the line still tokenises — but `<<` is whole
+        # punctuation, so `is_boundary` ends the run there: in
+        # `git <<EOF push origin +HEAD:main` the `git` token was severed from
+        # its own subcommand, `git_segments` yielded nothing, and bash ran the
+        # push. Raised in review; verified allowed, and allowed on `main` too.
+        #
+        # Removing the delimiter with the introducer is what leaves no stray
+        # word behind, which was the reason the exemption existed.
+        for command in (
+            "git <<EOF push origin +HEAD:main\nEOF",
+            "git <<'EOF' push origin +HEAD:main\nEOF",
+            "git <<-EOF push origin --mirror\nEOF",
+            "git <<<x push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The controls: an honest heredoc still files, and a push after one is
+        # still judged rather than swallowed with the body.
         self.assertAdmitted("git commit -F - <<'EOF'\na message\nEOF")
         self.assertRefused(
             "git commit -F - <<'EOF'\na message\nEOF\ngit push origin +HEAD:main")

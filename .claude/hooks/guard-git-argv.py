@@ -483,18 +483,67 @@ def redirection_spans(command):
         digits = index
         while plain(digits) and command[digits].isdigit():
             digits += 1
+        if digits == start and command[start] == "{":
+            # **The descriptor grammar is not only digits**, and reading it as
+            # digits alone left `git {fd}>&1 push origin +HEAD:main` admitted
+            # while bash ran the force push: `>&1` went, `{fd}` stayed, and
+            # `push_offence` took that word for the subcommand and stopped
+            # looking. Raised in review on the change that closed the digit
+            # half; verified allowed before the fix. Bash takes `{name}` where
+            # name is an identifier, so a leading digit is not one.
+            close = start + 1
+            if plain(close) and (command[close].isalpha() or command[close] == "_"):
+                while plain(close) and (command[close].isalnum()
+                                        or command[close] == "_"):
+                    close += 1
+                if plain(close) and command[close] == "}":
+                    digits = close + 1
         begins_word = start == 0 or (
             ordinary[start - 1] and command[start - 1] in METACHARACTERS)
         if digits > start and not begins_word:
-            # **A descriptor is a WHOLE token of digits glued to the
-            # operator**, which is bash's own rule rather than an approximation
-            # of it: in `echo foo2>x` the word bash writes is `foo2` and only
-            # `>x` is syntax. Reading the digits here would be editing an
-            # argument, which is the thing `shell_positions` exists to stop
-            # this file doing.
+            # **A descriptor is a WHOLE token glued to the operator**, which is
+            # bash's own rule rather than an approximation of it: in
+            # `echo foo2>x` the word bash writes is `foo2` and only `>x` is
+            # syntax. Reading the digits here would be editing an argument,
+            # which is the thing `shell_positions` exists to stop this file
+            # doing.
             index = digits
             continue
+        if command[digits:digits + 3] == "<<<":
+            # A here-string's word is data the shell feeds in, exactly like a
+            # redirect target — and it is checked before `<<`, which is a
+            # prefix of it. Left to the branch below, `<<<x` was reduced to a
+            # bare `<<` that still split the run.
+            end = digits + 3
+            while plain(end) and command[end] in " \t":
+                end += 1
+            while end < len(command) and not (
+                    ordinary[end] and command[end] in METACHARACTERS):
+                end += 1
+            spans.append((start, end))
+            index = end
+            continue
         if command[digits:digits + 2] == "<<":
+            # **A heredoc introducer goes WITH its delimiter, and leaving it
+            # standing was a fail-open.** `strip_heredocs` takes the body and
+            # leaves this behind so the rest of the line still tokenises — but
+            # `<<` is whole punctuation, so `is_boundary` ends the run there:
+            # in `git <<EOF push origin +HEAD:main` the `git` token was severed
+            # from its own subcommand, `git_segments` yielded nothing, and bash
+            # ran the force push. Raised in review; verified allowed, and
+            # allowed on `main` before this file grew a strip at all.
+            #
+            # Removing the delimiter with it is what leaves no stray word, and
+            # `HEREDOC` is the one parse of that grammar this file has — the
+            # dash form and both quoted spellings included.
+            introducer = HEREDOC.match(command, digits)
+            if introducer is not None:
+                spans.append((start, introducer.end()))
+                index = introducer.end()
+                continue
+            # An introducer this file cannot parse keeps its old treatment, and
+            # a descriptor in front of one is still the stray word every other
+            # spelling leaves.
             if digits > start:
                 spans.append((start, digits))
             index = digits + 2

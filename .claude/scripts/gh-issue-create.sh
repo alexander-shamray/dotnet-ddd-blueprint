@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# File one issue on THIS repository from a sweep, and nothing else: the kind
-# and severity labels from a fixed vocabulary on the command line, the title
-# and the body from stdin, and the repository from the checkout this script is
-# standing in.
+# File one issue on THIS repository, from a sweep or by hand, and nothing
+# else: the kind, severity and route from fixed vocabularies on the command
+# line, the title and the body from stdin, and the repository from the
+# checkout this script is standing in. The route decides which provenance
+# line the body must end with, and #184 is why it is a parameter rather than
+# a constant.
 #
 # `Bash(gh issue create:*)` was a prefix grant, so it bought more than the
 # operation it was added for — the shape every helper in this directory exists
@@ -51,6 +53,7 @@
 # env-prefixed command no longer begins with `gh issue create` and the grant is
 # a prefix match. A script sets it for its own child and the grant on the
 # script is unchanged.
+#
 # THE FIXED LINE IS SELECTED, NOT CONSTANT, and #184 is why. A detector needs
 # a last line the caller cannot lose by accident; it does not need that line to
 # be the SAME line for everybody. What stood here was one sentence asserting
@@ -72,8 +75,11 @@
 # fixed, still exact, and a body cut short has still lost it.
 set -euo pipefail
 
-[ "$#" -eq 3 ] ||
-  { echo "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> <sweep|hand> < title, blank line, body ending in the trailer" >&2; exit 2; }
+[ "$#" -eq 3 ] || {
+  echo "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low>" \
+       "<sweep|hand> < title, blank line, body ending in the trailer" >&2
+  exit 2
+}
 kind="$1"; severity="$2"; route="$3"
 
 # The whole vocabulary a sweep files under. A word outside it is refused rather

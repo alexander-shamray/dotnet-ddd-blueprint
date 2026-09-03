@@ -631,10 +631,17 @@ grants stay with it, because removing them still buys nothing against a
 built-in. What survives as residual is one line rather than a grant: a flag the
 shell *computes* — `F=--output=x; git log $F` — is not visible to a hook that
 resolves quoting but not expansion. **#183's redirection strip inherits that
-same bound and adds none**: a descriptor the shell computes — `${N}>&1` — is
-not digits, so no descriptor is read and the word stays, which costs a
-positional and refuses. Every shape the strip cannot resolve fails that way
-round.
+same bound and adds none**, and the direction it fails in depends on where the
+unresolved word lands. `git push origin ${N}>&1 main` costs a positional and
+refuses; `git ${N}>&1 push origin +HEAD:main` is **admitted**, because the word
+sits where the subcommand goes and `push_offence` stops at the first non-flag
+it does not recognise. Both measured. That is the expansion residual above
+rather than a second one — the strip reads `2>&1` and `{fd}>&1`, which are
+syntax, and cannot read a word the shell has yet to build — and an earlier
+revision of this paragraph claimed every unresolved shape fails closed, which
+the second command disproves. **A guard's stated failure direction is a claim
+to measure in both positions**, not one to reason to from the case in front of
+you.
 
 **A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because
