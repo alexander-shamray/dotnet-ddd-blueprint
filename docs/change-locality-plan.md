@@ -276,8 +276,12 @@ Per chapter, in this order by measured churn: §9, §12, §11, §15, §8, §13,
   lines that is a copy of a source file is a citation, not a sample;
 - keeps every callout that states a rule or a decision.
 
-One agent per chapter, in parallel. `/validate-blueprint` runs on each,
-scoped to that chapter's references, and `/check-links` after all of them.
+§9 first and alone, one agent, because it is the highest-churn chapter and
+its PR sets the pattern the rest copy — section 7's third answer, which
+this step used to contradict by starting every chapter at once. Then one
+agent per remaining chapter, in parallel. `/validate-blueprint` runs on
+each, scoped to that chapter's references, and `/check-links` after all of
+them.
 
 Done per chapter when the greps in step 2's exit test are empty for it.
 

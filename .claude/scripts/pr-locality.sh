@@ -7,9 +7,9 @@
 # rows `docs/change-locality.md` asks a PR body to carry without holding
 # `Bash(gh pr view:*)`** — the grant that reaches `--json reviews`, the
 # unfiltered feed #56 closed. `body` is the one field this reads from the
-# pull request, `--name-only` the one shape it reads from the diff; what
-# applies is the shape rule every helper in this directory follows — a caller
-# that chooses fields can choose `reviews`, so this one chooses none.
+# pull request, `filename` the one field it reads from the files endpoint;
+# what applies is the shape rule every helper in this directory follows — a
+# caller that chooses fields can choose `reviews`, so this one chooses none.
 #
 # **The output never contains the touch-set cell.** A pull request author is
 # not a trusted party, /review-copilot takes any PR number, and a row was the
@@ -19,7 +19,13 @@
 # whose value is letters this script validated, then one `inside <path>` or
 # `outside <path>` line per changed file, where the path is the diff's own
 # and the word is this script's. A caller acts on `outside` lines and never
-# sees what the set said.
+# sees what the set said. **A changed path is the author's text too** — the
+# author names the files, and git permits a newline inside a name — so each
+# arrives JSON-encoded, one per line and unambiguous, and is printed only if
+# it decodes to a plain path: no escape in it, path characters only, a `/`
+# or a `.` in it, no `..` segment. Any other name refuses the whole run,
+# because a verdict list with one line withheld is a list a caller would
+# read as complete.
 #
 # Nothing is printed when the body carries neither row; a caller that reads
 # nothing skips its touch-set check and says so, and does not infer a class.
@@ -107,14 +113,29 @@ for item in "${items[@]}"; do
   patterns+=("^${re}(/.*)?$")
 done
 # The changed paths are the diff's own, and each gets the one word this
-# script chooses for it. `--name-only` is the whole of what is read.
-files=$(gh pr diff "$pr" --name-only)
+# script chooses for it. `filename` is the whole of what is read, and it is
+# read as a JSON string so that a newline inside a name cannot be a second
+# line: a name that needed an escape is refused rather than decoded.
+files=$(gh api "repos/{owner}/{repo}/pulls/$pr/files" --paginate --jq '.[].filename | @json')
+verdicts=()
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  case "$line" in
+    '"'*'"') ;;
+    *) refuse "a changed path did not arrive as a JSON string" ;;
+  esac
+  case "$line" in *\\*) refuse "a changed path is not a plain path" ;; esac
+  path="${line:1:${#line}-2}"
+  grep -Eq '^[A-Za-z0-9_./@+()-]+$' <<<"$path" || refuse "a changed path is not a plain path"
+  case "$path" in *[/.]*) ;; *) refuse "a changed path is not a plain path" ;; esac
+  case "/$path/" in *//*|*/./*|*/../*) refuse "a changed path is not a plain path" ;; esac
+  verdicts+=("$path")
+done <<<"$files"
 printf 'class %s\n' "$class"
-while IFS= read -r path; do
-  [ -n "$path" ] || continue
+for path in "${verdicts[@]}"; do
   verdict=outside
   for re in "${patterns[@]}"; do
     if grep -Eq "$re" <<<"$path"; then verdict=inside; break; fi
   done
   printf '%s %s\n' "$verdict" "$path"
-done <<<"$files"
+done

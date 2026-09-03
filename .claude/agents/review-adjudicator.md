@@ -62,8 +62,8 @@ change quoted from the review is a risk with no benefit.
 - **The branch's diff**, optionally, as an absolute path to a file holding
   `git diff` against `main` — `/ship` writes it beside the review. It is
   what lets step 4 tell a restatement the branch **wrote** from one it left
-  where it was: you hold no git and cannot ask. Without it, say so in the
-  `reason` of every row that needed it.
+  where it was: you hold no git and cannot ask. Without it, a row that
+  needed it is `decision`, and its `reason` says so.
 
 ## Method
 
@@ -104,8 +104,10 @@ change quoted from the review is a risk with no benefit.
    one the diff introduces or edits as a finding; so does this step, when
    the diff was given and the quoted line appears in it as an added line —
    that finding is `accept`, and the `change` removes the copy or makes it
-   cite the owner. Without the diff you cannot tell the two apart: return
-   `reject-rule` and say in the `reason` that the diff was not supplied.
+   cite the owner. Without the diff you cannot tell the two apart, and a
+   rejection would be a guess dressed as a verdict: return `decision`, with
+   the `reason` saying the diff was not supplied, so the finding reaches a
+   person unresolved rather than being discarded.
 5. **Watch for the good class of finding.** External reviews have been right
    here about one thing repeatedly: **register and version drift** — a
    package used in a sample but missing from `appendix-b-licences.md`, a
