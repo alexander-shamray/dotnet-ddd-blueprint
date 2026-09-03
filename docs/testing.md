@@ -151,7 +151,8 @@ in `test_edit_target_guard.py` beside the others and picked up by the same
 **link** case against **each** primitive the platform grants — a symbolic link,
 a junction, or both — where the ordinary-write, malformed-event and
 registration cases have no link in them and run once. Never a skip either way,
-since a skip reports a pass for a property it never tested. It is also the one module CI runs on **three** platforms:
+since a skip reports a pass for a property it never tested. It is also the one
+module CI runs on **three** platforms:
 `review-helpers` on Linux, and `edit-target-guard` as a matrix over Windows and
 macOS — because the junction fallback, `..` after a link and the on-disk case
 `realpath` answers with are Windows' own, and a case-insensitive mount is
