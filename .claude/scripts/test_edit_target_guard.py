@@ -60,6 +60,9 @@ def setUpModule():
     against the CI coverage; found by the fix.
     """
     global SYMLINKS, JUNCTIONS
+    # Removed at the end of this function rather than left behind: every run,
+    # local or CI, was leaving one populated tree in the temp directory.
+    # Raised by Copilot, beside the same defect in the per-case fixtures.
     probe = tempfile.mkdtemp()
     target = os.path.join(probe, "target")
     os.mkdir(target)
@@ -92,6 +95,7 @@ def setUpModule():
     # identically to one that ran both — and which of the two happened is the
     # whole reason that job exists. One line in the log answers it.
     print(f"link primitives exercised: {', '.join(linkers())}", file=sys.stderr)
+    shutil.rmtree(probe, ignore_errors=True)
 
 
 def linkers():
@@ -390,6 +394,66 @@ class ALinkIsNotTheFileItIsSpelledAs(GuardCase):
         reason = self.assertRefused(os.path.join(short, "a.md"))
         self.assertIn(os.path.basename(long_name), reason)
 
+    def test_a_directory_may_fold_differently_from_its_root(self):
+        """Windows sets case sensitivity per directory, and the traits do not.
+
+        **The finding was that a child can disagree with the root; what the
+        measurement shows is that the disagreement is benign for a link.** A
+        case-sensitive `docs/` really does keep `Sub` and `sub` apart — checked
+        here with `fsutil file setCaseSensitiveInfo`, which needs no
+        privilege — so the anchor's folded key calls two spellings one where
+        that directory does not. For the guard to be fooled by it, a link's
+        resolution would have to differ from its own path only in case, and a
+        link's resolution IS its target: writing through `docs/Sub/x.md` lands
+        on exactly the file that path names. `samefile` says so, and this case
+        asserts it rather than asserting a bypass that does not exist.
+
+        The guard carries the identity check anyway, for the shape this
+        argument does not cover — a sub-mount whose equivalences differ from
+        the root's — and it costs one `stat` on paths that agree only after
+        folding.
+        """
+        if os.name != "nt":
+            print("per-directory case sensitivity is Windows'; case has no "
+                  "subject here", file=sys.stderr)
+            return
+        # A fresh, EMPTY directory: the flag will not take on one that already
+        # holds entries, and `docs/` in this fixture does. Found by the flag
+        # silently not applying — `BETA` and `beta` stayed one directory.
+        docs = os.path.join(self.root, "mixed")
+        os.makedirs(docs, exist_ok=True)
+        made = subprocess.run(
+            ["fsutil", "file", "setCaseSensitiveInfo", docs, "enable"],
+            capture_output=True, text=True)
+        probe_lower = os.path.join(docs, "probe")
+        probe_upper = os.path.join(docs, "PROBE")
+        os.makedirs(probe_lower, exist_ok=True)
+        if made.returncode != 0 or os.path.isdir(probe_upper):
+            print("this volume will not take a case-sensitive directory; case "
+                  "has no subject here", file=sys.stderr)
+            return
+
+        # **The pair has to differ ONLY in case**, or the guard refuses it for
+        # the ordinary reason and the case says nothing about folding. One pair
+        # per primitive, since two links cannot share a name.
+        names = {"symlink": "alpha", "junction": "beta"}
+        for linker in linkers():
+            with self.subTest(link=linker):
+                lower = os.path.join(docs, names[linker])
+                os.makedirs(lower, exist_ok=True)
+                self.write(os.path.join(lower, "x.md"), "lower\n")
+                upper = os.path.join(docs, names[linker].upper())
+                if linker == "symlink":
+                    os.symlink(lower, upper, target_is_directory=True)
+                else:
+                    JUNCTIONS(lower, upper)
+                spelled = os.path.join(upper, "x.md")
+                self.assertTrue(
+                    os.path.samefile(spelled, os.path.join(lower, "x.md")),
+                    "the link and its target are one file, which is why "
+                    "admitting this is correct")
+                self.assertAdmitted(spelled)
+
     def test_a_notebook_path_is_judged_too(self):
         # `NotebookEdit` carries its target under another key, and a guard that
         # reads only `file_path` would wave the whole tool through while the
@@ -533,9 +597,10 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
         # Python. A checkout prefix spelled in the other form therefore matched
         # no anchor and reached the branch that admits. Raised by Copilot.
         #
-        # `key` composes unconditionally, so the predicate is assertable on
-        # every platform; the end-to-end half needs a mount that agrees, and
-        # says so when it has none rather than reporting a pass for it.
+        # `key` composes where the anchor's traits say the mount does, so the
+        # predicate is assertable on every platform by passing the traits
+        # explicitly; the end-to-end half needs a mount that agrees, and says
+        # so when it has none rather than reporting a pass for it.
         guard = self.guard_module()
         name = "caf\u00e9"  # built rather than typed: an editor that normalises
         # this file would otherwise make the two spellings one and the case vacuous.

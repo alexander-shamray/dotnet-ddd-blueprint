@@ -410,6 +410,38 @@ def offence(event):
 
         expected = os.path.normpath(
             os.path.join(real_root, os.path.relpath(lexical, base)))
+
+        # **The traits are measured at the root and a child can disagree**,
+        # which makes an equivalence applied there a claim about a directory
+        # nobody asked. Windows sets case sensitivity per directory
+        # (`fsutil file setCaseSensitiveInfo`), and a mount below the root can
+        # differ outright — so `docs/Sub/x.md`, a junction beside a real
+        # `docs/sub/`, is two distinct files that the anchor's folding calls
+        # one. Measured in a case-sensitive directory here: admitted before
+        # this check, refused after. Raised by Copilot.
+        #
+        # Where the two agree only BECAUSE of an equivalence, the filesystem
+        # is asked directly. `samefile` is safe in this position and not in the
+        # anchor test: it compares two concrete paths rather than deciding what
+        # counts as a root, which is the distinction that makes identity the
+        # wrong tool one paragraph up and the right one here. When either path
+        # does not exist yet — the ordinary case for `Write` — there is nothing
+        # to compare and the folded verdict stands, which is the residual.
+        if (same(resolved, expected, traits)
+                and os.path.normpath(resolved) != os.path.normpath(expected)):
+            try:
+                if not os.path.samefile(resolved, expected):
+                    return (
+                        f"guard-edit-target: {spelled} and the file it names "
+                        f"differ only by a spelling this checkout's root folds "
+                        f"— but {resolved} and {expected} are two files here. "
+                        "A directory may be case- or normalisation-sensitive "
+                        "where its root is not (#181, "
+                        "docs/harness-boundaries.md)."
+                    )
+            except OSError:
+                pass
+
         if not same(resolved, expected, traits):
             escaped = not under(resolved, real_root, traits)
             where = "outside the checkout" if escaped else "elsewhere in it"
