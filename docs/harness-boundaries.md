@@ -809,6 +809,21 @@ with the long name, and the spelling therefore disagrees with the file.
 Whether the matcher alone would have refused that one is untested — the hook
 runs first — so it stands as defence in depth rather than as a measured gap.
 
+**Then CI found the general form, and it replaced the list those spellings
+were becoming.** A Windows runner's `GetShortPathNameW` shortens the whole
+prefix rather than the leaf, so `C:\Users\RUNNER~1\…\GUARD-~1\DOCUME~1\a.md`
+matched no anchor at all and fell through to the residual while resolving
+squarely inside a checkout — the 8.3 case went red there having passed on a
+volume where only the leaf is aliased. Case folding and Unicode composition
+had each closed one spelling by teaching the comparison an equivalence, which
+is a deny-list in slower clothing. **The rule now is that the residual belongs
+to a file genuinely outside every checkout, and not to one inside under a name
+the anchors cannot place**: a target resolving into a checkout that did not
+recognise its spelling is refused, whatever alphabet the spelling is in.
+Measured against the commit that shipped it — admitted there, refused after —
+and the control is the worktree case, where a session standing in the aliased
+directory makes it a root of its own and the spelling is recognised again.
+
 **Unicode normalisation is the same shape on a different platform.** A
 case-insensitive APFS volume is also insensitive to normalisation, so `é`
 composed and `e` plus a combining accent name one directory there and two
