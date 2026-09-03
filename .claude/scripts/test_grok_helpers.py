@@ -2755,7 +2755,7 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
             "| Class | C+E |\n"
             "| Touch set | `src/Services/Ordering/**`, `tests/Ordering.*`, "
             "`.claude/commands/{pr,ship}.md`, CLAUDE.md, docs/x.md, "
-            "docs/file?.md |\n"
+            "docs/file?.md, deploy/ |\n"
         )
         files = "\n".join((
             "src/Services/Ordering/Ordering.Domain/Order.cs",
@@ -2771,6 +2771,8 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
             "notdocs/x.md",
             "docs/file1.md",
             "docs/file/1.md",
+            "deploy/compose/docker-compose.yml",
+            "deployment.md",
         )) + "\n"
         r = self._run_locality_with_gh(self._gh_printing(body, files))
         self.assertEqual(0, r.returncode, r.stderr)
@@ -2790,6 +2792,8 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
                 "outside notdocs/x.md",
                 "inside docs/file1.md",
                 "outside docs/file/1.md",
+                "inside deploy/compose/docker-compose.yml",
+                "outside deployment.md",
             ],
             r.stdout.splitlines(),
         )

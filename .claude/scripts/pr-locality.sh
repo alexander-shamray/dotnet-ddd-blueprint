@@ -94,6 +94,7 @@ for item in "${items[@]}"; do
   grep -Eq '^[A-Za-z0-9_./*?{},()-]+$' <<<"$t" ||
     refuse "the Touch set row is not a path list"
   case "$t" in *[/.]*) ;; *) refuse "the Touch set row is not a path list" ;; esac
+  t="${t%/}"
   # A brace alternative is a segment start too: `{../outside,docs/x.md}`
   # expands to a path that leaves the checkout, so the boundary is judged
   # over the token with its braces dropped and its alternatives joined as
@@ -106,7 +107,9 @@ for item in "${items[@]}"; do
   # The token as an anchored regular expression: `**` crosses directories,
   # `*` and `?` do not, braces are alternation, and a token also covers
   # everything beneath the directory it names — `tests/Ordering.*` is the
-  # test projects, not files whose name happens to start that way.
+  # test projects, not files whose name happens to start that way. A
+  # trailing `/` names the directory the same way `docs` would, and was
+  # dropped above before the boundary was judged.
   re=$(printf '%s' "$t" |
     sed -e 's/[.()]/\\&/g' -e 's/\*\*/\x01/g' -e 's/\*/[^\/]*/g' \
         -e 's/?/[^\/]/g' -e 's/\x01/.*/g' -e 's/{/(/g' -e 's/}/)/g' -e 's/,/|/g')

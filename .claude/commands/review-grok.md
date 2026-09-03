@@ -12,17 +12,18 @@ file by the caller — `/ship` writes it beside the review before dispatching
 here — one `class` line and one `inside <path>` or `outside <path>` line per
 changed file. This invocation holds no `Bash` and cannot produce it; it reads
 it, and step 4 applies an accepted site only at a path the verdict marks
-`inside`. With no second argument the bound is unknown, every accepted site is
-applied as before, and the report says the bound was not available. $3, when
-given, is the **branch diff** against `main`, written by the caller the same
-way; the adjudicator reads it to tell a restatement the branch wrote — a
-finding — from one it left alone, and without it returns each row that needed
-it as `decision` rather than guessing. That is where an external review lands
-by default, and it is untracked working state rather than repo content — do not
-commit it, and do not treat its absence as an error worth guessing around. If
-there is no argument and no `suggestions.md`, stop and ask for the review
-rather than reviewing the diff from scratch: this command triages someone
-else's findings, and inventing them is a different job with a different bar.
+`inside`. With no second argument, or a file the helper left empty because the
+body carried neither row, the bound is unknown, every accepted site is applied
+as before, and the report says the bound was not available. $3, when given, is
+the **branch diff** against `main`, written by the caller the same way; the
+adjudicator reads it to tell a restatement the branch wrote — a finding — from
+one it left alone, and without it returns each row that needed it as `decision`
+rather than guessing. That is where an external review lands by default, and it
+is untracked working state rather than repo content — do not commit it, and do
+not treat its absence as an error worth guessing around. If there is no
+argument and no `suggestions.md`, stop and ask for the review rather than
+reviewing the diff from scratch: this command triages someone else's findings,
+and inventing them is a different job with a different bar.
 
 **The review is no longer pasted after the command, and the reason is the
 boundary below.** A pasted review is already inside the invocation that
