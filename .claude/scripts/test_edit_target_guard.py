@@ -533,8 +533,18 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
         composed = os.path.join(self.root, unicodedata.normalize("NFC", name))
         decomposed = os.path.join(self.root, unicodedata.normalize("NFD", name))
         self.assertNotEqual(composed, decomposed)
-        self.assertEqual(guard.key(composed, False), guard.key(decomposed, False))
-        self.assertEqual(guard.key(composed, True), guard.key(decomposed, True))
+
+        # **Composed only where the mount composes**, which is the half that
+        # arrived a round late: composing everywhere folds two names that can
+        # COEXIST on ext4 into one key, so a link resolving into the sibling
+        # compares equal to a path inside the checkout. Both directions are
+        # asserted here because each was a bypass in its turn.
+        for folded in (False, True):
+            with self.subTest(folded=folded):
+                self.assertEqual(guard.key(composed, (folded, True)),
+                                 guard.key(decomposed, (folded, True)))
+                self.assertNotEqual(guard.key(composed, (folded, False)),
+                                    guard.key(decomposed, (folded, False)))
 
         os.makedirs(composed, exist_ok=True)
         try:
@@ -556,6 +566,49 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
                 through = os.path.join(
                     decomposed, "..", os.path.relpath(link, self.root))
                 self.assertRefused(through)
+
+    def test_two_names_that_can_coexist_are_not_folded_into_one(self):
+        # **The other direction of the same question, and the argument that
+        # skipped it was the bypass.** This file once composed to NFC
+        # unconditionally on the reasoning that composing "can never make two
+        # paths look like one". On a normalisation-SENSITIVE filesystem — NTFS
+        # and ext4 among them — a composed and a decomposed name are two
+        # directories that coexist, so a link inside the checkout resolving to
+        # the SAME relative path under the sibling compared equal to a path
+        # inside it, and the escape was admitted. Raised by Copilot.
+        #
+        # Measured against the commit that shipped it, on NTFS: admitted there,
+        # refused here. Where the mount equates the two names the sibling
+        # cannot exist, and the case says so rather than pretending to have
+        # tested it.
+        name = "caf\u00e9"
+        checkout = os.path.join(self.outside,
+                                unicodedata.normalize("NFC", name))
+        sibling = os.path.join(self.outside,
+                               unicodedata.normalize("NFD", name))
+        os.makedirs(os.path.join(checkout, ".git"), exist_ok=True)
+        os.makedirs(os.path.join(sibling, "docs"), exist_ok=True)
+        self.write(os.path.join(sibling, "docs", "a.md"), "secret\n")
+        try:
+            here, there = os.stat(checkout), os.stat(sibling)
+            coexist = (here.st_dev, here.st_ino) != (there.st_dev, there.st_ino)
+        except OSError:
+            coexist = False
+        if not coexist:
+            print("this filesystem equates NFC and NFD, so the sibling cannot "
+                  "exist and this case has no subject here", file=sys.stderr)
+            return
+
+        for linker in linkers():
+            with self.subTest(link=linker):
+                link = os.path.join(checkout, f"docs-{linker}")
+                if linker == "symlink":
+                    os.symlink(os.path.join(sibling, "docs"), link,
+                               target_is_directory=True)
+                else:
+                    JUNCTIONS(os.path.join(sibling, "docs"), link)
+                self.assertRefused(os.path.join(link, "a.md"),
+                                   cwd=checkout, project=checkout)
 
     def test_a_checkout_whose_name_has_no_letters_is_still_asked(self):
         # **The probe has to flip something, and the basename is not always

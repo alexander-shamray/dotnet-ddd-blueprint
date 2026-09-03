@@ -149,36 +149,71 @@ def case_insensitive(path):
     return os.name == "nt"
 
 
-def key(path, folded):
-    """One comparable spelling of `path`, folded where the filesystem folds.
+def form_insensitive(path):
+    """Whether the filesystem resolves NFC and NFD spellings to one file.
 
-    **Unicode is composed unconditionally, where case is folded only where the
-    mount folds it.** A case-insensitive APFS volume is *also* insensitive to
-    normalisation, so `é` composed and `e` + a combining accent name one
-    directory there while they are two strings here — a checkout prefix spelled
-    in the other form matched no anchor and reached the branch that admits.
-    Raised by Copilot.
+    **The twin of `case_insensitive`, and it exists because composing
+    unconditionally was wrong.** This file argued that composing "can never
+    make two paths look like one" — and on a normalisation-SENSITIVE
+    filesystem, ext4 among them, `/tmp/caf\u00e9` and its decomposed sibling are
+    two directories that can coexist. Folding them into one key let a link
+    resolving into the sibling compare equal to a path inside the checkout, so
+    the argument for skipping the probe was the bypass. Raised by Copilot.
 
-    It needs no probe, unlike the case question, because composing costs
-    nothing where the filesystem does distinguish the two: two genuinely
-    different files still differ in every component that is not a
-    normalisation of the other, so this can make two spellings of *one* path
-    compare equal and can never make two paths look like one.
+    Asked the same way as case, and for the same reason. Where no component has
+    a distinct alternate form the answer is `False` **by construction rather
+    than as a fallback**: a path that re-normalises to itself has no
+    differently-normalised spelling to be confused with.
     """
-    spelling = unicodedata.normalize(
-        "NFC", os.path.normcase(os.path.normpath(path)))
+    normalised = os.path.normpath(path)
+    parts = normalised.split(os.sep)
+    for index in range(len(parts) - 1, -1, -1):
+        part = parts[index]
+        other = unicodedata.normalize(
+            "NFD" if unicodedata.is_normalized("NFC", part) else "NFC", part)
+        if other == part:
+            continue
+        candidate = os.sep.join(parts[:index] + [other] + parts[index + 1:])
+        try:
+            here = os.stat(normalised)
+            there = os.stat(candidate)
+        except OSError:
+            return False
+        return (here.st_dev, here.st_ino) == (there.st_dev, there.st_ino)
+    return False
+
+
+def traits_of(path):
+    """What this path's filesystem treats as one name: (case, normalisation)."""
+    return (case_insensitive(path), form_insensitive(path))
+
+
+def key(path, traits):
+    """One comparable spelling of `path`, under its filesystem's equivalences.
+
+    **Both halves are asked of the mount rather than assumed**, and each was a
+    bypass in one direction before it was: folding nothing on a
+    case-insensitive APFS volume let a differently-cased prefix match no anchor
+    at all, and folding normalisation everywhere let two coexisting names on
+    ext4 collapse into one. A comparison is only as good as the equivalence the
+    filesystem actually holds.
+    """
+    folded, composed = traits
+    spelling = os.path.normcase(os.path.normpath(path))
+    if composed:
+        spelling = unicodedata.normalize("NFC", spelling)
     return spelling.lower() if folded else spelling
 
 
-def same(left, right, folded):
+def same(left, right, traits):
     """Whether two absolute paths name the same place."""
-    return key(left, folded) == key(right, folded)
+    return key(left, traits) == key(right, traits)
 
 
-def under(child, parent, folded):
+def under(child, parent, traits):
     """Whether `child` is `parent` or sits beneath it, lexically."""
-    child = key(child, folded)
-    parent = key(parent, folded)
+    child = key(child, traits)
+    parent = key(parent, traits)
     if child == parent:
         return True
     if not parent.endswith(os.sep):
@@ -255,10 +290,10 @@ def anchors(event):
         if not path or not isinstance(path, str):
             continue
         spelled = os.path.abspath(path)
-        folded = case_insensitive(spelled)
-        if any(same(spelled, seen, folded) for seen, _, _ in found):
+        traits = traits_of(spelled)
+        if any(same(spelled, seen, traits) for seen, _, _ in found):
             continue
-        found.append((spelled, os.path.realpath(path), folded))
+        found.append((spelled, os.path.realpath(path), traits))
     return found
 
 
@@ -297,16 +332,30 @@ def offence(event):
         cwd = os.getcwd()
 
     checkouts = anchors(event)
-    if alternate_alphabet(spelled) and not any(
-            alternate_alphabet(root) for root, _, _ in checkouts):
-        return (
-            f"guard-edit-target: {spelled} is spelled in Windows' other path "
-            "grammar — an extended-length or device prefix, or a UNC share — "
-            "while every checkout this session stands in is named by an "
-            "ordinary path. A permission rule matches the string it is given, "
-            "and measured here a denied directory accepted a write spelled "
-            "both of those ways. Name the file the way the rules are written."
-        )
+    # **The exemption is per anchor and per target, and it was session-wide.**
+    # A checkout on a network share is `\\`-spelled, and the first form read
+    # that as licence for any alternate-alphabet target anywhere: once one
+    # anchor was UNC, `\\?\UNC\server\share\repo\…` was exempt too, and since
+    # it is not lexically under `\\server\share\repo` the anchor loop skipped
+    # it and the fall-through admitted it. So the exemption now requires an
+    # anchor that is BOTH in that alphabet and containing this target, which
+    # is the case it was written for and no other. Raised by Copilot.
+    if alternate_alphabet(spelled):
+        joined = (spelled if os.path.isabs(spelled)
+                  else os.path.join(cwd, spelled))
+        placed = os.path.normpath(os.path.abspath(joined))
+        if not any(alternate_alphabet(root)
+                   and (under(placed, root, traits)
+                        or under(placed, real, traits))
+                   for root, real, traits in checkouts):
+            return (
+                f"guard-edit-target: {spelled} is spelled in Windows' other "
+                "path grammar — an extended-length or device prefix, or a UNC "
+                "share — and no checkout named that way contains it. A "
+                "permission rule matches the string it is given, and measured "
+                "here a denied directory accepted a write spelled both of "
+                "those ways. Name the file the way the rules are written."
+            )
 
     # `realpath` is taken of the ORIGINAL spelling and `normpath` of the joined
     # one, and the order matters: `normpath` collapses `..` lexically, which is
@@ -339,10 +388,10 @@ def offence(event):
     # incapable of widening the guard, which is the property `anchors` rests
     # its trust in `CLAUDE_PROJECT_DIR` on. Raised by Copilot.
     judged = False
-    for spelled_root, real_root, folded in checkouts:
-        if under(lexical, spelled_root, folded):
+    for spelled_root, real_root, traits in checkouts:
+        if under(lexical, spelled_root, traits):
             base = spelled_root
-        elif under(lexical, real_root, folded):
+        elif under(lexical, real_root, traits):
             base = real_root
         else:
             continue
@@ -350,8 +399,8 @@ def offence(event):
 
         expected = os.path.normpath(
             os.path.join(real_root, os.path.relpath(lexical, base)))
-        if not same(resolved, expected, folded):
-            escaped = not under(resolved, real_root, folded)
+        if not same(resolved, expected, traits):
+            escaped = not under(resolved, real_root, traits)
             where = "outside the checkout" if escaped else "elsewhere in it"
             return (
                 f"guard-edit-target: {spelled} resolves {where} — to "
@@ -380,8 +429,8 @@ def offence(event):
     # target resolving outside every anchor still falls through, which is what
     # keeps the session's own memory and scratch writes working.
     if not judged:
-        for _, real_root, folded in checkouts:
-            if under(resolved, real_root, folded):
+        for _, real_root, traits in checkouts:
+            if under(resolved, real_root, traits):
                 return (
                     f"guard-edit-target: {spelled} is not a spelling any "
                     f"checkout here recognises, yet it resolves to {resolved}, "
