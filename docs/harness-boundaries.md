@@ -798,8 +798,14 @@ one to `\\localhost\C$\dev\ashamray\.claude\sandbox\probe-share.txt`; the plain
 spelling of either file is refused. Both probe files were deleted.
 
 **So the guard refuses the family rather than the prefixes** — every spelling
-beginning `\\`, unless a checkout is itself named that way, which is a
-repository on a network share and the one legitimate use. Enumerating the
+beginning `\\`, unless an anchor that is itself named that way **contains the
+target**. The exemption was session-wide for one round, which reopened the
+bypass it was carved for: once any checkout was `\\`-spelled, an alias of that
+same checkout — `\\?\UNC\localhost\C$\…`, not lexically under
+`\\localhost\C$\…` — skipped the anchor loop and was admitted. Measured with
+the administrative share as the project directory, and raised by Copilot. The
+legitimate case it protects is a repository genuinely on a network share,
+editing its own files. Enumerating the
 prefixes is the deny-list shape this repository has rejected twice, and the UNC
 form is exactly what such a list missed. Refused rather than resolved because a
 hook can only allow or deny: it cannot hand the matcher the plain spelling it
@@ -824,14 +830,22 @@ Measured against the commit that shipped it — admitted there, refused after �
 and the control is the worktree case, where a session standing in the aliased
 directory makes it a root of its own and the spelling is recognised again.
 
-**Unicode normalisation is the same shape on a different platform.** A
+**Unicode normalisation is the same shape on a different platform, and it took
+two rounds because the first fix argued its way past the probe.** A
 case-insensitive APFS volume is also insensitive to normalisation, so `é`
 composed and `e` plus a combining accent name one directory there and two
 strings in a comparison — a checkout prefix spelled in the other form matched
-no anchor and reached the branch that admits. The guard composes to NFC
-unconditionally, which needs no probe of the mount: composing can make two
-spellings of one path compare equal and can never make two paths look like
-one. Raised by Copilot.
+no anchor and reached the branch that admits. The fix composed to NFC
+**unconditionally**, on the reasoning that composing "can never make two paths
+look like one" — which is false wherever the mount is normalisation-sensitive:
+NTFS and ext4 keep both names, so a link resolving to the same relative path
+under the coexisting sibling compared equal to a path inside the checkout, and
+the escape was admitted. Measured on NTFS against the commit that shipped it.
+So normalisation is probed exactly as case is and the two answers travel
+together as the anchor's traits. **Both were raised by Copilot, and the second
+is the one worth carrying: an equivalence asserted about "filesystems" rather
+than measured on the mount is a bypass in whichever direction the assertion is
+wrong.**
 
 **A `..` that traverses no link is admitted, and the reason is a measurement
 of the harness rather than a judgement about paths.** The case for refusing it
