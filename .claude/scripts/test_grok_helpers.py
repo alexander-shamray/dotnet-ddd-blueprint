@@ -5793,6 +5793,38 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertAdmitted(command)
 
+    def test_the_readings_do_not_multiply(self):
+        # **The four readings and the substitution recursion each descend onto
+        # a string barely shorter than the one they came from, so a command
+        # nesting them multiplies.** `$( echo ${a:-{z,X}} )` repeated seven
+        # times is 155 characters and took over sixty seconds — past the hook
+        # timeout, which produces no verdict, which `PreToolUse` treats as
+        # non-blocking. Fail-open by exhaustion, on an INNOCENT command, and a
+        # regression from the commit that added the readings. Found by an
+        # adversarial audit; measured at 394 seconds for eight levels.
+        #
+        # `offence` caches the verdict per string, so each distinct string is
+        # judged once. The cache holds the verdict rather than the visit, which
+        # is the half that has to be right: remembering only that a string had
+        # been seen would return None the second time a REFUSING string
+        # appeared and lose the refusal.
+        #
+        # Asserted as a verdict rather than a duration — a timing assertion on
+        # CI is a flake — but the case cannot return at all if the cost
+        # multiplies, so a green run is the bound.
+        nested = "b"
+        for _ in range(8):
+            nested = "$( echo ${a:-{z," + nested + "}} )"
+        self.assertAdmitted("git commit -m " + nested)
+
+        # And the control that the cache cannot swallow a refusal: the same
+        # shape carrying a push is still refused, and a repeated string that
+        # refuses on its first reading refuses on every later one.
+        self.assertRefused(
+            "git commit -m $( echo ${a:-{z,b}} ) ; git push origin +HEAD:main")
+        self.assertRefused(
+            "git ${x:-push} origin +HEAD:main ; git ${x:-push} origin +HEAD:main")
+
     def test_an_unbalanced_brace_ends_the_scan(self):
         # **A hook that runs out of time is non-blocking, which is fail-open by
         # exhaustion rather than by misreading.** The `${` branch advanced one

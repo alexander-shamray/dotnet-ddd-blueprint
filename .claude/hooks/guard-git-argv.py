@@ -1918,8 +1918,38 @@ def push_offence(segment):
 MAX_NESTING = 24
 
 
-def offence(command, depth=0):
-    """The reason to refuse `command`, or None to allow it."""
+def offence(command, depth=0, judged=None):
+    """The reason to refuse `command`, or None to allow it.
+
+    **`judged` is a verdict cache, and it is what keeps the cost finite.** Each
+    of the four readings and each extracted substitution recurses onto a string
+    barely shorter than the one it came from, so a command nesting them
+    multiplies: `$( echo ${a:-{z,X}} )` repeated seven times is 155 characters
+    and took over sixty seconds — past the hook timeout, which produces no
+    verdict, which `PreToolUse` treats as non-blocking. Fail-open by
+    exhaustion, on an innocent command, and a regression from the commit that
+    added the readings. Found by an adversarial audit.
+
+    **The cache holds the verdict rather than the visit**, which is the part
+    that has to be right: remembering only that a string had been seen would
+    return None the second time a refusing string appeared, and lose the
+    refusal. A string reached inside its own evaluation is recorded as None
+    first, so a cycle terminates without inventing a verdict — the outer call
+    is the one that answers.
+    """
+    if judged is None:
+        judged = {}
+    if command in judged:
+        return judged[command]
+    judged[command] = None
+
+    verdict = _offence(command, depth, judged)
+    judged[command] = verdict
+    return verdict
+
+
+def _offence(command, depth, judged):
+    """`offence`'s body, called only through its cache."""
     if depth > MAX_NESTING:
         return (
             "this command nests shells or substitutions more deeply than the "
@@ -1955,7 +1985,7 @@ def offence(command, depth=0):
     ):
         variant = reading(command)
         if variant != command:
-            refusal = offence(variant, depth + 1)
+            refusal = offence(variant, depth + 1, judged)
             if refusal is not None:
                 return f"with {description}: {refusal}"
 
@@ -1970,7 +2000,7 @@ def offence(command, depth=0):
         # body arrives with `quotes` false and is not a command line.
         text = join_continuations(text, quotes=quotes)
         for inner in substitutions(text, quotes=quotes):
-            refusal = offence(inner, depth + 1)
+            refusal = offence(inner, depth + 1, judged)
             if refusal is not None:
                 return f"inside a command substitution: {refusal}"
 
@@ -2052,7 +2082,7 @@ def offence(command, depth=0):
         return None
 
     for script in evaluated_scripts(tokens):
-        refusal = offence(script, depth + 1)
+        refusal = offence(script, depth + 1, judged)
         if refusal is not None:
             return f"inside a shell evaluator: {refusal}"
 
