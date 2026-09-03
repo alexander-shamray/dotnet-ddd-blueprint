@@ -65,6 +65,7 @@ choice and this file follows it.
 import json
 import os
 import sys
+import unicodedata
 
 # The tools that write a file. `MultiEdit` is listed although this repository's
 # harness does not surface it: the matcher in `.claude/settings.json` is a
@@ -80,23 +81,31 @@ EDITING_TOOLS = ("Edit", "Write", "NotebookEdit", "MultiEdit")
 # this file cannot see is one it has established nothing about.
 PATH_KEYS = ("file_path", "notebook_path")
 
-# Windows' extended-length (`\\?\`) and device (`\\.\`) prefixes exist to skip
-# the path normalisation every other spelling goes through, which is exactly
-# what a permission rule's matcher relies on. **Measured in this checkout with
-# `.claude/sandbox/**` denied: a `Write` to
-# `\\?\C:\dev\ashamray\.claude\sandbox\probe-unc.txt` was CREATED**, where the
-# plain spelling of the same file is refused. So the prefix is a spelling that
-# names a denied target and is judged by nothing — the class this file exists
-# for, arriving through the path grammar rather than through a link.
+# **Windows names the same file in more than one alphabet, and a permission
+# rule reads only one of them.** Every spelling beginning `\\` is the other
+# one: the extended-length prefix `\\?\` and the device prefix `\\.\`, which
+# exist precisely to SKIP the normalisation a matcher depends on, and the UNC
+# form `\\server\share\...`, which reaches the local disk through the
+# administrative shares. **Both were measured in this checkout with
+# `.claude/sandbox/**` denied, and both were CREATED**: a `Write` to
+# `\\?\C:\dev\ashamray\.claude\sandbox\probe-unc.txt` and one to
+# `\\localhost\C$\dev\ashamray\.claude\sandbox\probe-share.txt`. The plain
+# spelling of either file is refused. Both probe files were deleted.
 #
-# Refused rather than resolved, because this hook can only allow or deny: it
-# cannot hand the matcher the plain spelling it would have judged. Nothing in
-# this repository emits one — the prefix is for paths past `MAX_PATH`, which
-# the harness does not produce — so the cost is a spelling nobody uses and the
-# gain is that a denied tree cannot be reached by asking for it in Windows'
-# other alphabet. The forward-slash forms are covered because Windows accepts
-# them interchangeably.
-DEVICE_PREFIXES = ("\\\\?\\", "\\\\.\\")
+# So the whole family is refused rather than the two prefixes that were found
+# first — enumerating spellings is the deny-list shape this repository has
+# rejected twice, and the UNC form is what a list of prefixes would have
+# missed. Refused rather than resolved, because a hook can only allow or deny:
+# it cannot hand the matcher the plain spelling it would have judged.
+#
+# **Unless a checkout is itself named that way**, which is the one legitimate
+# case — a repository on a network share. Then the anchors are `\\`-spelled
+# too, the matcher's strings and the guard's agree, and nothing here fires.
+# Scoped to Windows because no other platform has a second alphabet: `//x` on
+# POSIX is an ordinary path, and refusing it would be a rule about nothing.
+def alternate_alphabet(path):
+    """Whether `path` is spelled in Windows' non-drive path grammar."""
+    return os.name == "nt" and path[:2].replace("/", "\\") == "\\\\"
 
 
 def case_insensitive(path):
@@ -141,8 +150,23 @@ def case_insensitive(path):
 
 
 def key(path, folded):
-    """One comparable spelling of `path`, folded where the filesystem folds."""
-    spelling = os.path.normcase(os.path.normpath(path))
+    """One comparable spelling of `path`, folded where the filesystem folds.
+
+    **Unicode is composed unconditionally, where case is folded only where the
+    mount folds it.** A case-insensitive APFS volume is *also* insensitive to
+    normalisation, so `é` composed and `e` + a combining accent name one
+    directory there while they are two strings here — a checkout prefix spelled
+    in the other form matched no anchor and reached the branch that admits.
+    Raised by Copilot.
+
+    It needs no probe, unlike the case question, because composing costs
+    nothing where the filesystem does distinguish the two: two genuinely
+    different files still differ in every component that is not a
+    normalisation of the other, so this can make two spellings of *one* path
+    compare equal and can never make two paths look like one.
+    """
+    spelling = unicodedata.normalize(
+        "NFC", os.path.normcase(os.path.normpath(path)))
     return spelling.lower() if folded else spelling
 
 
@@ -268,18 +292,21 @@ def offence(event):
             "Refusing rather than waving it through."
         )
 
-    if spelled[:4].replace("/", "\\") in DEVICE_PREFIXES:
-        return (
-            f"guard-edit-target: {spelled} is spelled with Windows' "
-            "extended-length or device prefix, which skips the normalisation a "
-            "permission rule's matcher depends on — measured, a denied "
-            "directory accepted a write spelled that way. Name the file the "
-            "ordinary way, which is the spelling every rule judges."
-        )
-
     cwd = event.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = os.getcwd()
+
+    checkouts = anchors(event)
+    if alternate_alphabet(spelled) and not any(
+            alternate_alphabet(root) for root, _, _ in checkouts):
+        return (
+            f"guard-edit-target: {spelled} is spelled in Windows' other path "
+            "grammar — an extended-length or device prefix, or a UNC share — "
+            "while every checkout this session stands in is named by an "
+            "ordinary path. A permission rule matches the string it is given, "
+            "and measured here a denied directory accepted a write spelled "
+            "both of those ways. Name the file the way the rules are written."
+        )
 
     # `realpath` is taken of the ORIGINAL spelling and `normpath` of the joined
     # one, and the order matters: `normpath` collapses `..` lexically, which is
@@ -311,7 +338,7 @@ def offence(event):
     # exists to refuse. Requiring agreement is what makes an extra anchor
     # incapable of widening the guard, which is the property `anchors` rests
     # its trust in `CLAUDE_PROJECT_DIR` on. Raised by Copilot.
-    for spelled_root, real_root, folded in anchors(event):
+    for spelled_root, real_root, folded in checkouts:
         if under(lexical, spelled_root, folded):
             base = spelled_root
         elif under(lexical, real_root, folded):

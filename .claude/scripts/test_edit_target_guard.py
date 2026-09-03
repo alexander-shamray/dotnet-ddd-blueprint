@@ -33,9 +33,11 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -117,6 +119,16 @@ class GuardCase(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="guard-root-")
         self.outside = tempfile.mkdtemp(prefix="guard-outside-")
+        # **Both fixtures are removed, and the order is load-bearing.** Every
+        # case here makes links from the checkout into `outside`, so the
+        # checkout goes first: `addCleanup` runs last-registered-first, which
+        # is why `outside` is registered before it. `ignore_errors` because a
+        # link left dangling by the other order is not a test failure worth
+        # reporting, and a link that `rmtree` declines to follow is the
+        # behaviour we want rather than an error. Raised by Copilot, against a
+        # suite that had been leaving two directories per case behind.
+        self.addCleanup(shutil.rmtree, self.outside, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         # **The fixture is a real checkout, and the `.git` is load-bearing.**
         # An anchor is a checkout root, so a scratch tree without one has no
         # root to derive from `cwd` — and the case below that stands the
@@ -167,7 +179,8 @@ class GuardCase(unittest.TestCase):
             JUNCTIONS(real_target, linkpath)
         return linkpath
 
-    def judge(self, file_path, tool="Edit", cwd=None, key="file_path"):
+    def judge(self, file_path, tool="Edit", cwd=None, key="file_path",
+              project=None):
         """The hook's verdict on one call: the reason, or `None` for allowed."""
         event = {
             "hook_event_name": "PreToolUse",
@@ -178,7 +191,8 @@ class GuardCase(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(HOOK)],
             input=json.dumps(event), capture_output=True, text=True,
-            env={**os.environ, "CLAUDE_PROJECT_DIR": self.root},
+            env={**os.environ,
+                 "CLAUDE_PROJECT_DIR": self.root if project is None else project},
         )
         self.assertEqual(
             0, result.returncode,
@@ -309,15 +323,35 @@ class ALinkIsNotTheFileItIsSpelledAs(GuardCase):
         # it cannot hand the matcher the plain spelling it would have judged.
         # Asserted on every platform because the check is textual: a POSIX file
         # whose name begins with those characters is not a real caller.
+        # **The whole family, not the two prefixes that were found first.** The
+        # UNC form reaches the same disk through an administrative share, and
+        # it was measured the same way: a `Write` to
+        # `\\localhost\C$\...\.claude\sandbox\probe-share.txt` was created in a
+        # denied directory. A list of prefixes would have missed it, which is
+        # the deny-list shape this repository has rejected twice.
+        guard = self.guard_module()
         plain = os.path.join(self.root, "docs", "chapter.md")
-        for prefix in ("\\\\?\\", "\\\\.\\", "//?/", "//./"):
-            with self.subTest(prefix=prefix):
-                reason = self.assertRefused(prefix + plain)
-                self.assertIn("prefix", reason)
+        spellings = ["\\\\?\\" + plain, "\\\\.\\" + plain, "//?/" + plain,
+                     "\\\\localhost\\C$\\dev\\x\\docs\\chapter.md"]
+        if os.name != "nt":
+            # No second alphabet exists here, and the predicate says so; `//x`
+            # on POSIX is an ordinary path and refusing it would be a rule
+            # about nothing.
+            for spelling in spellings:
+                self.assertFalse(guard.alternate_alphabet(spelling))
+            return
+        for spelling in spellings:
+            with self.subTest(spelling=spelling):
+                self.assertTrue(guard.alternate_alphabet(spelling))
+                self.assertIn("other path grammar",
+                              self.assertRefused(spelling))
 
-        # The control: the same file named the ordinary way is admitted, so the
-        # case is about the prefix rather than about the path.
+        # Two controls. The same file named the ordinary way is admitted, so
+        # the case is about the grammar rather than about the path — and a
+        # session whose own checkout is `\\`-spelled is not refused wholesale,
+        # which is the one legitimate use of that grammar.
         self.assertAdmitted(plain)
+        self.assertTrue(guard.alternate_alphabet("\\\\nas\\projects\\repo"))
 
     def test_an_eight_dot_three_spelling_is_refused_where_one_exists(self):
         # The same class in Windows' other alphabet: `CLAUDE~1` is a different
@@ -450,6 +484,46 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
         except OSError:
             measured = False
         self.assertEqual(measured, guard.case_insensitive(self.root))
+
+    def test_a_composed_and_a_decomposed_spelling_are_one_key(self):
+        # **A case-insensitive APFS volume is also insensitive to Unicode
+        # normalisation**, so `é` composed and `e` followed by a combining
+        # accent name one directory there while they are two strings in
+        # Python. A checkout prefix spelled in the other form therefore matched
+        # no anchor and reached the branch that admits. Raised by Copilot.
+        #
+        # `key` composes unconditionally, so the predicate is assertable on
+        # every platform; the end-to-end half needs a mount that agrees, and
+        # says so when it has none rather than reporting a pass for it.
+        guard = self.guard_module()
+        name = "caf\u00e9"  # built rather than typed: an editor that normalises
+        # this file would otherwise make the two spellings one and the case vacuous.
+        composed = os.path.join(self.root, unicodedata.normalize("NFC", name))
+        decomposed = os.path.join(self.root, unicodedata.normalize("NFD", name))
+        self.assertNotEqual(composed, decomposed)
+        self.assertEqual(guard.key(composed, False), guard.key(decomposed, False))
+        self.assertEqual(guard.key(composed, True), guard.key(decomposed, True))
+
+        os.makedirs(composed, exist_ok=True)
+        try:
+            here, there = os.stat(composed), os.stat(decomposed)
+            one_directory = (here.st_dev, here.st_ino) == (there.st_dev,
+                                                           there.st_ino)
+        except OSError:
+            one_directory = False
+        if not one_directory:
+            print("this filesystem distinguishes NFC from NFD; the end-to-end "
+                  "half of the normalisation case has no subject here",
+                  file=sys.stderr)
+            return
+
+        target = os.path.join(self.root, ".claude", "scripts", "helper.sh")
+        for linker in linkers():
+            with self.subTest(link=linker):
+                link = self.link_to("composed", target, linker)
+                through = os.path.join(
+                    decomposed, "..", os.path.relpath(link, self.root))
+                self.assertRefused(through)
 
     def test_a_checkout_whose_name_has_no_letters_is_still_asked(self):
         # **The probe has to flip something, and the basename is not always
