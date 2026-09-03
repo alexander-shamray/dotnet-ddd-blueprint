@@ -6345,6 +6345,64 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertRefused("bash <<<git\\ push\\ origin\\ +HEAD:main")
         self.assertAdmitted("bash <<<'git log --oneline -5'")
 
+    def test_one_model_of_quoting_reaches_every_scanner(self):
+        # **`shell_positions` was taught that `$'…'` takes escapes and its five
+        # siblings were not.** `without_substitutions`, `rewriting_expansions`,
+        # `dollar_quotes`, `join_continuations` and `substitutions` each
+        # carried their own copy of bash's quote rules, so one prefix —
+        # `: $'x\''; `, where the escaped quote does NOT close the word — left
+        # every one of them a quote out of step, and each pass walked straight
+        # past the shape it exists to catch. Four were verified allowed; all
+        # five raised in review.
+        #
+        # They read `quote_states` now. The prefix is one string across every
+        # case below on purpose: the defect is one model, so the cases differ
+        # only in which pass the desynchronisation reached.
+        prefix = ": $'x\\''; "
+        for name, rest in (
+            ("the empty-substitution reading", "git $( )push origin +HEAD:main"),
+            ("the default reading", "git ${x:-push} origin +HEAD:main"),
+            ("the whitespace reading", "git push${IFS}origin +HEAD:main"),
+            ("the brace reading", "git p{u..u}sh origin +HEAD:main"),
+            ("a nested substitution", 'git log "$(git push origin +HEAD:main)"'),
+            ("a dollar quote", "git $'\\x70ush' origin +HEAD:main"),
+            ("a line continuation", "git \\\npush origin +HEAD:main"),
+        ):
+            with self.subTest(pass_=name):
+                self.assertRefused(prefix + rest)
+
+        # **The prefix is doing the work, not the payload**: each of these is
+        # refused without it, which is what makes the pair a measurement of the
+        # scanner rather than of the grammar behind it.
+        self.assertRefused("git $( )push origin +HEAD:main")
+        self.assertRefused(": $'x'; git $( )push origin +HEAD:main")
+
+        # And the state those scanners read is the one bash uses: the escaped
+        # quote is inside the word, and the quote after it closes it.
+        guard = self.guard_module()
+        states = guard.quote_states("$'x\\''; git status")
+        self.assertEqual("single", states[3], "the escaped quote is inside")
+        self.assertEqual("", states[5], "and the word has ended after it")
+
+        # Honest traffic carrying the same shapes is still admitted.
+        self.assertAdmitted("echo $'\\n'; git log --oneline -5")
+        self.assertAdmitted("git log --grep='$x' -5")
+
+    def test_a_locale_quote_is_refused_for_its_own_reason(self):
+        # One sentence covered two decisions and said the wrong thing about
+        # one: a plain `$"safe"` carries no escape at all, and telling a caller
+        # to go looking for one in a command that has none sends them somewhere
+        # there is nothing to find. Raised in review.
+        guard = self.guard_module()
+        translated = guard.offence('git $"safe" -5')
+        self.assertIn("translated string", translated)
+        self.assertIn("message catalogue", translated)
+
+        undecodable = guard.offence("git $'\\M-x' -5")
+        self.assertIn("escape this guard does not decode", undecodable)
+        self.assertNotIn("catalogue", undecodable,
+                         "the two reasons stay apart")
+
     def test_the_undecodable_heredoc_scan_knows_where_a_body_is(self):
         # The scan had its own `shell_positions` call with no body spans, so an
         # apostrophe in an earlier body left it in quote state and a later

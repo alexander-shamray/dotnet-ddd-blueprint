@@ -338,6 +338,44 @@ def _heredoc_delimiter(word):
 def shell_positions(command, data=()):
     """Walk `command`, yielding `(index, in_quotes, in_comment)` per character.
 
+    One of two adapters over `_quoting`, which is where the model lives.
+    """
+    for index, state, _escaped in _quoting(command, data=data):
+        yield index, state in ("single", "double", "data"), state == "comment"
+
+
+def quote_states(command, quotes=True):
+    """`command`'s quoting state at each character.
+
+    `state[i]` is `"single"`, `"double"`, `"comment"` or `""`. A scanner that
+    also needs to know where an escape sits keeps its own backslash branch:
+    every caller here already had one, and they differ — a continuation join
+    deletes the pair, an expansion rewrite copies it through.
+
+    **This exists because five scanners in this file each carried their own
+    copy of bash's quote rules, and none of them learned about `$'…'`.**
+    `shell_positions` was made escape-aware for it, and
+    `without_substitutions`, `rewriting_expansions`, `dollar_quotes`,
+    `join_continuations` and `substitutions` were not — so `: $'x\'';` in
+    front of a command left every one of them one quote out of step, and
+    `$( )`, `${x:-push}`, a line continuation and a nested `$(git push …)`
+    each walked past the pass that exists to catch it. Four of the five were
+    verified allowed; all five are raised in review. **A fix that lands in one
+    function and not in its siblings is this file's most-repeated failure**,
+    and the answer is not a sixth careful copy.
+
+    `quotes` is false for a heredoc BODY, where a quote is an ordinary
+    character — the same flag its callers already take.
+    """
+    states = [""] * len(command)
+    for index, state, _escaped in _quoting(command, quotes=quotes):
+        states[index] = state
+    return states
+
+
+def _quoting(command, quotes=True, data=()):
+    """Walk `command`, yielding `(index, state, escaped)` per character.
+
     `data` is spans this scanner must read as data rather than as shell text —
     heredoc bodies, and only `heredoc_spans` passes any. Inside one, a quote
     opens nothing and a `#` starts nothing: the characters are yielded as
@@ -351,9 +389,11 @@ def shell_positions(command, data=()):
     `git log "$(printf ')'; git push origin +HEAD:main)"` close early, hiding
     the push in the outer token. Both raised in review, both verified allowed.
 
-    `in_quotes` is true inside `'…'` and `"…"` alike. Comments start at an
-    unquoted `#` that begins a word and end at the newline — which is bash's
-    rule, and the reason `git log --grep=#x` is not a comment.
+    `state` is `"single"` inside `'…'`, `"double"` inside `"…"`, `"comment"`
+    in a comment, `"data"` inside one of `data`'s spans and `""` elsewhere.
+    Comments start at an unquoted `#` that begins a word and end at the
+    newline — which is bash's rule, and the reason `git log --grep=#x` is not
+    a comment.
 
     **An ANSI-C word takes a backslash and an ordinary single-quoted one does
     not**, and reading `$'…'` by the ordinary rule desynchronised every
@@ -384,6 +424,8 @@ def shell_positions(command, data=()):
     # in review.
     at_word_start = True
     index = 0
+    # Whether this character is the one the backslash before it escapes.
+    pending = False
     # A cursor rather than a search: this walk is monotonic, so the spans are
     # consumed in order. Searching them per character made a command carrying
     # 200 heredocs ten times slower, and a quadratic path in this file is the
@@ -394,7 +436,7 @@ def shell_positions(command, data=()):
             cursor += 1
         if cursor < len(data) and data[cursor][0] <= index:
             while index < data[cursor][1] and index < len(command):
-                yield index, True, False
+                yield index, "data", False
                 index += 1
             at_word_start = True
             dollar = False
@@ -405,7 +447,7 @@ def shell_positions(command, data=()):
                 comment = False
                 at_word_start = True
             else:
-                yield index, False, True
+                yield index, "comment", False
                 index += 1
                 continue
         if not comment:
@@ -413,8 +455,8 @@ def shell_positions(command, data=()):
                 if ansi_c and char == "\\" and index + 1 < len(command):
                     # Both characters, for `strip_comments`' reason below: a
                     # consumer rebuilds text from these positions.
-                    yield index, True, False
-                    yield index + 1, True, False
+                    yield index, "single", False
+                    yield index + 1, "single", True
                     index += 2
                     dollar = False
                     continue
@@ -429,8 +471,8 @@ def shell_positions(command, data=()):
                     # changed shape on its way through the guard. A scanner that
                     # silently edits its input is worse than one that misreads
                     # it, because every later stage inherits the edit.
-                    yield index, True, False
-                    yield index + 1, True, False
+                    yield index, "double", False
+                    yield index + 1, "double", True
                     index += 2
                     dollar = False
                     continue
@@ -440,22 +482,22 @@ def shell_positions(command, data=()):
                 # An unquoted backslash escapes the next character, so that
                 # character is ordinary text — a space included, and an escaped
                 # space separates nothing.
-                yield index, False, False
-                yield index + 1, False, False
+                yield index, "", False
+                yield index + 1, "", True
                 index += 2
                 at_word_start = False
                 dollar = False
                 continue
-            elif char == "'":
+            elif char == "'" and quotes:
                 single = True
                 ansi_c = dollar
                 at_word_start = False
-            elif char == '"':
+            elif char == '"' and quotes:
                 double = True
                 at_word_start = False
             elif char == "#" and at_word_start:
                 comment = True
-                yield index, False, True
+                yield index, "comment", False
                 index += 1
                 dollar = False
                 continue
@@ -463,7 +505,9 @@ def shell_positions(command, data=()):
                 at_word_start = True
             else:
                 at_word_start = False
-        yield index, single or double, comment
+        yield index, ("single" if single else "double" if double
+                      else "comment" if comment else ""), pending
+        pending = False
         dollar = char == "$" and not (single or double or comment)
         index += 1
 
@@ -759,13 +803,14 @@ def without_substitutions(command):
     about a value assembled at run time — `F=--output=x; git log $F` — and that
     this is not that.
     """
+    # One model of bash's quoting, shared: this scan used to keep its
+    # own, which never learned that `$'…'` takes escapes. See
+    # `quote_states`.
+    states = quote_states(command)
     out, index = [], 0
-    in_single = in_double = False
     while index < len(command):
         char = command[index]
-        if in_single:
-            if char == "'":
-                in_single = False
+        if states[index] == "single":
             out.append(char)
             index += 1
             continue
@@ -806,10 +851,6 @@ def without_substitutions(command):
             if end is not None and glued(command, index, end):
                 index = end
                 continue
-        if char == "'" and not in_double:
-            in_single = True
-        elif char == '"':
-            in_double = not in_double
         out.append(char)
         index += 1
     return "".join(out) + command[index:] if index < len(command) else "".join(out)
@@ -846,13 +887,14 @@ def rewriting_expansions(command, replace):
     in its place, or None to leave it alone. Single-quoted regions are left
     untouched, because a `$` is literal there.
     """
+    # One model of bash's quoting, shared: this scan used to keep its
+    # own, which never learned that `$'…'` takes escapes. See
+    # `quote_states`.
+    states = quote_states(command)
     out, index = [], 0
-    in_single = in_double = False
     while index < len(command):
         char = command[index]
-        if in_single:
-            if char == "'":
-                in_single = False
+        if states[index] == "single":
             out.append(char)
             index += 1
             continue
@@ -870,10 +912,6 @@ def rewriting_expansions(command, replace):
                 out.append(command[index:end] if written is None else written)
                 index = end
                 continue
-        if char == "'" and not in_double:
-            in_single = True
-        elif char == '"':
-            in_double = not in_double
         out.append(char)
         index += 1
     return "".join(out)
@@ -953,19 +991,20 @@ def dollar_quotes(command):
     `end` is just past the closing quote, and `ansi_c` says which form it is,
     because only `$'…'` decodes escapes.
     """
+    # One model of bash's quoting, shared: this scan used to keep its
+    # own, which never learned that `$'…'` takes escapes. See
+    # `quote_states`.
+    states = quote_states(command)
     found, index = [], 0
-    in_single = in_double = False
     while index < len(command):
         char = command[index]
-        if in_single:
-            if char == "'":
-                in_single = False
+        if states[index] in ("single", "double"):
             index += 1
             continue
         if char == "\\" and index + 1 < len(command):
             index += 2
             continue
-        if (char == "$" and not in_double
+        if (char == "$"
                 and command[index + 1:index + 2] in ("'", '"')):
             # **Neither form is a quoting form INSIDE double quotes**, and
             # missing that broke this three ways at once. To bash
@@ -999,10 +1038,6 @@ def dollar_quotes(command):
             found.append((index, close + 1, quote == "'"))
             index = close + 1
             continue
-        if char == "'" and not in_double:
-            in_single = True
-        elif char == '"':
-            in_double = not in_double
         index += 1
     return found
 
@@ -1110,6 +1145,32 @@ def single_quoted(text):
     return "'" + text.replace("'", "'\"'\"'") + "'"
 
 
+def unreadable_dollar_quote(command):
+    """Why `command`'s `$'…'` or `$"…"` cannot be read, or None.
+
+    **Two different reasons, and one sentence for both said the wrong thing.**
+    A plain `$"safe"` carries no escape at all; it is refused because its
+    translation is a lookup in a catalogue this hook is not given. Reporting
+    that as an undecodable escape tells a caller to go looking for one, in a
+    command that has none. Raised in review.
+    """
+    for _start, _end, ansi_c in dollar_quotes(command):
+        if not ansi_c:
+            return (
+                "a `$\"…\"` is a translated string, so what the word says is "
+                "decided by a message catalogue this guard is not given; "
+                "refusing rather than reading the source as if it were the "
+                "result."
+            )
+    if undecodable_dollar_quote(command):
+        return (
+            "a `$'…'` carries an escape this guard does not decode, so it "
+            "cannot tell what the word says; refusing rather than reading "
+            "part of it."
+        )
+    return None
+
+
 def undecodable_dollar_quote(command):
     """Whether a `$'…'` or `$"…"` in `command` carries an escape to decode.
 
@@ -1208,13 +1269,14 @@ def join_continuations(command, quotes=True):
     quotes that are not quotes, could reach the wrong conclusion about where
     the escape sits. Raised in review; verified allowed.
     """
+    # One model of bash's quoting, shared: this scan used to keep its
+    # own, which never learned that `$'…'` takes escapes. See
+    # `quote_states`.
+    states = quote_states(command, quotes=quotes)
     out, index = [], 0
-    in_single = in_double = False
     while index < len(command):
         char = command[index]
-        if in_single:
-            if char == "'":
-                in_single = False
+        if states[index] == "single":
             out.append(char)
             index += 1
             continue
@@ -1228,10 +1290,6 @@ def join_continuations(command, quotes=True):
             out.append(command[index + 1])
             index += 2
             continue
-        if quotes and char == "'" and not in_double:
-            in_single = True
-        elif quotes and char == '"':
-            in_double = not in_double
         out.append(char)
         index += 1
     return "".join(out)
@@ -1597,36 +1655,29 @@ def substitutions(command, quotes=True):
     """
     found = []
     index = 0
-    # Single-quote state only: `$(` is live inside DOUBLE quotes, which is the
-    # whole shape of the bypass — `git log "$(git push …)"`.
-    in_single = False
-    # **And double-quote state for ONE branch.** A process substitution is not
-    # performed inside double quotes — `echo "<(x)"` prints the text — so the
-    # branch added for it is gated on this, where `$(` deliberately is not.
-    # Reading it anywhere else would resurrect the bypass the comment above
-    # names.
-    in_double = False
+    # One model of bash's quoting, shared: this scan used to keep its own,
+    # which never learned that `$'…'` takes escapes — so `: $'x\\''; git log
+    # "$(git push origin +HEAD:main)"` ran the nested push while this state
+    # machine closed at the escaped quote, reopened at the real closer, and
+    # never saw the `$(`. Raised in review; verified allowed. See
+    # `quote_states`.
+    #
+    # **`$(` is live inside DOUBLE quotes**, which is the whole shape of the
+    # bypass this pass exists for, so only the single-quoted state stops it —
+    # and the one branch below that DOES need the double-quoted state reads
+    # it from the same list rather than tracking a second thing.
+    states = quote_states(command, quotes=quotes)
     while index < len(command):
         char = command[index]
-        if in_single:
-            if char == "'":
-                in_single = False
-            index += 1
-            continue
-        if char == "'" and quotes and not in_double:
+        if states[index] == "single":
             # **An apostrophe inside double quotes opens nothing**, and reading
             # one as a quote suppressed every substitution after it:
             # `git log "don't $(git push origin +HEAD:main)"` runs the push, and
             # the scanner entered single-quote state at `don't`, never saw the
             # `$(`, and handed `shlex` an opaque quoted argument. Raised in
-            # review; verified allowed, on `main` as well. The double-quote
-            # state this needs was added a few commits earlier for the process
-            # substitution branch and simply was not read here.
-            in_single = True
-            index += 1
-            continue
-        if char == '"' and quotes:
-            in_double = not in_double
+            # review; verified allowed, on `main` as well — and settled here by
+            # asking `quote_states` rather than by tracking a second flag,
+            # which is the same answer one layer up.
             index += 1
             continue
         if char == "\\":
@@ -1642,8 +1693,9 @@ def substitutions(command, quotes=True):
             found.append(command[index + 2:end])
             index = end + 1
             continue
-        if quotes and not in_double and (command.startswith("<(", index)
-                                         or command.startswith(">(", index)):
+        if (quotes and states[index] != "double"
+                and (command.startswith("<(", index)
+                     or command.startswith(">(", index))):
             # **A process substitution is a command the shell runs**, and until
             # the redirection strip could consume one it was reached only by
             # the run splitter — which sees it while it stands as its own run
@@ -2666,12 +2718,9 @@ def _offence(command, depth, judged):
     # found the quote and un-sigilled it, leaving `shlex` a literal
     # `\x70ush` that is not `push`. Both raised in an adversarial audit; the
     # bypass was live on `main` too, the over-refusal was this branch's own.
-    if undecodable_dollar_quote(resolved):
-        return (
-            "a `$'…'` or `$\"…\"` carries an escape this guard does not "
-            "decode, so it cannot tell what the word says; refusing rather "
-            "than reading part of it."
-        )
+    unreadable = unreadable_dollar_quote(resolved)
+    if unreadable is not None:
+        return unreadable
 
     # `strip_dollar_quotes` turns `$'…'` and `$"…"` into the ordinary quoting
     # `shlex` resolves, on the string just checked.

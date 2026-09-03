@@ -643,14 +643,24 @@ own line rather than sending a reader to a file that does not hold it.
   `stdin_scripts`, one function either side of the fix; and `stdin_scripts`
   had a parse of a shell WORD of its own, ending a here-string at the first
   metacharacter, which is the fail-open `word_end` already had recorded in its
-  own docstring. Each fix was correct, and each left the next copy of the model
-  standing.
+  own docstring; and then the escape-awareness taught to the quote scanner was
+  missing from all **five** of its siblings at once, so one prefix carrying an
+  escaped ANSI-C quote walked past four passes in a single command. Each fix
+  was correct, and each left the next copy of the model standing.
   **Several were fail-open** — a force push to `main` admitted,
   more than once — because a model that merely *differs* from the shell's is
   wrong in whichever direction the difference falls, and only one of those
   directions is loud. Where a tool has to agree with another parser, make every
   caller share one implementation of the part that disagrees, and pin the
   agreement with cases in both directions.
+
+  **And when the count of copies stops being small, stop fixing them one at a
+  time.** Five scanners each held their own reading of bash's quoting, and four
+  rounds of review found four separate consequences of that before the fifth
+  found all five at once. What closed it was not a sixth careful copy but a
+  primitive the copies became adapters over — one walk, two public shapes. The
+  signal to make that move is not elegance, it is having fixed the same
+  sentence in a third place.
 
   **And when two of those models feed each other, interleave them rather than
   alternating.** The heredoc scanner needs the body spans to read the command
