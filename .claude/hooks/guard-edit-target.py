@@ -44,16 +44,27 @@ folds nothing and a differently-cased checkout prefix matches no anchor at
 all, which is the branch that admits. A case-insensitive mount on Linux is the
 same case again, which is why the question is asked of the mount.
 
-**The residual, stated rather than left to be found.** The subject is a target
-spelled *inside* a checkout this session is standing in. A path spelled
-entirely outside one — an absolute path into a scratch directory, or into the
-user's own `~/.claude` — is not judged here, because the harness writes its own
-state that way and refusing it would take the session's memory and scratchpad
-with it. Nothing in the exposure this closes can spell one: `/review-grok`'s
-site contract admits one plain repository-relative path per row, with no
-leading slash, no drive letter and no `..` segment, and the adjudicator drops a
-row that is not. A guard for the out-of-tree half would have to be a rule about
-which out-of-tree paths are legitimate, which is a different file's argument.
+**The residual, stated rather than left to be found — and it is narrower than
+it reads.** A path this file cannot place under any anchor is admitted **only
+when it also resolves outside every one of them**: an absolute path into a
+scratch directory, or into the user's own `~/.claude`, which the harness writes
+its own state through and refusing would take the session's memory and
+scratchpad with it. A spelling no anchor recognises that nevertheless *lands
+inside* a checkout is refused instead, whatever alphabet it is in, because the
+matcher then judged a string that is not this file. Nothing in the exposure
+this closes can spell either: `/review-grok`'s site contract admits one plain
+repository-relative path per row, with no leading slash, no drive letter and no
+`..` segment, and the adjudicator drops a row that is not. A guard for the
+out-of-tree half would have to be a rule about which out-of-tree paths are
+legitimate, which is a different file's argument.
+
+**And one whole grammar is refused rather than judged**, which is the exception
+to "this file holds no list": on Windows a spelling beginning `\\` — the
+extended-length prefix, the device prefix, a UNC share — skips the very
+normalisation a permission rule's matcher depends on, so the matcher never sees
+the target at all. Measured, both forms wrote into a denied directory. The one
+exemption is an anchor in that same grammar containing the target, which is a
+repository genuinely on a network share.
 
 Protocol: PreToolUse, matcher `Edit|Write|NotebookEdit|MultiEdit`. Exit 0 and
 print nothing to allow; print the deny JSON to refuse. The JSON form carries a
