@@ -235,6 +235,19 @@ def offence(event):
     # the wrong answer for a `..` that follows a link, so the lexical form is
     # used only to locate the target under an anchor. Where the two disagree
     # the call is refused, which is the direction this has to fail in.
+    #
+    # **A `..` that traverses no link is admitted here, and that is a decision
+    # backed by a measurement rather than an oversight.** The argument for
+    # refusing it is that `docs/../.claude/hooks/x` carries no `.claude/**`
+    # spelling, so a matcher reading the string would not deny it — and the
+    # harness does not read the string. Measured in this checkout, with
+    # `.claude/sandbox/**` denied: a `Write` to
+    # `docs/../.claude/sandbox/probe-tmp.txt` was refused with the harness's own
+    # "denied by your permission settings", while `docs/../docs/probe-tmp.txt`
+    # was created — so the path is normalised and then matched, and `..` is not
+    # what was rejected. Refusing every `..` here would therefore buy nothing
+    # against the deny list and would refuse the second of those two, which is
+    # innocent traffic. Raised by Copilot; the premise is what failed.
     joined = spelled if os.path.isabs(spelled) else os.path.join(cwd, spelled)
     lexical = os.path.normpath(os.path.abspath(joined))
     resolved = os.path.realpath(joined)

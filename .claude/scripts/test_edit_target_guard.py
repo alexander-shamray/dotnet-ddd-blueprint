@@ -326,6 +326,28 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
         self.assertAdmitted(
             os.path.join(self.root, "docs", "..", "docs", "chapter.md"))
 
+    def test_a_dotdot_into_a_denied_tree_is_the_deny_lists_subject_not_this_one(self):
+        # **Stated as a passing case because the argument for the other verdict
+        # is a good one and rests on a premise this harness does not have.**
+        # `docs/../.claude/scripts/helper.sh` carries no `.claude/**` spelling,
+        # so a matcher reading the string would not deny it — and the harness
+        # does not read the string. Measured in the real checkout, with
+        # `.claude/sandbox/**` denied: a `Write` to
+        # `docs/../.claude/sandbox/probe-tmp.txt` was refused with the
+        # harness's own "denied by your permission settings", while
+        # `docs/../docs/probe-tmp.txt` was created — the path is normalised and
+        # then matched, and `..` is not what was rejected.
+        #
+        # So this guard admits it, because the file it lands on is the file the
+        # path names once the shell of `..` is gone, and no link was traversed.
+        # Refusing every `..` would buy nothing against the deny list and would
+        # refuse the second of those two spellings, which is innocent traffic.
+        # Raised by Copilot; if the harness ever stops normalising, this case
+        # is the one to invert and the paragraph in the hook is the one to
+        # rewrite.
+        self.assertAdmitted(os.path.join(
+            self.root, "docs", "..", ".claude", "scripts", "helper.sh"))
+
     def test_a_relative_path_is_resolved_against_the_events_cwd(self):
         # The harness sends absolute paths today. This is what the hook does if
         # that changes, and the answer must not be "resolve against whatever

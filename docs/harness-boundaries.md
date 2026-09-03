@@ -783,6 +783,20 @@ Requiring agreement is also what makes an environment-supplied
 `CLAUDE_PROJECT_DIR` safe to take as given, since an added anchor can then
 only narrow the guard and never widen it.
 
+**A `..` that traverses no link is admitted, and the reason is a measurement
+of the harness rather than a judgement about paths.** The case for refusing it
+is that `docs/../.claude/hooks/x` carries no `.claude/**` spelling, so a
+matcher reading the string would not deny it. **The matcher does not read the
+string.** Measured in this checkout with `.claude/sandbox/**` denied: a `Write`
+to `docs/../.claude/sandbox/probe-tmp.txt` was refused with the harness's own
+*"denied by your permission settings"*, while `docs/../docs/probe-tmp.txt` was
+created — so a path is normalised and then matched, and `..` is not what was
+rejected. Refusing every `..` in the guard would buy nothing against the deny
+list and would refuse the second of those two spellings, which is innocent
+traffic. Raised by Copilot, and the premise is the half that failed; a passing
+case pins the verdict and names what to invert if the harness ever stops
+normalising.
+
 **Its residual is the half the harness itself needs, stated rather than
 rounded up.** The subject is a target spelled *inside* a checkout the session
 is standing in; a path spelled entirely outside one is not judged, because
