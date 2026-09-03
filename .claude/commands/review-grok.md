@@ -101,9 +101,10 @@ pointer becomes a third copy of it.
    finding that asks for a restated count, a "since PR-NN" sentence, or a
    value quoted a second time where the owner site is already correct a
    `reject-rule` naming that section rather than an `accept` that widens the
-   diff. It enumerates, locates the owner and every site inside the changed
-   files, adjudicates against the blueprint and returns the record; this
-   step does none of that itself.
+   diff. It enumerates, locates the owner and every site the review names
+   — it holds no list of changed files, and does not go looking for copies
+   the review did not name — adjudicates against the blueprint and returns
+   the record; this step does none of that itself.
    **Spawn nothing else**: the frontmatter denies every other registered type
    by name, because the harness has no "only this type" allow, and a new
    agent under `.claude/agents/` is admitted here until this line names it.

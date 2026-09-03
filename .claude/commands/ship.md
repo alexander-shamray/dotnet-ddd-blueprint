@@ -674,10 +674,11 @@ same argument as never calling a branch clean because asking failed.
    (`docs/change-locality.md` §5): `/validate-blueprint` after Class C, or
    after an edit to a file in that audit's scope — a chapter or appendix,
    `docs/roadmap.md`, `docs/testing.md`; `/check-links` when the change
-   touched links, cross-references or nav footers. A Class A change runs
-   neither, and its PR body says so under the rule below rather than
-   claiming a run that did not happen — a body that names the class has
-   named the reason.
+   touched links, cross-references or nav footers. The link trigger does
+   not depend on the class — a Class A change may edit an alert's runbook,
+   and a runbook carries links. A Class A change never runs the audit, and
+   its PR body says so under the rule below rather than claiming a run that
+   did not happen — a body that names the class has named the reason.
 
    **Before `/commit`, not after.** A defect found after the commit costs a
    second commit or a rewrite; found here it is an edit. This is also the step a

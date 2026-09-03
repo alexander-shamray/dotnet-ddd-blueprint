@@ -110,21 +110,21 @@ marks both.
 
 ## 4. The work, in order
 
-Each step is its own PR and is itself a Class D change — whose tree set is
-`docs/`, `.claude/`, `.github/` and `deploy/`, so steps 5 and 9 are inside
-it — except step 8, which is Class B per chapter. Steps marked ∥ can run in
-parallel with each other once their prerequisite has merged. Nothing here is
-done inside a feature PR.
+Each step is its own PR and is itself a Class D change — whose set is
+`docs/`, `.claude/`, `.github/`, `deploy/` and `CLAUDE.md`, so every step
+below is inside it — except step 8, which is Class B per chapter. Steps
+marked ∥ can run in parallel with each other once their prerequisite has
+merged. Nothing here is done inside a feature PR.
 
 ### Step 0 — land the contract and stop the bleeding
 
 Prerequisite for everything else. After it, feature PRs may already skip the
 tour.
 
-- Write `docs/change-locality.md`: sections 3 of this plan (trust order, the
-  restated rule, classes and touch sets, partitions and mutexes) and a
-  ten-line checklist. It replaces `agent-locality.md`, which is untracked and
-  is deleted.
+- Write `docs/change-locality.md`: the source-of-trust order, the rule that
+  every fact has one owner, the change classes with their touch sets, the
+  partitions and mutex surfaces, the procedure, and a ten-line checklist.
+  It replaces `agent-locality.md`, which is untracked and is deleted.
 - `CLAUDE.md`: replace the one-rule section's "grep the whole blueprint"
   paragraphs with a pointer to that file. Nothing else in `CLAUDE.md` moves
   yet; step 2 rewrites it whole.
@@ -227,7 +227,9 @@ when no command or chapter tells an agent to update Appendix D.
 `ci.yml`, on `pull_request` including `edited`):
 
 - reads the PR body's `| Class |` and `| Touch set |` rows and the diff's
-  file list, and fails on a body carrying neither;
+  file list, and fails unless the body carries exactly one row of each —
+  the pair `pr-locality.sh` already requires, because half the metadata
+  makes half the gate impossible;
 - holds the class → allowed-path map in one YAML file the gate reads, and
   `docs/change-locality.md`'s table becomes a citation of that file, so the
   map exists once;

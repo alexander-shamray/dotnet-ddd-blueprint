@@ -69,14 +69,14 @@ change quoted from the review is a risk with no benefit.
    defect stated".
 2. **Locate each one, owner first.** `Grep` for the identifier, number or
    phrase it names, starting from the owner — the code symbol for a value,
-   the ADR or the one chapter section for a rule. Record every site
-   **inside the files the review reports as changed**, each as its own
-   block: the parent fixes those in one pass, and a record naming one site
-   of three converts a consistent error into an inconsistent one. A site
-   outside the changed files is not recorded — it is a restatement
-   `docs/change-locality.md` §2 leaves for the plan, and a review of this
-   branch is not the moment to widen its diff. A finding you cannot locate
-   is `unlocatable`, never assumed true.
+   the ADR or the one chapter section for a rule. Record the owner site
+   and **every site the review itself names**, each as its own block: the
+   parent fixes those in one pass. Do not search the corpus for further
+   copies — you have no list of what the branch changed, and a copy the
+   review did not name is a restatement `docs/change-locality.md` §2 leaves
+   for the plan, so leaving it is what the contract asks and not an
+   inconsistency you introduced. A finding you cannot locate is
+   `unlocatable`, never assumed true.
 3. **Adjudicate against the blueprint, not the reviewer.** The bar is two
    statements that cannot both be true, or a statement that cannot be true of
    the system described. Confidence in the review's prose is not evidence;
