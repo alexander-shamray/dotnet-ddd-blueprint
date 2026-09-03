@@ -787,20 +787,36 @@ Requiring agreement is also what makes an environment-supplied
 only narrow the guard and never widen it.
 
 **A spelling can also evade the matcher through the path grammar rather than
-through a link, and one of those is measured here.** Windows' extended-length
-(`\\?\`) and device (`\\.\`) prefixes exist precisely to skip the
-normalisation a permission rule's matcher depends on. Measured in this
-checkout with `.claude/sandbox/**` denied: a `Write` to
-`\\?\C:\dev\ashamray\.claude\sandbox\probe-unc.txt` **was created**, where the
-plain spelling of the same file is refused. The guard refuses that prefix
-outright — it can only allow or deny, so it cannot hand the matcher the plain
-spelling it would have judged — and nothing here emits one, since the prefix
-is for paths past `MAX_PATH`. **The 8.3 alias is the same class in the other
-alphabet and needs no special case**: `.claude` has the alias `CLAUDE~1` on
-this volume, `realpath` answers with the long name, and the spelling therefore
-disagrees with the file. Whether the matcher alone would have refused *that*
-one is untested — the hook runs first — so it stands as defence in depth
-rather than as a measured gap.
+through a link, and two of those were measured here — both admitted before the
+guard refused them.** Windows names one file in more than one alphabet: the
+extended-length prefix `\\?\` and the device prefix `\\.\`, which exist
+precisely to skip the normalisation a matcher depends on, and the UNC form
+`\\server\share\…`, which reaches the local disk through the administrative
+shares. With `.claude/sandbox/**` denied, a `Write` to
+`\\?\C:\dev\ashamray\.claude\sandbox\probe-unc.txt` **was created**, and so was
+one to `\\localhost\C$\dev\ashamray\.claude\sandbox\probe-share.txt`; the plain
+spelling of either file is refused. Both probe files were deleted.
+
+**So the guard refuses the family rather than the prefixes** — every spelling
+beginning `\\`, unless a checkout is itself named that way, which is a
+repository on a network share and the one legitimate use. Enumerating the
+prefixes is the deny-list shape this repository has rejected twice, and the UNC
+form is exactly what such a list missed. Refused rather than resolved because a
+hook can only allow or deny: it cannot hand the matcher the plain spelling it
+would have judged. **The 8.3 alias is the same class again and needs no special
+case**: `.claude` has the alias `CLAUDE~1` on this volume, `realpath` answers
+with the long name, and the spelling therefore disagrees with the file.
+Whether the matcher alone would have refused that one is untested — the hook
+runs first — so it stands as defence in depth rather than as a measured gap.
+
+**Unicode normalisation is the same shape on a different platform.** A
+case-insensitive APFS volume is also insensitive to normalisation, so `é`
+composed and `e` plus a combining accent name one directory there and two
+strings in a comparison — a checkout prefix spelled in the other form matched
+no anchor and reached the branch that admits. The guard composes to NFC
+unconditionally, which needs no probe of the mount: composing can make two
+spellings of one path compare equal and can never make two paths look like
+one. Raised by Copilot.
 
 **A `..` that traverses no link is admitted, and the reason is a measurement
 of the harness rather than a judgement about paths.** The case for refusing it
