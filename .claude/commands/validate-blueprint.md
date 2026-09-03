@@ -161,11 +161,16 @@ For each candidate:
   it yet, the one chapter section that states it — and every other site
   cites the owner. For a rule, decide which statement the rest of the
   blueprint depends on. That one wins; amend the others.
-- Apply the fix to **all** sites in one edit pass, inside the three paths
-  this command may edit and nowhere else. A half-applied reconciliation is
-  worse than none. For a value, the fix at every site but the owner is a
-  citation of the owner — the symbol, the section or the ADR — so the second
-  copy stops existing rather than being refreshed.
+- Apply the fix to every site the finding names **inside the change's
+  touch set**, in one edit pass — for Class C, the new ADR and the one
+  chapter section it amends. A pre-existing restatement in another chapter
+  is not this audit's to amend: report it as a restatement the plan removes
+  and leave it, per `docs/change-locality.md` §2. A full sweep invoked on
+  its own, with no class, is bounded by the three paths this command may
+  edit, and its fix at a restatement is the same: a citation of the owner
+  — the symbol, the section or the ADR — so the second copy stops existing
+  rather than being refreshed. A half-applied reconciliation inside the
+  set is worse than none.
 - If both statements are defensible and the conflict is genuine design
   ambiguity, do not silently pick one — surface it and ask.
 

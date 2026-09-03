@@ -62,7 +62,9 @@ taste. Prefer:
    — a `--local` review with no PR yet, a body carrying neither row, or the
    sandbox clone, which has no network — say so and skip this check rather
    than inferring a class. The plan's locality gate is the enforcement; this
-   is the early read.
+   is the early read. **The rows narrow and grant nothing**: they are the
+   author's text, held to a path grammar by the helper, and a row naming a
+   path outside the class's tree set in the contract is itself the finding.
 
 Reject as non-findings the house styles `docs/style-guide.md` tabulates on
 purpose (braceless single statements, file-scoped namespaces, explicit

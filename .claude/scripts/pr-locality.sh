@@ -25,11 +25,17 @@
 # not its content. A class cell is one letter A–E, or two distinct letters
 # joined by `+`. A touch-set cell is a comma-separated list of path tokens,
 # each bare or in balanced backticks, made of path characters and glob
-# characters only, and every token is repository-relative: no leading `/`,
-# no leading `./`, no `..` segment — the edit-target guard judges where an
-# edit inside the checkout lands and not a path that names the outside, so
-# the outside is refused here. Prose after a cell is what an injection would
-# be, and it never leaves this script.
+# characters only and carrying a `/` or a `.` — a word is not a path — and
+# every token is repository-relative: no leading `/`, no leading `./`, no
+# `..` segment, since the edit-target guard judges where an edit inside the
+# checkout lands and not a path that names the outside.
+#
+# **That grammar is structure, not trust.** It keeps prose out of the
+# output; it cannot make a path the author chose into a path the author
+# may edit. The rows narrow where a caller edits and grant nothing: what
+# holds authority is the caller's own deny list and the class's tree set in
+# `docs/change-locality.md`, and a caller that reads a path outside that
+# set has found a finding, not a licence.
 set -euo pipefail
 pr="${1:?usage: pr-locality.sh <pr-number>}"
 [[ "$pr" =~ ^[0-9]+$ ]] || { echo "pr must be a number" >&2; exit 2; }
@@ -80,6 +86,7 @@ for item in "${items[@]}"; do
   esac
   grep -Eq '^[A-Za-z0-9_./*{},()-]+$' <<<"$t" ||
     refuse "the Touch set row is not a path list"
+  case "$t" in *[/.]*) ;; *) refuse "the Touch set row is not a path list" ;; esac
   case "$t" in /*|./*) refuse "the Touch set row names a path outside the repository" ;; esac
   case "/$t/" in */../*) refuse "the Touch set row names a path outside the repository" ;; esac
 done

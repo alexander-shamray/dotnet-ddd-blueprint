@@ -110,9 +110,9 @@ marks both.
 
 ## 4. The work, in order
 
-Each step is its own PR and is itself a Class D change — whose set is
-`docs/`, `.claude/`, `.github/`, `deploy/` and `CLAUDE.md`, so every step
-below is inside it — except step 8, which is Class B per chapter. Steps
+Each step is its own PR and is itself a Class D change — the contract's row
+for D covers every tree the steps below touch — except step 8, which is
+Class B per chapter. Steps
 marked ∥ can run in parallel with each other once their prerequisite has
 merged. Nothing here is done inside a feature PR.
 
@@ -310,9 +310,9 @@ partitions, the mutex list, and "never write a count". Three departures:
 
 - `docs/superpowers/` stays frozen, as today.
 - No ADR is edited; step 3 moves text verbatim.
-- `.claude/settings.json` has an uncommitted change on this branch that
-  belongs to PR #185's deny-list restore; this plan does not depend on it and
-  no step edits that file before step 0's command edits have merged.
+- `.claude/settings.json` is the harness's own boundary and its deny list
+  is lifted and restored by the repository owner, never by a step; no step
+  here depends on its content, and none edits it.
 - The blueprint's rules do not change anywhere in steps 0 to 9. This is a
   change to where facts live and who may write them, not to what they say.
 
