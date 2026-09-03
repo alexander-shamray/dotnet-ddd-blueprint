@@ -124,15 +124,20 @@ def offence(event):
     if tool not in EDITING_TOOLS:
         return None
 
-    tool_input = event.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
-        return None
+    # A `tool_input` that is not an object goes to the same refusal as one
+    # carrying no path, and the two used to differ: the shape check returned
+    # `None` — admit — while the missing key refused. They are the same
+    # statement about the same call, which is that this file cannot see where
+    # the write lands, and only one of the two answers is the one that fails
+    # closed.
+    tool_input = event.get("tool_input")
     spelled = None
-    for key in PATH_KEYS:
-        value = tool_input.get(key)
-        if isinstance(value, str) and value:
-            spelled = value
-            break
+    if isinstance(tool_input, dict):
+        for key in PATH_KEYS:
+            value = tool_input.get(key)
+            if isinstance(value, str) and value:
+                spelled = value
+                break
     if spelled is None:
         return (
             f"guard-edit-target: {tool} carries no file path this guard can "

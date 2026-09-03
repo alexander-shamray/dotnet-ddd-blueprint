@@ -16,6 +16,7 @@ allowed tree and whose resolution is not. If neither is available this module
 fails rather than passing quietly.
 """
 
+import importlib.util
 import json
 import os
 import re
@@ -295,6 +296,28 @@ class WhatThisGuardIsNotTheSubjectOf(GuardCase):
         reason = self.assertRefused(None)
         self.assertIn("no file path", reason)
 
+    def test_a_tool_input_that_is_not_an_object_is_refused_the_same_way(self):
+        # The same statement about the same call — this file cannot see where
+        # the write lands — and it used to get the opposite answer: a
+        # `tool_input` of the wrong shape was admitted while a missing key was
+        # refused. One of those two fails closed.
+        for payload in ([], "file_path", 7):
+            with self.subTest(payload=payload):
+                event = {
+                    "hook_event_name": "PreToolUse",
+                    "cwd": self.root,
+                    "tool_name": "Edit",
+                    "tool_input": payload,
+                }
+                result = subprocess.run(
+                    [sys.executable, str(HOOK)],
+                    input=json.dumps(event), capture_output=True, text=True,
+                )
+                self.assertEqual(0, result.returncode)
+                verdict = json.loads(result.stdout)["hookSpecificOutput"]
+                self.assertEqual("deny", verdict["permissionDecision"])
+                self.assertIn("no file path", verdict["permissionDecisionReason"])
+
     def test_a_malformed_event_does_not_take_the_session_down(self):
         # The one deliberate fail-OPEN, argued in the hook and pinned here the
         # way the argv guard's is: refusing every write because this file
@@ -317,10 +340,27 @@ class TheWiringWithoutWhichNoneOfTheAboveRuns(unittest.TestCase):
         settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
         return settings.get("hooks", {}).get("PreToolUse", [])
 
+    def guard_module(self):
+        """The hook imported directly, for the one list only it holds."""
+        spec = importlib.util.spec_from_file_location("guard_edit_target", HOOK)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     def test_the_hook_is_registered_for_every_tool_that_writes(self):
         # The subject is the matcher, not the verdict: every case above passes
         # against a hook the harness never calls, and a matcher naming `Edit`
         # alone would leave `Write` — the tool that creates the file — unjudged.
+        #
+        # **The asserted set is read from the hook rather than written out
+        # here**, and the first version of this case wrote out three of the
+        # four. `MultiEdit` was in the matcher and in `EDITING_TOOLS` and in no
+        # assertion, so dropping it from the matcher would have left that tool
+        # unguarded with this test still green — the gate-coverage failure
+        # `CLAUDE.md` calls this repository's most-repeated, inside the test
+        # written to catch it. Raised by Copilot against the first push.
+        # Deriving the set is what makes a tool added to the hook a red test
+        # rather than a silent gap.
         matchers = [
             (entry.get("matcher") or "", entry.get("hooks") or [])
             for entry in self.registered()
@@ -330,11 +370,23 @@ class TheWiringWithoutWhichNoneOfTheAboveRuns(unittest.TestCase):
             if any(HOOK.name in (h.get("command") or "") for h in hooks)
         ]
         self.assertTrue(mine, f"{HOOK.name} is registered for nothing")
-        for tool in ("Edit", "Write", "NotebookEdit"):
+        tools = self.guard_module().EDITING_TOOLS
+        # The positive control: an empty or shrunken list would satisfy the
+        # loop below by having nothing to check, which is the vacuous pass this
+        # repository keeps finding in its own gates.
+        self.assertGreaterEqual(len(tools), 4, f"EDITING_TOOLS shrank: {tools}")
+        for tool in tools:
             with self.subTest(tool=tool):
                 self.assertTrue(
                     any(re.fullmatch(matcher, tool) for matcher in mine),
                     f"no registered matcher selects {tool}: {mine}")
+
+        # And the other direction, because a matcher wider than the hook's own
+        # list would send it calls it answers by refusing for want of a path.
+        for matcher in mine:
+            for alternative in matcher.split("|"):
+                with self.subTest(matcher=matcher, alternative=alternative):
+                    self.assertIn(alternative, tools)
 
     def test_the_hook_runs_on_the_312_floor(self):
         commands = [
