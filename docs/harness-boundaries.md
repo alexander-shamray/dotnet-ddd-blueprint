@@ -862,6 +862,22 @@ compares two concrete paths rather than deciding what counts as a root. Where
 either path does not exist yet — the ordinary `Write` — there is nothing to
 compare and the folded verdict stands. Raised by Copilot.
 
+**The final review round argued that this check *admits* an alias, and it has
+the direction backwards — recorded rather than acted on.** The block runs only
+where `same(...)` is already true, which is the branch that **admits**; the
+refusal beneath it is guarded by `not same(...)`. It can therefore only turn an
+admission into a refusal, and deleting it would admit strictly more. The
+narrower half of the remark is true: the *folded comparison* it sits inside can
+equate two spellings a case-sensitive child keeps apart. For a deny to be
+evaded that way, `resolved` and `expected` must differ **purely** by case or
+normalisation — which puts them at the same position under the same parents —
+and a deny pattern must then name one of those spellings and not the other.
+That is the residual, stated rather than closed. **Failing closed on the
+missing-leaf case was the other suggestion, and it is refused on this guard's
+own rule**: `expected` rarely exists when a `Write` creates a file, so refusing
+there would fire on the commonest innocent call the hook sees, and a guard that
+fires on innocent traffic is one somebody turns off.
+
 **A `..` that traverses no link is admitted, and the reason is a measurement
 of the harness rather than a judgement about paths.** The case for refusing it
 is that `docs/../.claude/hooks/x` carries no `.claude/**` spelling, so a
