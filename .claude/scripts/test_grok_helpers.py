@@ -1904,11 +1904,16 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
 
     def test_each_route_requires_the_line_that_is_true_of_it(self):
         # **The point of #184, stated as a test rather than as a sentence.**
-        # The helper was the only sanctioned route to file an issue and it
-        # required every body to claim a sweep filed it and a second read-only
-        # auditor confirmed it. An issue filed by hand out of a review triage
-        # was made to assert both, and #183 carried that claim until it was
-        # edited afterwards.
+        # The helper required a sweep's provenance from every body it
+        # accepted, hand filings through it included — so an issue filed by
+        # hand out of a review triage was made to claim that a sweep filed it
+        # and that a second read-only auditor confirmed it. #183 carried that
+        # claim until it was edited afterwards.
+        #
+        # It is the sweeps' only route rather than every issue's: nothing
+        # denies a session's raw `gh issue create`. An earlier revision of this
+        # comment said otherwise, which is the same overstatement the helper's
+        # own header carried and this pull request corrected there.
         #
         # So neither line is accepted under the other's route. That is what
         # keeps the sentence worth reading: a claim every issue makes is a
@@ -5358,6 +5363,22 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertRefused(command)
 
+        # **`$'…'` is a quoting form, and reading its `$` as an ordinary
+        # character was the same defect one spelling along.** `<<$'EOF'` names
+        # `EOF`; taking the delimiter for `$EOF` meant the real `EOF` line
+        # terminated nothing, so every command after it — the push included —
+        # was swallowed as body text. Raised in review; verified allowed.
+        self.assertRefused(
+            "git commit -F - <<$'EOF'\nEOF\ngit push origin +HEAD:main\n$EOF")
+
+        # And the direction an UNDECODABLE delimiter errs in, which is the
+        # asymmetry that makes it a decision: `$'…'` decodes escapes, this file
+        # does not, and a delimiter guessed too long swallows commands. So one
+        # carrying a backslash opens no body at all and the lines after it stay
+        # commands — a false positive rather than a force push.
+        self.assertRefused(
+            "git commit -F - <<$'E\\x4fF'\nEOF\ngit push origin +HEAD:main\nEOF")
+
     def test_a_heredoc_body_performs_no_process_substitution(self):
         # **The over-refusal the previous round introduced, and it is the
         # failure this file's docstring says gets a guard turned off.** A bare
@@ -5377,6 +5398,35 @@ class TheGitArgvGuard(unittest.TestCase):
         # The control on the other side: a command line still performs one, so
         # the narrowing must not reach the case the previous round closed.
         self.assertRefused("git log > >(git push origin +HEAD:main)")
+
+    def test_a_line_continuation_is_removed_before_anything_reads_a_word(self):
+        # **bash deletes a backslash-newline before it tokenises**, so
+        # `git 2\<newline>>&1 push origin +HEAD:main` reaches git as
+        # `git push origin +HEAD:main`. The guard read the backslash as an
+        # ordinary escape: the descriptor scan stopped at it, `>&1` was
+        # stripped alone, and `2` was left sitting where the subcommand goes.
+        # The bare form does the same with no descriptor at all.
+        #
+        # Raised in review. **Both verified allowed against `main` as well as
+        # against the commit before the fix** — the first measurement of this
+        # used a backslash and the letter `n` rather than a real newline, and
+        # said the guard was already refusing them. A test that constructs the
+        # bytes it means is the answer to that, which is why `\\\n` is written
+        # rather than pasted.
+        for command in (
+            "git 2\\\n>&1 push origin +HEAD:main",
+            "git \\\npush origin +HEAD:main",
+            "git push \\\norigin +HEAD:main",
+            "git \\\nlog --output=/tmp/probe",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The honest form this repository actually writes, and the one place a
+        # continuation is NOT removed: inside single quotes a backslash is
+        # literal, so the pair is two ordinary characters of an argument.
+        self.assertAdmitted("git log --oneline \\\n  -5")
+        self.assertAdmitted("git commit -m 'a \\\n literal'")
 
     def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
         # The boundary of the exemption, and it is bash's own rule: digits are

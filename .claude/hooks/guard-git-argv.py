@@ -179,9 +179,16 @@ PROTECTED_BRANCHES = {"main"}
 # while bash ran the push. Raised in review; verified allowed. So the word is
 # one or more fragments — single-quoted, double-quoted, escaped or bare — and
 # `_heredoc_delimiter` below does the quote removal the shell does.
+#
+# **`$'…'` is a quoting form and reading its `$` as bare was a fail-open.**
+# `<<$'EOF'` names `EOF`; taking the `$` for an ordinary character made the
+# delimiter `$EOF`, so a script terminating at a real `EOF` line had every
+# command after it swallowed as body text — `git push origin +HEAD:main`
+# included. Raised in review; verified allowed. `$"…"` is the locale form and
+# is listed beside it for the same reason.
 HEREDOC = re.compile(
     r"<<(?P<dash>-?)[ \t]*"
-    r"(?P<word>(?:\x27[^\x27]*\x27|\x22[^\x22]*\x22|\\.|"
+    r"(?P<word>(?:\$?\x27[^\x27]*\x27|\$?\x22[^\x22]*\x22|\\.|"
     r"[^\s;&|<>()\x27\x22\\])+)"
 )
 
@@ -196,12 +203,31 @@ def _heredoc_delimiter(word):
     `EOF` and all take their bodies verbatim; only a wholly bare `<<EOF`
     expands.
 
+    **`$'…'` decodes escapes, and this returns `None` rather than guess one.**
+    A delimiter the guard gets wrong is not symmetric: too long and the body
+    swallows the commands after it, which is the fail-open this whole function
+    exists to close. So an ANSI-C fragment carrying a backslash — the only part
+    of the form that needs decoding — makes the delimiter unknown, and
+    `heredoc_spans` then opens no body at all, leaving every following line to
+    be judged as the command it may be. Erring toward refusing is the direction
+    that costs a false positive rather than a force push.
+
     The pattern admits a fragment only in complete form, so every quote opened
     here is closed and the searches below cannot fail.
     """
     out, index, quoted = [], 0, False
     while index < len(word):
         char = word[index]
+        if char == "$" and word[index + 1:index + 2] in ("'", '"'):
+            quote = word[index + 1]
+            close = word.index(quote, index + 2)
+            body = word[index + 2:close]
+            if quote == "'" and "\\" in body:
+                return None, False
+            out.append(body)
+            index = close + 1
+            quoted = True
+            continue
         if char in "'\"":
             close = word.index(char, index + 1)
             out.append(word[index + 1:close])
@@ -346,6 +372,10 @@ def heredoc_spans(command):
                 # `<<\EOF` is a quoted delimiter to bash the same way `<<'EOF'`
                 # is, and `<<E"OF"` is one in parts.
                 delimiter, expands = _heredoc_delimiter(match.group("word"))
+                if delimiter is None:
+                    # A delimiter this file cannot decode opens no body, so the
+                    # lines after it stay commands and are judged as such.
+                    continue
                 openers.append(
                     (match.end(), expands, delimiter, bool(match.group("dash"))))
 
@@ -430,6 +460,56 @@ def strip_comments(command):
         for index, _in_quotes, in_comment in shell_positions(command)
         if not in_comment
     )
+
+
+def join_continuations(command):
+    """`command` with every line continuation removed, as bash removes them.
+
+    **A backslash-newline is deleted before the shell tokenises anything**, so
+    `git 2\\<newline>>&1 push origin +HEAD:main` reaches git as
+    `git push origin +HEAD:main` with `2>&1` applied — and the guard, reading
+    the backslash as an ordinary escape, stopped the descriptor scan at it,
+    stripped `>&1` alone and left `2` sitting where the subcommand goes. The
+    bare form `git \\<newline>push origin +HEAD:main` did the same thing with
+    no descriptor at all. Both raised in review, both verified allowed, and
+    both allowed on `main` before this file had a redirection strip.
+
+    `separate_lines` deliberately keeps the pair — a continuation is not a
+    separator — and that is still true; what was missing is that it is not an
+    argument either. It is removed here, before anything reads a word, which is
+    the order bash uses.
+
+    **Inside single quotes a backslash is literal**, so a continuation there is
+    two ordinary characters and stays. Inside double quotes bash removes it,
+    and so does this.
+    """
+    out, index = [], 0
+    in_single = in_double = False
+    while index < len(command):
+        char = command[index]
+        if in_single:
+            if char == "'":
+                in_single = False
+            out.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(command):
+            if command[index + 1] == "\n":
+                index += 2
+                continue
+            # Any other escape is passed through whole, so an escaped quote
+            # never toggles the state below.
+            out.append(char)
+            out.append(command[index + 1])
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = True
+        elif char == '"':
+            in_double = not in_double
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def separate_lines(command):
@@ -1307,8 +1387,12 @@ def offence(command, depth=0):
     # that wants the others' work done first: a redirection inside a heredoc
     # body or a comment is not one bash performs, and there is nothing left of
     # either by the time it runs.
+    # `join_continuations` sits after `strip_comments` because a backslash at
+    # the end of a COMMENT continues nothing — bash ends a comment at the
+    # newline — so joining first would have swallowed the next line into it.
     stripped = strip_redirections(
-        separate_lines(strip_comments(strip_heredocs(command))))
+        separate_lines(
+            join_continuations(strip_comments(strip_heredocs(command)))))
     try:
         lexer = shlex.shlex(stripped, posix=True, punctuation_chars=True)
         # Comments are already gone, and `shlex` would take a second, wider view
