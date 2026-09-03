@@ -388,6 +388,27 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
             measured = False
         self.assertEqual(measured, guard.case_insensitive(self.root))
 
+    def test_a_checkout_whose_name_has_no_letters_is_still_asked(self):
+        # **The probe has to flip something, and the basename is not always
+        # flippable.** A checkout at `/Users/me/123` has no cased character in
+        # its last component, so a probe that only flips the basename falls to
+        # the platform default — `False` on macOS, where the mount folds — and
+        # a linked target spelled `/users/me/123/...` matches no anchor and
+        # falls through unjudged. Raised by Copilot.
+        #
+        # The assertion ties the numeric root to a lettered one on the same
+        # filesystem rather than to a platform: whatever the mount answers for
+        # the parent, it must answer for the child, because they are the same
+        # mount. A platform-default fallback breaks that on macOS and on any
+        # case-insensitive mount, which is where it mattered.
+        guard = self.guard_module()
+        numeric = os.path.join(self.outside, "123456")
+        os.makedirs(os.path.join(numeric, "docs"), exist_ok=True)
+        self.assertEqual(guard.case_insensitive(self.outside),
+                         guard.case_insensitive(numeric))
+        self.assertEqual(guard.case_insensitive(numeric),
+                         guard.case_insensitive(os.path.join(numeric, "docs")))
+
     def test_a_differently_cased_checkout_prefix_is_still_judged(self):
         # **The branch that admits is the one a case difference reaches.** On a
         # folding filesystem `/Users/x/Repo` and `/users/x/repo` are one

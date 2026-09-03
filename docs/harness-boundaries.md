@@ -732,7 +732,10 @@ was never a statement about what this command is about to edit.
 `.claude/hooks/guard-edit-target.py` is the check that premise stood in for
 — the second hook in this repository, and the argument for it is one
 sentence: **an edit target must be the file its path spells.** It resolves
-the target of every `Edit`, `Write` and `NotebookEdit`, re-anchors it on the
+the target of every `Edit`, `Write`, `NotebookEdit` and `MultiEdit` — the
+matcher, the hook's own `EDITING_TOOLS` and the registration case all name
+those four, and a boundary documented narrower than the one configured is the
+drift this file exists to refuse — re-anchors it on the
 resolved checkout root, and refuses the call when the two disagree — into a
 denied tree, or out of the checkout. The premise stays as defence in depth
 and its gate stays green. The bare tool name is the documented form of a

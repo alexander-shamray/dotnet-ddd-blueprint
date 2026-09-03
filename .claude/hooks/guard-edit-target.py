@@ -92,22 +92,34 @@ def case_insensitive(path):
     under no anchor at all, which is the branch that admits. Raised by Copilot;
     the same is true of a case-insensitive mount on Linux.
 
-    Asked of the filesystem rather than read off `sys.platform`: the basename
-    is case-flipped and both spellings are `stat`ed, and one file with one
-    device and inode under two spellings is the answer. Where the flip is not a
-    different string, or the probe cannot run, the platform default stands in —
-    it is the best available guess and it is the one that was there before.
+    Asked of the filesystem rather than read off `sys.platform`: a component of
+    the path is case-flipped and both spellings are `stat`ed, and one file with
+    one device and inode under two spellings is the answer.
+
+    **Which component is not a detail, and picking the basename alone was a
+    gap.** A checkout at `/Users/me/123` has nothing to flip in its last
+    component, so the probe fell to the platform default — `False` on macOS,
+    where the mount folds — and a linked target spelled `/users/me/123/...`
+    matched no anchor and fell through unjudged. Raised by Copilot. Every
+    component is tried, deepest first, and the first one that changes under
+    `swapcase` carries the probe; a path with no cased component anywhere is
+    the only case left to the platform default, and it cannot arise under a
+    root that holds a `.git`.
     """
-    directory, name = os.path.split(os.path.normpath(path))
-    flipped = name.swapcase()
-    if not directory or flipped == name:
-        return os.name == "nt"
-    try:
-        here = os.stat(path)
-        other = os.stat(os.path.join(directory, flipped))
-    except OSError:
-        return os.name == "nt" if not os.path.exists(path) else False
-    return (here.st_dev, here.st_ino) == (other.st_dev, other.st_ino)
+    normalised = os.path.normpath(path)
+    parts = normalised.split(os.sep)
+    for index in range(len(parts) - 1, -1, -1):
+        flipped = parts[index].swapcase()
+        if flipped == parts[index]:
+            continue
+        other = os.sep.join(parts[:index] + [flipped] + parts[index + 1:])
+        try:
+            here = os.stat(normalised)
+            there = os.stat(other)
+        except OSError:
+            return False
+        return (here.st_dev, here.st_ino) == (there.st_dev, there.st_ino)
+    return os.name == "nt"
 
 
 def key(path, folded):
