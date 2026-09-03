@@ -326,8 +326,24 @@ def shell_positions(command):
     `in_quotes` is true inside `'…'` and `"…"` alike. Comments start at an
     unquoted `#` that begins a word and end at the newline — which is bash's
     rule, and the reason `git log --grep=#x` is not a comment.
+
+    **An ANSI-C word takes a backslash and an ordinary single-quoted one does
+    not**, and reading `$'…'` by the ordinary rule desynchronised every
+    consumer of this scanner from the position it was on. `$'''` is the
+    one-character word `'` to bash — the escaped quote does not close it — so
+    `$''' ; git 2>&1 push origin +HEAD:main` runs the push. Read by the
+    ordinary rule the word closes at the escaped quote, the quote after it
+    opens one that never closes, and the rest of the line is `in_quotes`: so
+    `redirection_spans` left `2>&1` standing, `is_boundary` read the glued
+    `>&` as a run boundary, and `git` was severed from its own subcommand.
+    Raised in review; verified allowed. `$"…"` needs nothing, because a
+    locale-quoted word already follows the double-quoted rule this scanner
+    applies to it.
     """
     single = double = comment = False
+    # Whether the single quote now open was introduced by a `$`, and whether
+    # the character just yielded was an unquoted, unescaped `$`.
+    ansi_c = dollar = False
     # **Whether a `#` begins a WORD, tracked rather than inferred from the
     # previous character.** The old test read `command[index - 1] in " \t…"`,
     # which cannot tell a separating space from an escaped one: in
@@ -349,8 +365,16 @@ def shell_positions(command):
                 continue
         if not comment:
             if single:
+                if ansi_c and char == "\\" and index + 1 < len(command):
+                    # Both characters, for `strip_comments`' reason below: a
+                    # consumer rebuilds text from these positions.
+                    yield index, True, False
+                    yield index + 1, True, False
+                    index += 2
+                    dollar = False
+                    continue
                 if char == "'":
-                    single = False
+                    single = ansi_c = False
             elif double:
                 if char == "\\" and index + 1 < len(command):
                     # **Both characters, because a consumer rebuilds text from
@@ -363,6 +387,7 @@ def shell_positions(command):
                     yield index, True, False
                     yield index + 1, True, False
                     index += 2
+                    dollar = False
                     continue
                 if char == '"':
                     double = False
@@ -374,9 +399,11 @@ def shell_positions(command):
                 yield index + 1, False, False
                 index += 2
                 at_word_start = False
+                dollar = False
                 continue
             elif char == "'":
                 single = True
+                ansi_c = dollar
                 at_word_start = False
             elif char == '"':
                 double = True
@@ -385,12 +412,14 @@ def shell_positions(command):
                 comment = True
                 yield index, False, True
                 index += 1
+                dollar = False
                 continue
             elif char in METACHARACTERS:
                 at_word_start = True
             else:
                 at_word_start = False
         yield index, single or double, comment
+        dollar = char == "$" and not (single or double or comment)
         index += 1
 
 
@@ -1794,26 +1823,106 @@ def leading_command(run):
     return ""
 
 
-def _run_leader(command, position, ordinary):
-    """The first word of the command run containing `position`."""
+def reads_stdin_as_script(words):
+    """Whether a run made of `words` will EXECUTE what arrives on its stdin.
+
+    **The test used to be that the run's LEADING word is a shell**, and a
+    wrapper in front of one defeated it: `echo 'git push origin +HEAD:main' |
+    command bash` runs the push, and so does the `env bash` spelling, while
+    the leading word is `command` or `env` and no shell was found. Raised in
+    review; both verified allowed, and `env` found beside the one that was
+    reported.
+
+    **So the shell is looked for anywhere in the run, and the exemption is the
+    allow-list rather than the wrapper set.** Enumerating the wrappers that DO
+    exec their argument is the direction `DATA_ONLY_COMMANDS` argues against in
+    its own comment — it fails open on the first one nobody thought of, and
+    `command`, `env`, `nohup`, `nice`, `stdbuf`, `setsid`, `timeout`, `ionice`
+    and `chrt` are nine before anyone has looked hard. Reading any shell name
+    in the run costs an over-refusal instead, and it costs one only in the
+    shape `echo '…git push…' | grep bash`, because the printer half of the
+    pipeline pass has to match first.
+
+    A run carrying `-c` reads its script from the argv rather than from stdin,
+    and `evaluated_scripts` judges that channel at any position already.
+    """
+    body = [word for word in words if not ASSIGNMENT.match(word)]
+    if not body or program_name(body[0]) in DATA_ONLY_COMMANDS:
+        return False
+    if any(SCRIPT_FLAG.match(word) for word in body[1:]):
+        return False
+    return any(program_name(word) in EVALUATORS for word in body)
+
+
+def _run_words(command, start, end, ordinary):
+    """`command[start:end]` split into words on its unquoted metacharacters."""
+    words, index = [], start
+    while index < end:
+        while index < end and command[index] in " 	":
+            index += 1
+        cursor = index
+        while cursor < end and not (
+                ordinary[cursor] and command[cursor] in METACHARACTERS):
+            cursor += 1
+        if cursor > index:
+            words.append(command[index:cursor])
+        index = cursor if cursor > index else index + 1
+    return words
+
+
+def _run_bounds(command, position, ordinary):
+    """The half-open span of the command run containing `position`."""
     start = position
-    while start > 0:
-        previous = start - 1
-        if ordinary[previous] and command[previous] in ";&|()\n":
-            break
-        start = previous
-    while start < position:
-        while start < position and command[start] in " \t":
-            start += 1
-        end = start
-        while end < position and not (
-                ordinary[end] and command[end] in METACHARACTERS):
-            end += 1
-        word = command[start:end]
-        if not ASSIGNMENT.match(word):
-            return word
-        start = end
-    return ""
+    while start > 0 and not (
+            ordinary[start - 1] and command[start - 1] in RUN_SEPARATORS):
+        start -= 1
+    end = position
+    while end < len(command) and not (
+            ordinary[end] and command[end] in RUN_SEPARATORS):
+        end += 1
+    return start, end
+
+
+def forwards_to_evaluator(command, position, ordinary):
+    """Whether the run at `position` writes into a shell later in its pipeline.
+
+    **A heredoc belongs to the run that opens it and its BYTES belong to
+    whatever is downstream of the pipe.** `cat <<'EOF' | bash` with a push in
+    the body runs it: the opener is `cat`'s, so `stdin_scripts` yielded
+    nothing, and `strip_heredocs` then removed the body — the only copy of the
+    script — before anything else could look. The here-string spelling
+    `cat <<<'git push origin +HEAD:main' | bash` fails the same way. Raised in
+    review; both verified allowed, and both live on `main`.
+
+    Only a `|` carries stdout onward, so `||` ends the walk rather than
+    continuing it, and a `)` between the run and the pipe is stepped over
+    because a subshell writes into the pipe exactly as a bare run does.
+    """
+    _, index = _run_bounds(command, position, ordinary)
+    while index < len(command):
+        while index < len(command) and (
+                command[index] in " 	"
+                or (ordinary[index] and command[index] == ")")):
+            index += 1
+        if not (index < len(command) and ordinary[index]
+                and command[index] == "|") or command.startswith("||", index):
+            return False
+        index += 2 if command.startswith("|&", index) else 1
+        start = index
+        while index < len(command) and not (
+                ordinary[index] and command[index] in RUN_SEPARATORS):
+            index += 1
+        if reads_stdin_as_script(_run_words(command, start, index, ordinary)):
+            return True
+    return False
+
+
+def _consumes_as_script(command, position, ordinary):
+    """Whether the script at `position` is executed by its own run or a later
+    one in the same pipeline."""
+    start, end = _run_bounds(command, position, ordinary)
+    return (reads_stdin_as_script(_run_words(command, start, end, ordinary))
+            or forwards_to_evaluator(command, position, ordinary))
 
 
 def pipeline_groups(tokens):
@@ -1867,8 +1976,7 @@ def unmodelled_printer(tokens):
     """
     for group in pipeline_groups(tokens):
         shells = [position for position, run in enumerate(group)
-                  if program_name(leading_command(run)) in EVALUATORS
-                  and not any(SCRIPT_FLAG.match(element) for element in run[1:])]
+                  if reads_stdin_as_script(run)]
         if not shells:
             continue
         for run in group[:max(shells)]:
@@ -1957,9 +2065,9 @@ def stdin_scripts(command):
             cursor += 1
         if cursor >= len(openers):
             break
-        leader = _run_leader(command, openers[cursor], ordinary)
+        opener = openers[cursor]
         cursor += 1
-        if program_name(leader) in EVALUATORS:
+        if _consumes_as_script(command, opener, ordinary):
             yield command[start:end]
 
     index = 0
@@ -1967,14 +2075,14 @@ def stdin_scripts(command):
         if not (ordinary[index] and command.startswith("<<<", index)):
             index += 1
             continue
-        leader = _run_leader(command, index, ordinary)
+        consumed = _consumes_as_script(command, index, ordinary)
         cursor = index + 3
         while cursor < len(command) and command[cursor] in " \t":
             cursor += 1
         word = cursor
         while word < len(command) and not boundary(word):
             word += 1
-        if program_name(leader) in EVALUATORS:
+        if consumed:
             try:
                 parts = shlex.split(command[cursor:word], posix=True)
             except ValueError:
@@ -2034,8 +2142,7 @@ def evaluated_scripts(tokens):
     # pipe. Found by an adversarial audit.
     for group in pipeline_groups(tokens):
         shells = [position for position, run in enumerate(group)
-                  if program_name(leading_command(run)) in EVALUATORS
-                  and not any(SCRIPT_FLAG.match(element) for element in run[1:])]
+                  if reads_stdin_as_script(run)]
         if not shells:
             continue
         for before in group[:max(shells)]:
@@ -2073,6 +2180,11 @@ PUNCTUATION = set("();<>|&")
 # the question it answers is where a WORD begins rather than where a token
 # does.
 METACHARACTERS = set("|&;()<> \t\n")
+
+# What ends a command RUN. A subset of METACHARACTERS: a redirection
+# operator and a space separate words within one run rather than ending
+# it.
+RUN_SEPARATORS = set(";&|()\n")
 
 
 def is_boundary(token):

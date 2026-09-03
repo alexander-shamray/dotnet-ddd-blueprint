@@ -652,6 +652,21 @@ disproved the narrower claim that replaced it. **A guard's stated failure
 direction is a claim to measure in every position**, not one to derive from the
 case in front of you.
 
+**A shell reads a script from three places and the third is a pipe**, so the
+guard costs a stated over-refusal to cover it. `bash -c '…'` and
+`bash <<<'…'` put the text where it can be read; `echo '…' | bash` puts it
+one run away, and `cat <<'EOF' | bash` puts it in a heredoc belonging to a
+run that is not a shell at all. What decides is whether some later stage of
+the pipeline will *execute* its stdin, and that cannot be settled by naming
+the wrappers which exec their argument — `command`, `env`, `nohup`, `nice`,
+`stdbuf`, `setsid`, `timeout`, `ionice` and `chrt` are nine before anyone has
+looked hard, and the tenth is the bypass. So a shell name **anywhere** in a
+stdin-consuming run counts, which is the direction `DATA_ONLY_COMMANDS`
+already argues for, and it costs `echo '…git push…' | grep bash` a refusal
+it does not deserve. That shape needs a printer writing a push into a pipeline
+whose far end merely mentions a shell; it has never been typed here, and the
+alternative fails open on a wrapper nobody listed.
+
 **A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because
 the harness has no "only this type" allow — so `security-sweep.md`,

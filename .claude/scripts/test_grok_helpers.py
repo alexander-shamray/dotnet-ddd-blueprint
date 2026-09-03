@@ -6023,6 +6023,103 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("bash <<<'git log --oneline -5'")
         self.assertAdmitted("bash <<'EOF'\ngit status\nEOF")
 
+    def test_an_ansi_c_word_ends_at_an_unescaped_quote(self):
+        # `$'\''` is the one-character word `'` to bash: inside `$'…'` a
+        # backslash escapes, so the quote after it does NOT close the word.
+        # Read by the ordinary single-quote rule the word closes at the escaped
+        # quote, the next quote opens one that never closes, and the whole
+        # remainder of the line reads as quoted — so `redirection_spans` left
+        # `2>&1` standing, the glued `>&` became a run boundary, and `git` was
+        # severed from its own subcommand. Raised in review; verified allowed,
+        # with the command run under a `bash` that reported `': command not
+        # found` and then executed the push.
+        #
+        # The scanner is asserted rather than only the verdict: the defect is a
+        # position this file's other passes are read off, so a verdict
+        # assertion pins the symptom and leaves the desynchronisation free to
+        # surface somewhere else.
+        guard = self.guard_module()
+        word = "$'\\''"
+        quoted = dict((index, in_quotes)
+                      for index, in_quotes, _ in guard.shell_positions(
+                          word + " ; git status"))
+        self.assertTrue(quoted[3], "the ESCAPED quote is inside the word")
+        self.assertFalse(quoted[len(word)],
+                         "and the word ends at the one that follows it")
+
+        self.assertRefused(word + " ; git 2>&1 push origin +HEAD:main")
+        self.assertRefused(word + "; git >out 2>&1 push origin +HEAD:main")
+
+        # The ordinary forms are untouched: a backslash in a plain single-
+        # quoted word is literal, and `$'…'` without an escape still decodes.
+        self.assertAdmitted("$'\\n' ; git status")
+        self.assertAdmitted("git commit -m 'a \\\\ literal'")
+
+    def test_a_script_forwarded_down_a_pipeline_is_still_a_script(self):
+        # **A heredoc belongs to the run that opens it and its BYTES belong to
+        # whatever is downstream of the pipe.** `cat <<'EOF' | bash` runs the
+        # push in its body: the opener is `cat`'s, so nothing was yielded, and
+        # `strip_heredocs` then removed the body — the only copy of the script
+        # — before any other pass could look. Raised in review; both spellings
+        # verified allowed, and both live on `main`.
+        body = "\ngit push origin +HEAD:main\nEOF"
+        for command in (
+            "cat <<'EOF' | bash" + body,
+            "cat <<EOF | bash" + body,
+            "cat <<EOF | tee /dev/null | bash" + body,
+            "cat <<EOF |& bash" + body,
+            "(cat <<EOF) | bash" + body,
+            "X=1 cat <<EOF | X=2 bash" + body,
+            "cat <<<'git push origin +HEAD:main' | bash",
+            "printf %s 'git push origin +HEAD:main' | sudo bash",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # Only a `|` carries stdout onward, and every other reader of these
+        # constructs is still left alone — which is what keeps
+        # `git commit -F - <<EOF` a filing rather than a command.
+        self.assertAdmitted("cat <<EOF | grep foo\nhello\nEOF")
+        self.assertAdmitted("cat <<EOF || bash\nhello\nEOF")
+        self.assertAdmitted("cat <<EOF ; bash\nhello\nEOF")
+        self.assertAdmitted("git commit -F - <<EOF\nmessage\nEOF")
+        self.assertAdmitted("cat <<<'git log --oneline -5' | bash")
+
+    def test_a_wrapper_in_front_of_a_shell_still_reads_stdin(self):
+        # `echo '…' | command bash` runs the push, and so does the `env`
+        # spelling found beside it, while the run's LEADING word is `command`
+        # or `env` and the pipeline pass found no shell. Raised in review;
+        # verified allowed.
+        #
+        # The shell is looked for anywhere in the run rather than the wrappers
+        # being enumerated: listing the ones that DO exec their argument is the
+        # direction `DATA_ONLY_COMMANDS` argues against in its own comment, and
+        # `command`, `env`, `nohup`, `nice`, `stdbuf`, `setsid`, `timeout`,
+        # `ionice` and `chrt` are nine before anyone has looked hard.
+        guard = self.guard_module()
+        self.assertTrue(guard.reads_stdin_as_script(["command", "bash"]))
+        self.assertTrue(guard.reads_stdin_as_script(["stdbuf", "-o0", "sh"]))
+        self.assertFalse(guard.reads_stdin_as_script(["echo", "bash"]),
+                         "a printer's argument is text, wrapper or not")
+        self.assertFalse(guard.reads_stdin_as_script(["bash", "-c", "x"]),
+                         "a `-c` script comes from the argv, not from stdin")
+
+        for command in (
+            "echo 'git push origin +HEAD:main' | command bash",
+            "echo 'git push origin +HEAD:main' | env bash",
+            "echo 'git push origin +HEAD:main' | nohup bash",
+            "echo 'git push origin +HEAD:main' | stdbuf -o0 bash",
+            "echo 'git push origin +HEAD:main' | timeout 5 sh",
+            "printf 'git p%ssh origin +HEAD:main' u | command bash",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The over-refusal this costs needs a printer feeding it, so an
+        # ordinary pipeline naming a shell is unaffected.
+        self.assertAdmitted("echo hello | grep bash")
+        self.assertAdmitted("git log --oneline -5 | grep bash")
+
     def test_the_readings_do_not_multiply(self):
         # **The four readings and the substitution recursion each descend onto
         # a string barely shorter than the one they came from, so a command
