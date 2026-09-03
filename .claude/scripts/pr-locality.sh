@@ -35,6 +35,16 @@ pr="${1:?usage: pr-locality.sh <pr-number>}"
 body=$(gh pr view "$pr" --json body --jq .body)
 class_row=$(grep -E '^\| *Class *\|' <<<"$body" || [ $? -eq 1 ])
 touch_row=$(grep -E '^\| *Touch set *\|' <<<"$body" || [ $? -eq 1 ])
+# Exactly one of each, or none. A second row is where a valid first row
+# would have carried an invalid second past a check that only asked whether
+# any row matched — `grep -q` answers for the set, and the print below emits
+# the set — so two rows is refused before either grammar is consulted.
+if [ "$(grep -c . <<<"$class_row")" -gt 1 ]; then
+  echo "more than one Class row" >&2; exit 3
+fi
+if [ "$(grep -c . <<<"$touch_row")" -gt 1 ]; then
+  echo "more than one Touch set row" >&2; exit 3
+fi
 if [ -n "$class_row" ]; then
   grep -Eq '^\| *Class *\| *[A-E](\+[A-E])* *\| *$' <<<"$class_row" ||
     { echo "the Class row is not a class" >&2; exit 3; }
