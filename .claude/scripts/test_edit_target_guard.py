@@ -71,6 +71,13 @@ def setUpModule():
     if not HOOK.exists():
         raise AssertionError(f"the hook is missing: {HOOK}")
 
+    # **Say what was exercised, because a green run does not.** `unittest`
+    # prints a subtest's name only when it fails, so a Windows job that had
+    # symbolic links and never reached the junction fallback is indexed
+    # identically to one that ran both — and which of the two happened is the
+    # whole reason that job exists. One line in the log answers it.
+    print(f"link primitives exercised: {', '.join(linkers())}", file=sys.stderr)
+
 
 def linkers():
     """The link primitives available here, by name. Never empty."""
