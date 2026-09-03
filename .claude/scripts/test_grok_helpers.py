@@ -5180,6 +5180,101 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted(
             'sh -c "$(echo \'git push origin +HEAD:main\')"')
 
+    def test_a_redirection_is_not_an_argument_to_the_program(self):
+        # **#183, and the file descriptor is the whole of it.**
+        # `shlex(punctuation_chars=True)` emits a maximal run of `();<>|&` as
+        # ONE token, so `>&` arrives whole — but a digit is not punctuation, so
+        # the `2` of `2>&1` detaches and survives as an ordinary WORD. It then
+        # reaches every check that counts non-flags, and `push_offence` found
+        # three positionals where it requires two. Measured on this host while
+        # pushing PR #182's branch: the push was refused with the redirection
+        # and succeeded without it.
+        #
+        # Each of these is a push `ship.md` actually makes, wearing the
+        # redirection that captures its output.
+        for command in (
+            "git push -u origin fix/some-branch 2>&1",
+            "git push -u origin fix/some-branch 2>&1 | tail -5",
+            "git push origin fix/some-branch 2>/dev/null",
+            "git push origin fix/some-branch >/tmp/log 2>&1",
+            "git push origin fix/some-branch &>/tmp/log",
+            "git push origin fix/some-branch 1>&2",
+            "git push origin HEAD:refs/heads/fix/some-branch 2>&1",
+            "git -C /tmp/x push -u origin fix/some-branch 2>&1",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+    def test_a_redirection_hides_no_push_from_the_grammar(self):
+        # **The half the issue did not name, and it fails OPEN.** The same
+        # stray word shifts the positional UNPACK, not merely the count: in
+        # `git push -u origin 2>&1 +HEAD:main` the `2` is taken for the
+        # refspec — it satisfies `SAFE_REF` — while the real `+HEAD:main` falls
+        # past the `>&` boundary into a run of its own. Bash runs a FORCE PUSH
+        # TO MAIN, and the guard admitted it. Measured against the hook as
+        # shipped, alongside three further spellings.
+        #
+        # This is the third instance of one lesson: the lexer knows a rule the
+        # run splitter does not. It is why the fix is a strip in the ONE
+        # pipeline both paths read, rather than a relaxed count in the single
+        # check that happened to be looked at.
+        for command in (
+            "git push -u origin 2>&1 +HEAD:main",
+            "git push origin 2>&1 main",
+            "git push origin 2>&1 --mirror",
+            "git push -u origin 2>/dev/null +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_redirection_before_the_subcommand_hides_no_command(self):
+        # The same root cause reaching the run splitter rather than the push
+        # grammar. `git 2>&1 log --output=/tmp/probe` split into `['git','2']`
+        # and `['1','log',…]`: the second run holds no `git` token, so
+        # `git_segments` yielded nothing at all and #30's write primitive was
+        # admitted. The `ext::` check went the same way, because
+        # `subcommand_of` read `2` and found it in no repository subcommand.
+        for command in (
+            "git 2>&1 log --output=/tmp/probe",
+            "git 2>&1 push origin +HEAD:main",
+            "git 2>/dev/null fetch ext::sh -c touch% /tmp/pwned",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
+        # The boundary of the exemption, and it is bash's own rule: digits are
+        # a descriptor only where they are a WHOLE token glued to the operator.
+        # In `echo foo2>x` bash writes the word `foo2`, so a strip that ate the
+        # `2` would be editing an argument rather than removing syntax — the
+        # thing `shell_positions` exists to stop this file doing.
+        #
+        # So `feat2` is still the refspec, and the protected one is still
+        # refused with the redirection standing next to it.
+        self.assertAdmitted("git push origin feat2>/tmp/log")
+        self.assertRefused("git push origin main2>/tmp/log; git push origin main")
+        self.assertAdmitted("git log --grep=x2 -1")
+
+    def test_a_quoted_or_escaped_redirection_is_data(self):
+        # The control every strip in this file owes. A `>` inside quotes is an
+        # argument and an escaped one is a literal, so neither is syntax to
+        # remove — and a commit body quoting a redirected push must still reach
+        # the scan whole rather than arrive with its middle deleted.
+        self.assertAdmitted("git commit -m 'run it 2>&1 and log'")
+        self.assertAdmitted('git log --grep="2>&1" -5')
+        self.assertAdmitted("git commit -m 'git push origin 2>&1 +HEAD:main'")
+        self.assertRefused("git commit -m x; git push origin '2>&1' +HEAD:main")
+
+    def test_a_heredoc_introducer_survives_the_redirection_strip(self):
+        # `strip_heredocs` leaves the introducer standing on purpose, so that
+        # the rest of the line still tokenises. `<<` is therefore NOT a
+        # redirection this strip removes: taking it would leave the delimiter
+        # behind as a stray word, which is the defect being fixed rather than a
+        # fix for it.
+        self.assertAdmitted("git commit -F - <<'EOF'\na message\nEOF")
+        self.assertRefused(
+            "git commit -F - <<'EOF'\na message\nEOF\ngit push origin +HEAD:main")
+
     def test_a_non_bash_tool_is_not_judged(self):
         self.assertIsNone(self.judge("git push origin +HEAD:main", tool="Read"))
 

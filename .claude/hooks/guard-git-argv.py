@@ -439,6 +439,124 @@ def separate_lines(command):
     return "".join(out)
 
 
+# Redirection operators, longest first so that `>>` is never read as a `>`
+# with a stray `>` behind it. **`<<` is deliberately absent**, and
+# `redirection_spans` argues why.
+REDIRECTION_OPERATORS = ("&>>", "&>", ">>", ">&", ">|", "<>", "<&", ">", "<")
+
+
+def redirection_spans(command):
+    """Every redirection in `command`, as `(start, end)` character offsets.
+
+    `start` is the first character of the file descriptor where one is written
+    and of the operator otherwise, and `end` is just past the target word — so
+    `command[start:end]` is everything bash consumes as redirection syntax and
+    never hands to the program.
+
+    **A heredoc is not one of these.** `strip_heredocs` has already taken its
+    body and leaves the introducer standing so the rest of the line still
+    tokenises; removing `<<` here would leave its delimiter behind as a stray
+    word, which is the defect this function exists to remove rather than a fix
+    for it. A descriptor written in front of one still goes, because that is
+    the same stray word in every other spelling.
+    """
+    ordinary = [False] * len(command)
+    escaped = None
+    for index, in_quotes, in_comment in shell_positions(command):
+        if index == escaped:
+            escaped = None
+            continue
+        if command[index] == "\\" and not in_quotes and not in_comment:
+            escaped = index + 1
+            continue
+        ordinary[index] = not in_quotes and not in_comment
+
+    def plain(position):
+        return position < len(command) and ordinary[position]
+
+    spans, index = [], 0
+    while index < len(command):
+        if not ordinary[index]:
+            index += 1
+            continue
+        start = index
+        digits = index
+        while plain(digits) and command[digits].isdigit():
+            digits += 1
+        begins_word = start == 0 or (
+            ordinary[start - 1] and command[start - 1] in METACHARACTERS)
+        if digits > start and not begins_word:
+            # **A descriptor is a WHOLE token of digits glued to the
+            # operator**, which is bash's own rule rather than an approximation
+            # of it: in `echo foo2>x` the word bash writes is `foo2` and only
+            # `>x` is syntax. Reading the digits here would be editing an
+            # argument, which is the thing `shell_positions` exists to stop
+            # this file doing.
+            index = digits
+            continue
+        if command[digits:digits + 2] == "<<":
+            if digits > start:
+                spans.append((start, digits))
+            index = digits + 2
+            continue
+        operator = None
+        for candidate in REDIRECTION_OPERATORS:
+            reach = range(digits, digits + len(candidate))
+            if command[digits:digits + len(candidate)] == candidate and all(
+                    plain(position) for position in reach):
+                operator = candidate
+                break
+        if operator is None:
+            index = digits + 1 if digits == start else digits
+            continue
+        end = digits + len(operator)
+        while plain(end) and command[end] in " \t":
+            end += 1
+        while end < len(command) and not (
+                ordinary[end] and command[end] in METACHARACTERS):
+            end += 1
+        spans.append((start, end))
+        index = end
+    return spans
+
+
+def strip_redirections(command):
+    """`command` with every redirection removed, target word included.
+
+    **A redirection is shell syntax and the file descriptor in front of one is
+    not — to `shlex`.** `punctuation_chars=True` emits a maximal run of
+    `();<>|&` as ONE token, so `>&` arrives whole, but a digit is not
+    punctuation: the `2` of `2>&1` detaches and survives as an ordinary word.
+    That one stray word reached every check downstream that counts non-flags,
+    in three separate directions (#183):
+
+        git push -u origin feat 2>&1        three positionals where two are
+                                            required, so an honest push was
+                                            refused for naming two refspecs
+        git push -u origin 2>&1 +HEAD:main  `2` taken for the refspec — it
+                                            satisfies `SAFE_REF` — while the
+                                            real one fell past the `>&`
+                                            boundary into a run of its own: a
+                                            FORCE PUSH TO MAIN, admitted
+        git 2>&1 log --output=/tmp/probe    the run split at `>&`, the second
+                                            run led with `1` and held no `git`
+                                            token, so #30's write primitive was
+                                            admitted
+
+    All measured against the guard as shipped. Removing the whole redirection
+    is what makes the remaining string the argv bash passes to the program,
+    which is the one thing this hook claims to judge — and it is one strip in
+    the pipeline both paths read rather than a relaxed count in whichever check
+    someone happened to be looking at.
+    """
+    out, cursor = [], 0
+    for start, end in redirection_spans(command):
+        out.append(command[cursor:start])
+        cursor = end
+    out.append(command[cursor:])
+    return "".join(out)
+
+
 def expandable_regions(command):
     """Every part of `command` the shell would expand, as `(text, quotes)`.
 
@@ -974,7 +1092,13 @@ def offence(command, depth=0):
     # moment anything else in the line failed to tokenise. A body is data on
     # every path, not only on the one that parses — and so is a comment, which
     # is why `strip_comments` runs here rather than being left to the lexer.
-    stripped = separate_lines(strip_comments(strip_heredocs(command)))
+    #
+    # `strip_redirections` is outermost because it is the only one of the four
+    # that wants the others' work done first: a redirection inside a heredoc
+    # body or a comment is not one bash performs, and there is nothing left of
+    # either by the time it runs.
+    stripped = strip_redirections(
+        separate_lines(strip_comments(strip_heredocs(command))))
     try:
         lexer = shlex.shlex(stripped, posix=True, punctuation_chars=True)
         # Comments are already gone, and `shlex` would take a second, wider view
