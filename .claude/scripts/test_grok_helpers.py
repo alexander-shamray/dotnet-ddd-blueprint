@@ -5809,6 +5809,44 @@ class TheGitArgvGuard(unittest.TestCase):
         self.judge('git commit -m "' + "${" * 5000)
         self.assertRefused("${" * 500 + "; git push origin +HEAD:main")
 
+    def test_an_expanding_heredoc_body_removes_its_continuations(self):
+        # **A body whose delimiter is unquoted expands, and removes
+        # `\\<newline>` before it does.** The continuation join was applied
+        # only to command-line regions, so
+        # `<<EOF` / `$\\<newline>(git push …)` / `EOF` formed a live `$(…)`
+        # that the substitution scan never saw. Raised in review; verified
+        # allowed.
+        #
+        # A quote is an ordinary character in a body, which is why the join
+        # takes the same `quotes` flag the extractor does rather than tracking
+        # quoting that is not there.
+        self.assertRefused(
+            "git commit -F - <<EOF\n$\\\n(git push origin +HEAD:main)\nEOF")
+        self.assertRefused(
+            "git commit -F - <<EOF\n`\\\ngit push origin --mirror`\nEOF")
+
+        # The control: a QUOTED delimiter expands nothing, so the same body is
+        # data and stays admitted.
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\n$\\\n(git push origin +HEAD:main)\nEOF")
+
+    def test_a_delimiter_inside_a_body_is_data(self):
+        # The over-refusal half of the same reading: a `<<` inside a heredoc
+        # BODY is text, and `undecodable_heredoc` was treating one as an
+        # opener — so a body documenting this very mechanism was refused as an
+        # undecodable delimiter. `shell_positions` does not mark a body,
+        # because a body is not quoted; `heredoc_spans` is what knows where one
+        # is. Raised in review; measured.
+        self.assertAdmitted(
+            "git commit -F - <<'BODY'\nsee <<$'E\\x4fF' here\nBODY")
+        self.assertAdmitted(
+            "git commit -F - <<'BODY'\nand <<EOF too\nBODY")
+
+        # And the control that the exemption did not swallow the check: an
+        # undecodable delimiter on the COMMAND LINE is still refused.
+        self.assertRefused(
+            "git commit -F - <<$'E\\x4fF'\nEOF\ngit push origin +HEAD:main\n$EOF")
+
     def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
         # The boundary of the exemption, and it is bash's own rule: digits are
         # a descriptor only where they are a WHOLE token glued to the operator.

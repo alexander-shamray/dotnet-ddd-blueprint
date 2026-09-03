@@ -502,9 +502,18 @@ def undecodable_heredoc(command):
     for index, in_quotes, in_comment in shell_positions(command):
         if in_quotes or in_comment:
             quoted.add(index)
+    # **A `<<` inside a heredoc BODY is data, not an opener**, and reading one
+    # as an opener refused an innocent filing: a body quoting `<<$'E\\x4fF'` —
+    # documentation of this very mechanism — was rejected as an undecodable
+    # delimiter. `shell_positions` does not mark a body, because a body is not
+    # quoted; `heredoc_spans` is what knows where one is. Raised in review;
+    # measured.
+    bodies = heredoc_spans(command)
     for match in HEREDOC.finditer(command):
         index = match.start()
         if index in quoted:
+            continue
+        if any(start <= index < end for start, end, _expands in bodies):
             continue
         if index > 0 and command[index - 1] == "<":
             continue
@@ -993,7 +1002,7 @@ def strip_dollar_quotes(command):
     return "".join(out)
 
 
-def join_continuations(command):
+def join_continuations(command, quotes=True):
     """`command` with every line continuation removed, as bash removes them.
 
     **A backslash-newline is deleted before the shell tokenises anything**, so
@@ -1013,6 +1022,14 @@ def join_continuations(command):
     **Inside single quotes a backslash is literal**, so a continuation there is
     two ordinary characters and stays. Inside double quotes bash removes it,
     and so does this.
+
+    **`quotes` is false for a heredoc BODY, where a quote is an ordinary
+    character and the continuation goes anyway.** An expanding body removes
+    `\\<newline>` before it expands, so
+    `git commit -F - <<EOF` / `$\\<newline>(git push origin +HEAD:main)` / `EOF`
+    forms a live `$(…)` and runs the push — while this function, tracking
+    quotes that are not quotes, could reach the wrong conclusion about where
+    the escape sits. Raised in review; verified allowed.
     """
     out, index = [], 0
     in_single = in_double = False
@@ -1034,9 +1051,9 @@ def join_continuations(command):
             out.append(command[index + 1])
             index += 2
             continue
-        if char == "'" and not in_double:
+        if quotes and char == "'" and not in_double:
             in_single = True
-        elif char == '"':
+        elif quotes and char == '"':
             in_double = not in_double
         out.append(char)
         index += 1
@@ -1951,8 +1968,7 @@ def offence(command, depth=0):
         # `shlex` later returned the whole quoted value as data. Raised in
         # review; verified allowed. Only for a command-line region: a heredoc
         # body arrives with `quotes` false and is not a command line.
-        if quotes:
-            text = join_continuations(text)
+        text = join_continuations(text, quotes=quotes)
         for inner in substitutions(text, quotes=quotes):
             refusal = offence(inner, depth + 1)
             if refusal is not None:
