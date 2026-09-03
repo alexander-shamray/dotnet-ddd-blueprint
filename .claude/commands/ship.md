@@ -1,7 +1,7 @@
 ---
 description: Start from a clean main, fork a worktree where one can be forked, branch, commit, push and open a PR, loop the external reviews — Grok until two consecutive clean passes, Copilot until one — then merge the PR and tear the workspace down. Decides for itself rather than stopping to ask
 argument-hint: "[what the change does] — omit and each step derives its own"
-allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(bash .claude/scripts/pr-state.sh:*), Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*)
+allowed-tools: Read, Grep, Glob, Write, Skill, EnterWorktree, ExitWorktree, Bash(git status:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(git log:*), Bash(git fetch origin:*), Bash(bash .claude/scripts/git-branch-create.sh:*), Bash(bash .claude/scripts/git-worktree-fork.sh:*), Bash(bash .claude/scripts/git-switch-existing.sh:*), Bash(git rev-parse:*), Bash(git worktree list:*), Bash(ls:*), Bash(git add:*), Bash(git commit:*), Bash(bash .claude/scripts/git-unstage.sh:*), Bash(git push -u origin:*), Bash(git push origin:*), Bash(wc:*), Bash(gh pr create:*), Bash(bash .claude/scripts/pr-state.sh:*), Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(gh pr checks:*), Bash(gh pr merge --merge:*), Bash(git pull --ff-only), Bash(git merge-base --is-ancestor:*), Bash(git worktree remove:*), Bash(git worktree prune:*), Bash(rm -f suggestions.md), Bash(bash .claude/scripts/grok-ledger.sh:*), Bash(bash .claude/scripts/copilot-request.sh:*), Bash(bash .claude/scripts/copilot-request-count.sh:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/grok-review.sh:*), Bash(sleep:*), Bash(bash .claude/scripts/pr-locality.sh:*)
 ---
 
 Take the working tree from wherever it is to a merged PR. Description:
@@ -670,8 +670,16 @@ same argument as never calling a branch clean because asking failed.
    before anything is committed to it. The same goes for the directory: name
    the worktree the run is in, and if it is the main checkout say that too.
 
-2. **Checks** — `/validate-blueprint`, plus `/check-links` when the change
-   touched links, cross-references or nav footers.
+2. **Checks**, selected by the class the PR body will carry
+   (`docs/change-locality.md` §5): `/validate-blueprint` after Class C, or
+   after an edit to a file in that audit's scope — a chapter or appendix,
+   `docs/roadmap.md`, `docs/testing.md`; `/check-links` when the change
+   touched links, cross-references or nav footers under
+   `docs/backend-architecture/`, the one tree that command reads — so a
+   Class A runbook edit, links and all, runs neither, and running the link
+   check for it would report on a tree it did not touch. A Class A change's
+   PR body says so under the rule below rather than claiming a run that did
+   not happen — a body that names the class has named the reason.
 
    **Before `/commit`, not after.** A defect found after the commit costs a
    second commit or a rewrite; found here it is an edit. This is also the step a
@@ -872,7 +880,14 @@ same argument as never calling a branch clean because asking failed.
       done, and otherwise go back to (1) and run one more. Keep the count in
       the report, because "clean twice" and "clean once" are what separate
       convergence from a lull, and a Grok recheck of nothing costs a few
-      minutes. Present → run `/review-grok`, which
+      minutes. Present → run `bash .claude/scripts/pr-locality.sh <n>`
+      and `git diff origin/main...HEAD`, write each output to a scratchpad
+      file with `Write`, and run `/review-grok` with the review's path,
+      the verdict's and the diff's — the triage holds no `Bash` and cannot
+      judge the touch set or read the diff itself; without the verdict it
+      applies every accepted site, which is the widening the contract
+      refuses, and without the diff its adjudicator cannot tell a
+      restatement the branch wrote from one it left alone. `/review-grok`
       triages and fixes — **its tool grant deliberately stops short of
       committing**. Then rerun the step 2 checks that apply to what it
       changed: a review fix is still an edit, and committing it unchecked

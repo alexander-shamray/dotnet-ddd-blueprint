@@ -519,9 +519,13 @@ number,reviews`. Three commands kept that grant for the harmless job of finding
 a branch's pull request, and it was a complete bypass of all three filtering
 helpers. **No command grants `Bash(gh pr view:*)` or `Bash(gh pr list:*)` any
 more**: `ship.md` reads state through `pr-state.sh`, `pr.md` feeds the closure
-gate through `pr-closure-input.sh`, all three resolve a branch's PR through
-`pr-for-branch.sh`, and every one fixes its field set, because a caller that
-chooses fields can choose `reviews`.
+gate through `pr-closure-input.sh`, every command that needs a branch's PR
+resolves it through `pr-for-branch.sh` — the test that pins the helper lists
+them — `review-branch.md`, `review-copilot.md` and `ship.md` judge a
+PR's changed paths against the body's `| Class |` and `| Touch set |` rows
+through `pr-locality.sh`, which prints a verdict per path and never the
+rows, and every one fixes its field set, because a caller that chooses
+fields can choose `reviews`.
 
 **The gate that pins this is an ALLOW-list of `gh` subcommands, and it is the
 second one in this repository to be rewritten that way.** Its first version

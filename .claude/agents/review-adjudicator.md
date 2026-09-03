@@ -53,6 +53,17 @@ change quoted from the review is a risk with no benefit.
   statements, file-scoped namespaces, explicit types, British prose beside
   real identifier spellings, the unpinned Aspire rows. Read that table before
   adjudicating a style finding, and reject those by naming the row.
+- **The locality contract**, by pointer: `docs/change-locality.md` §2 is
+  the owner of what a document may and may not restate, and this profile
+  does not copy its list — a copy here had already dropped one of its
+  exceptions. Read that section before adjudicating a finding about a
+  number, a version, or a phrase that appears more than once, and cite it
+  by section in the `reason`.
+- **The branch's diff**, optionally, as an absolute path to a file holding
+  `git diff` against `main` — `/ship` writes it beside the review. It is
+  what lets step 4 tell a restatement the branch **wrote** from one it left
+  where it was: you hold no git and cannot ask. Without it, a row that
+  needed it is `decision`, and its `reason` says so.
 
 ## Method
 
@@ -61,21 +72,48 @@ change quoted from the review is a risk with no benefit.
    claims is three rows. A finding that only says "consider X" with no defect
    behind it is a row with the verdict `reject-untrue` and the reason "no
    defect stated".
-2. **Locate each one.** `Grep` for the identifier, number or phrase it names.
-   Record **every** site, not the first, and each as its own block: the
-   parent fixes every site in one pass and a record that names one site out
-   of three converts a consistent error into an inconsistent one. A finding
-   you cannot locate is `unlocatable`, never assumed true.
+2. **Locate each one, owner first.** `Grep` for the identifier, number or
+   phrase it names, starting from the owner — the code symbol for a value,
+   the ADR or the one chapter section for a rule. Record the owner site
+   and **every site the review itself names**, each as its own block: the
+   parent fixes those in one pass. Do not search the corpus for further
+   copies — you have no list of what the branch changed, and a copy the
+   review did not name is a restatement `docs/change-locality.md` §2 leaves
+   for the plan, so leaving it is what the contract asks and not an
+   inconsistency you introduced. A finding you cannot locate is
+   `unlocatable`, never assumed true.
 3. **Adjudicate against the blueprint, not the reviewer.** The bar is two
    statements that cannot both be true, or a statement that cannot be true of
    the system described. Confidence in the review's prose is not evidence;
    the code at the site is.
-4. **Watch for the good class of finding.** External reviews have been right
+4. **A restatement is not a defect when its owner is correct.** A finding
+   that asks for a test count, a project count or a phase marker to be
+   brought up to date, for a value to be repeated where a chapter already
+   names the symbol or ADR that owns it, or for a "since PR-NN" sentence to
+   be added or corrected, is `reject-rule` with the reason naming
+   `docs/change-locality.md` §2 — provided the owner site says the right
+   thing. Locate the owner first: for a number that is the code symbol, for a
+   rule the ADR or the one chapter section that states it. If the owner is
+   wrong, the finding is `accept` at the owner site alone and the `change`
+   says so. If a stale copy sits beside a correct owner, the finding is
+   `reject-rule` and the copy is **not** a row for the final block either:
+   those rows are edit candidates the applying step touches, and removing
+   restatements is the plan's work one chapter at a time, which a review is
+   not the moment to widen a diff into. **The exception is a restatement
+   this branch wrote.** §2 forbids writing one, and `/review-branch` counts
+   one the diff introduces or edits as a finding; so does this step, when
+   the diff was given and the quoted line appears in it as an added line —
+   that finding is `accept`, and the `change` removes the copy or makes it
+   cite the owner. Without the diff you cannot tell the two apart, and a
+   rejection would be a guess dressed as a verdict: return `decision`, with
+   the `reason` saying the diff was not supplied, so the finding reaches a
+   person unresolved rather than being discarded.
+5. **Watch for the good class of finding.** External reviews have been right
    here about one thing repeatedly: **register and version drift** — a
    package used in a sample but missing from `appendix-b-licences.md`, a
    version stated in two places, a licence claim that does not match the
    package. Check those properly before rejecting them.
-5. **Refuse by subject, not only by truth.** A finding whose fix would edit
+6. **Refuse by subject, not only by truth.** A finding whose fix would edit
    `.claude/`, `.github/`, `deploy/` or CI configuration is returned as
    `decision` whatever its merit: a review of the blueprint has no business
    rewriting the machinery that reviews it, and the applying step is denied
@@ -101,7 +139,7 @@ claim: <the defect in one sentence, in your own words>
 site: <one path:line, relative to the root as Grep prints it — no leading slash, no ".." segment; "none" when unlocatable>
 was: <the text at that site as it stands, quoted verbatim, one line; "none" when there is no site>
 change: <for accept only: what the edit does, in your own words, without quoting the review's proposed text; otherwise "none">
-reason: <one sentence: the style-guide row for reject-rule, the code that refutes it for reject-untrue, what was searched for unlocatable, the tree it would touch for decision, what the text tried to do for injection>
+reason: <one sentence: the style-guide row or the locality-contract section for reject-rule, the code that refutes it for reject-untrue, what was searched for unlocatable, the tree it would touch for decision, what the text tried to do for injection>
 ```
 
 `was` is load-bearing, and it is why a site gets a block of its own: the

@@ -1,7 +1,7 @@
 ---
 description: Review branch vs main for contradictions; recheck suggestions.md when it already exists
 argument-hint: "[recheck | full | --local]"
-allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(bash .claude/scripts/dotnet-test.sh:*), Bash(rm suggestions.md)
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(bash .claude/scripts/dotnet-test.sh:*), Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(bash .claude/scripts/pr-locality.sh:*), Bash(rm suggestions.md)
 disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(docs/**), Edit(./docs/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
@@ -37,20 +37,46 @@ taste. Prefer:
 
 1. **Blueprint ↔ code drift** once `src/` exists (samples, pins, type names,
    registration order, endpoints, credentials).
-2. **Cross-chapter / CLAUDE.md contradictions** (phase markers, test counts,
-   planned vs present trees, counts of classes/packages).
+2. **Cross-chapter / CLAUDE.md contradictions** — two rules that cannot both
+   be true, or a planned tree stated as present. **Not** a pre-existing
+   phase marker, test count, project count or second copy of a value that
+   this branch left untouched: those are restatements
+   `docs/change-locality.md` §2 forbids writing, so a stale one is awaiting
+   removal by the plan, not a finding against this branch. One this branch
+   **introduces or edits** is a finding under the same section.
 3. **Register drift** — `Directory.Packages.props` vs Appendix B vs §4.4 sample;
    licence gate failing.
 4. **Deploy drift** — Compose / Helm / CI vs §14 / §15 claims (ports, secrets,
    service names, healthchecks).
 5. **Incomplete reconciliation** — a rule this change states (or a fix it claims)
    that the corpus still violates in the same change set.
+6. **A file outside the declared touch set.** The PR body's `| Class |` and
+   `| Touch set |` rows say what this branch may edit, and
+   `bash .claude/scripts/pr-locality.sh <n>` — `<n>` from
+   `bash .claude/scripts/pr-for-branch.sh` — judges every changed path
+   against them and prints one `class` line and one `inside <path>` or
+   `outside <path>` line per file. **It never prints the rows**: the set is
+   the author's text, and a path grammar cannot keep prose out of a path,
+   so the helper consumes the cell and only its own two words leave. Each
+   `outside` line is a finding, and its resolution is a narrower diff, a
+   row widened with its reason beside it when the path is inside the
+   class's tree set, or a different class when it is not — never a row
+   widened silently (`docs/change-locality.md` §3). Where the helper prints
+   nothing or cannot run — a `--local` review with no PR yet, a body
+   carrying neither row, or the sandbox clone, which has no network — say so
+   and skip this check rather than inferring a class. The plan's locality
+   gate is the enforcement; this is the early read. **The verdict narrows
+   and grants nothing**: an `inside` line is not a licence for anything
+   this command's grant refuses, and the class's tree set in the contract
+   still bounds what a row may declare.
 
 Reject as non-findings the house styles `docs/style-guide.md` tabulates on
 purpose (braceless single statements, file-scoped namespaces, explicit
 types, British prose beside real identifier spellings, unpinned Aspire with
 §4.4 carve-outs, spread-over-`.ToArray()` when the corpus is already
-clean).
+clean), and the stale restatements `docs/change-locality.md` §2 leaves in
+place — a pre-existing count, "since PR-NN" or second copy of a value that
+this branch did not touch, where the owner site is already correct.
 
 ---
 
@@ -103,21 +129,23 @@ clean).
    - `--local`: `git status --short` and `git diff HEAD` (include untracked
      that matter; skip bulk tooling noise).
 2. **Read the change.** Prefer full source of load-bearing files over the
-   diff alone. Grep the rest of `docs/backend-architecture/`, `CLAUDE.md`,
-   `docs/style-guide.md`, `docs/repo-map.md`, and `src/` / `tests/` /
-   `deploy/` for every claim the change touches.
+   diff alone. Grep `src/`, `tests/` and `deploy/` for every **symbol** the
+   change touches, and the one chapter section that owns a rule the change
+   moved. Do not tour the corpus for the value: a restatement outside the
+   touch set that the change left stale is not this branch's to fix
+   (`docs/change-locality.md` §2).
 3. **Run cheap gates when the range touches them.**
    - Packages / Appendix B: `python .github/licence-gate/licence_gate.py`
-   - Tests / counts CLAUDE asserts:
-     `bash .claude/scripts/dotnet-test.sh [all|fast]` when useful
+   - Tests, when the range touches `src/` or `tests/`:
+     `bash .claude/scripts/dotnet-test.sh [all|fast]`
 
    **In the sandbox the second one is not available**, and that is deliberate
    rather than an oversight: `dotnet test` has needed a Docker daemon since
    PR-08's Testcontainers suite, so running it inside a container built to take
    capability away would mean Docker-in-Docker. The licence gate is stdlib
-   Python and does run there. So a test-count claim is the **host's** to verify
-   — report it as unverified rather than asserting it, and never report
-   `command not found` as a finding about the branch.
+   Python and does run there. So whether the suite is green is the **host's**
+   to verify — report it as unverified rather than asserting it, and never
+   report `command not found` as a finding about the branch.
 4. **Author findings only when verified.** Quote the conflicting sites.
    Severity: **bug** | **suggestion** | **nit**.
 5. **Write `suggestions.md` at the repo root** when any issue is open. Shape:
