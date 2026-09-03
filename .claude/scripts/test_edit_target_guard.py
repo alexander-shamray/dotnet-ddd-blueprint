@@ -6,14 +6,27 @@ harness ever calls it — so the last class here has the registration itself as
 its subject, and it is the one that fails if the matcher stops naming a tool
 that writes.
 
-**The link cases are run against a real link on both platforms, and neither is
-a skip.** A skip on a missing capability reports a pass, which is the fail-open
-this repository refused when `dotnet test` was made to need a real Docker
-daemon. POSIX gets a symbolic link; Windows refuses one to an unprivileged
-process — measured, `WinError 1314` — and gets a directory junction instead,
-which is the same property one component up: a path whose spelling is inside an
-allowed tree and whose resolution is not. If neither is available this module
+**The link cases run against a real link, and against EVERY primitive the
+platform grants rather than the first one found.** A symbolic link where the
+session may make one; a directory junction on Windows, which is all an
+unprivileged process gets there — measured, `WinError 1314` — and which is the
+same property one component up: a path whose spelling is inside an allowed tree
+and whose resolution is not. Taking the first would have left the junction
+fallback unexercised on the one platform that needs it, since the GitHub
+Windows runner turns out to hold `SeCreateSymbolicLinkPrivilege` and reports
+`symlink, junction`.
+
+**Neither is a skip.** A skip on a missing capability reports a pass, which is
+the fail-open this repository refused when `dotnet test` was made to need a
+real Docker daemon; where a platform grants no primitive at all this module
 fails rather than passing quietly.
+
+**Three platform properties are asserted as the platform's own**, because the
+guard follows each rather than picking one: `..` after a link, which POSIX
+resolves against the link's target and Windows collapses first; case folding,
+which is the *filesystem's* answer rather than the platform's; and which link
+primitives exist. CI runs this module on Linux, Windows and macOS for exactly
+that reason.
 """
 
 import importlib.util
