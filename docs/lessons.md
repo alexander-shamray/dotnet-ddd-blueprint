@@ -633,13 +633,68 @@ own line rather than sending a reader to a file that does not hold it.
   where a comment starts; the escape handling in `_closing_paren` covered
   double quotes and not the unquoted state; and the `DATA_ONLY_COMMANDS`
   boundary was applied to the `git` scan and not to the evaluator pass one
-  function below it. Each fix was correct, and each left the next copy of the
-  model standing. **Several were fail-open** — a force push to `main` admitted,
+  function below it; and `shlex`'s `punctuation_chars` peeled the file
+  descriptor off `2>&1` as an ordinary word, which the run splitter, the push
+  grammar and `subcommand_of` each read as something different and none read
+  as syntax; and the quote scanner had no notion of a heredoc body, so an
+  apostrophe in one opened a quote that ran to the end of the command and hid
+  every later opener from the function whose whole job is finding them — and
+  then the same oversight was still standing in `undecodable_heredoc` and in
+  `stdin_scripts`, one function either side of the fix; and `stdin_scripts`
+  had a parse of a shell WORD of its own, ending a here-string at the first
+  metacharacter, which is the fail-open `word_end` already had recorded in its
+  own docstring; and then the escape-awareness taught to the quote scanner was
+  missing from all **five** of its siblings at once, so one prefix carrying an
+  escaped ANSI-C quote walked past four passes in a single command; and the
+  round that consolidated those five missed the two nested closers, so the
+  same prefix inside `$(…)` walked past the seventh copy. Each fix was
+  correct, and each left the next copy of the model standing.
+  **Several were fail-open** — a force push to `main` admitted,
   more than once — because a model that merely *differs* from the shell's is
   wrong in whichever direction the difference falls, and only one of those
   directions is loud. Where a tool has to agree with another parser, make every
   caller share one implementation of the part that disagrees, and pin the
   agreement with cases in both directions.
+
+  **And when the count of copies stops being small, stop fixing them one at a
+  time.** Five scanners each held their own reading of bash's quoting, and four
+  rounds of review found four separate consequences of that before the fifth
+  found all five at once. What closed it was not a sixth careful copy but a
+  primitive the copies became adapters over — one walk, two public shapes. The
+  signal to make that move is not elegance, it is having fixed the same
+  sentence in a third place.
+
+  **Consolidating copies is a search, and the search is what gets skipped.**
+  Five became adapters over one primitive in a single commit, and the next
+  review found two more — `_closing_paren` and `_closing_brace`, whose own
+  docstrings advertised that they tracked quotes. Grep for the *state* the
+  model keeps, not for the function you remember: `in_single` found all seven
+  in one command, and nobody ran it.
+
+  **And when two of those models feed each other, interleave them rather than
+  alternating.** The heredoc scanner needs the body spans to read the command
+  correctly, and finding the body spans is what it is for. Feeding them back
+  between whole passes converges — one body per pass, measured at n+1 passes
+  for n heredocs — which turns a linear scan into a quadratic one, and this
+  guard's timeout is a fail-open. Appending to the list the scanner is
+  walking, so the spans arrive as they are found, is one pass and the same
+  answer.
+
+  **And measure work, not wall-clock.** The replacement for that test asserted
+  a timing *ratio*, which contradicted this repository's own rule — a timing
+  assertion on CI is a flake — and a contended runner can violate it with no
+  regression at all. What the defect did was re-read a list once per opener, so
+  the instrument is a list that tallies its own reads: 2.00 then 2.00 when the
+  passes are linear, 3.93 then 3.97 when they are not. Deterministic, exact,
+  and it names the mechanism rather than its symptom.
+
+  **And a cost measured on one function is not a cost measured.** That pass
+  was pinned linear by a test over `heredoc_spans`, while the containment scan
+  it had removed still stood in two other functions that every `offence` call
+  reaches — ten million comparisons for 3,200 heredocs, found by profiling
+  rather than by the test that was watching. Measure the entry point, and
+  measure a rate rather than a total: a total goes stale on a faster runner
+  while the shape it stands in for does not.
 
 - **`git checkout <commit> -- <path>` writes the INDEX as well as the working
   tree, and a green suite says nothing about what is staged.** Taking a

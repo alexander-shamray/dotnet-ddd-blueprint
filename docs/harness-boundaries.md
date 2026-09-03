@@ -306,9 +306,10 @@ defeatable rather than theoretically so.
 **What closed it is the second of the two things named here as owed: a rule
 over the executed argv rather than the typed string.**
 `.claude/hooks/guard-git-argv.py`
-is a `PreToolUse` hook on `Bash` that `shlex.split`s the command — the same
-quote removal the shell performs — and judges the resolved argv, so the
-fragments are rejoined before anything is compared and the dodge stops working.
+is a `PreToolUse` hook on `Bash` that resolves the command the way the shell
+would — quote removal, heredoc bodies, comments, line separation and, since
+#183, redirections — and judges the argv that is left, so the fragments are
+rejoined before anything is compared and the dodge stops working.
 **It reaches further than any rule could**, and that is the part worth carrying:
 hooks run on every tool call in the loop, including the read-only `git` forms
 the harness waves through as promptless built-ins, where no allow or deny rule
@@ -629,7 +630,78 @@ no rule is consulted for. The deny stays as defence in depth and the three read
 grants stay with it, because removing them still buys nothing against a
 built-in. What survives as residual is one line rather than a grant: a flag the
 shell *computes* — `F=--output=x; git log $F` — is not visible to a hook that
-resolves quoting but not expansion.
+resolves quoting but not expansion. **#183's redirection strip inherits that
+same bound**, and the residual is now narrower than the sentence above says. An
+expansion written in the source is read four ways — empty, whitespace, its own
+default, and a single-element brace range — because each is what bash does in a
+shell with nothing set, and a command is admitted only if it is safe under all
+of them. So `git ${x:-push} origin +HEAD:main`, `git push${IFS}origin
++HEAD:main`, `git $@push …` and `git p{u..u}sh …` are refused, and so is
+`git ${N}>&1 push origin +HEAD:main`, which an earlier revision of this
+paragraph named as the admitted case.
+
+**What survives is the run-time half alone**: a value the shell is *told*
+rather than one written where the guard can read it — `F=--output=x; git log
+$F`, or `N=2; git log -${N}`. Closing that needs the argv after expansion,
+which no hook is given.
+
+**One construct puts that residual inside a word a caller types literally, and
+it is refused for exactly that reason.** `$"…"` is a *translated*
+double-quoted string: bash resolves it through gettext against `TEXTDOMAIN`
+and `TEXTDOMAINDIR`, both ordinary environment variables, so a catalogue
+placed in the checkout decides what the word says. Measured with a hand-built
+`.mo` — `$"safe"` printed `printf`, and in command position `$"safe" RAN`
+executed it; the same lookup can return `git`. Raised in review, against a
+guard that had already met this form once and refused only the *expansions*
+inside it, as though `$"safe"` were the word `safe`. Every locale quote is
+refused now. The cost is a construct nothing in this repository writes, and
+`$'…'` is unaffected: its escapes are decoded, and one outside the decoded set
+was already refused.
+
+**A shell fed by a process substitution is refused for the same reason a
+printer feeding one is.** `bash < <(printf '%s' '…')` executes the
+substitution's output, and `bash <(echo '…')` executes it as a file — both
+ran, and every pass judged the halves apart: the inner command is data, the
+redirection strip removes `< <(…)` whole because a process substitution *is*
+the target, and what is left is a shell with no script. Reading the inner
+command instead would be right for `<(echo '…')` and wrong for every spelling
+that computes, so this joins `unmodelled_printer` rather than trying. The cost
+is `bash < <(cat script.sh)`, which nothing here writes; `diff <(a) <(b)` and
+`echo <(…)` are untouched, because the run has to be a shell.
+
+**A crash in the guard is a fail-open, so a crash now refuses the command it
+crashed on.** `PreToolUse` reads empty stdout as non-blocking, and a
+traceback is empty stdout — so each of the four crash paths found here (two
+`str.index`, one `list.index`, one recursion) admitted whatever the command
+was, including a force push. Fixing them one at a time leaves the next one
+open, so the direction is set at the door instead. **This is not the same
+answer as the malformed-event case beside it, and the two differ on purpose**:
+an unreadable hook event has established nothing about any command, so
+refusing there would stop the session for a defect in this file, while a crash
+while judging *this* command says this command broke the parser — and refusing
+one command is proportionate, states why, and puts the traceback on stderr.
+
+**Each of those readings was found by measurement, not by reasoning**, and the
+paragraph that stood here reasoned. It claimed every unresolved shape fails
+closed; the second command disproved that, and then four more readings
+disproved the narrower claim that replaced it. **A guard's stated failure
+direction is a claim to measure in every position**, not one to derive from the
+case in front of you.
+
+**A shell reads a script from three places and the third is a pipe**, so the
+guard costs a stated over-refusal to cover it. `bash -c '…'` and
+`bash <<<'…'` put the text where it can be read; `echo '…' | bash` puts it
+one run away, and `cat <<'EOF' | bash` puts it in a heredoc belonging to a
+run that is not a shell at all. What decides is whether some later stage of
+the pipeline will *execute* its stdin, and that cannot be settled by naming
+the wrappers which exec their argument — `command`, `env`, `nohup`, `nice`,
+`stdbuf`, `setsid`, `timeout`, `ionice` and `chrt` are nine before anyone has
+looked hard, and the tenth is the bypass. So a shell name **anywhere** in a
+stdin-consuming run counts, which is the direction `DATA_ONLY_COMMANDS`
+already argues for, and it costs `echo '…git push…' | grep bash` a refusal
+it does not deserve. That shape needs a printer writing a push into a pipeline
+whose far end merely mentions a shell; it has never been typed here, and the
+alternative fails open on a wrapper nobody listed.
 
 **A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because

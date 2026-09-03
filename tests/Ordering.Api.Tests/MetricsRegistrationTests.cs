@@ -299,8 +299,26 @@ public class MetricsRegistrationTests
         // check proves the connection opens and nothing about this table, so
         // it does not report it either. The log is the only signal there is,
         // which makes an unasserted one a signal nobody would miss removing.
-        logger.Errors.Count.ShouldBe(3, "one per gauge, carrying the exception");
-        logger.Errors.ShouldAllBe(e => e is InvalidOperationException);
+        // Counted on THIS thread only, and that is not a detail. A
+        // `MeterProvider` built by any host in this assembly registers
+        // `AddMeter("Ordering.Outbox")` — by NAME, in ObservabilityExtensions
+        // — so it matches the meter created here and collects these very
+        // gauges on its own export thread, logging into this logger. Seven
+        // host-building classes run in parallel with this one, so the count
+        // was whatever their timers happened to add: CI read 7 where 3 was
+        // asserted, and a rerun of the same commit passed.
+        //
+        // `RecordObservableInstruments()` invokes the callbacks synchronously
+        // on the caller, so the calling thread is exactly "our pass" and a
+        // foreign collector is exactly "not ours". Filtering on it keeps the
+        // assertion exact instead of loosening it to a lower bound.
+        //
+        // The assembly-wide switch `Common.Web.Tests` carries was the other
+        // candidate and is the wrong tool here: its argument is that
+        // serialising is cheap *because that suite needs no container*, and
+        // this one does. Same hazard, different price, different answer.
+        logger.OwnErrors.Count.ShouldBe(3, "one per gauge, carrying the exception");
+        logger.OwnErrors.ShouldAllBe(e => e is InvalidOperationException);
     }
 
     private static string LaneOf(ReadOnlySpan<KeyValuePair<string, object?>> tags)
@@ -366,7 +384,29 @@ public class MetricsRegistrationTests
     /// </remarks>
     private sealed class RecordingLogger : ILogger<OutboxMetrics>
     {
-        public List<Exception?> Errors { get; } = [];
+        private readonly int owner = Environment.CurrentManagedThreadId;
+        private readonly List<Exception?> errors = [];
+
+        /// <summary>
+        /// The errors logged by the thread that constructed this logger, which
+        /// is the thread <c>RecordObservableInstruments()</c> runs the gauge
+        /// callbacks on.
+        /// </summary>
+        /// <remarks>
+        /// A foreign <c>MeterProvider</c> — any host in this assembly builds
+        /// one, and it subscribes to this meter by NAME — collects the same
+        /// gauges on its own export thread and logs here too. Recording the
+        /// thread is what separates this test's own pass from that traffic,
+        /// and it also removes the data race a shared unsynchronised list had.
+        /// </remarks>
+        public IReadOnlyList<Exception?> OwnErrors
+        {
+            get
+            {
+                lock (this.errors)
+                    return [.. this.errors];
+            }
+        }
 
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
@@ -380,8 +420,14 @@ public class MetricsRegistrationTests
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            if (logLevel == LogLevel.Error)
-                Errors.Add(exception);
+            if (logLevel != LogLevel.Error)
+                return;
+
+            if (Environment.CurrentManagedThreadId != this.owner)
+                return;
+
+            lock (this.errors)
+                this.errors.Add(exception);
         }
     }
 

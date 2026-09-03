@@ -887,10 +887,10 @@ Delivery:
 **This moved to [`docs/harness-boundaries.md`](docs/harness-boundaries.md),
 verbatim.** It is the inventory of what the harness grants these commands and
 what it refuses them: the `Edit`/`Write` rule, the `.claude/` deny list and its
-self-lock, the review sandbox and its two residuals, the numbered inventory of
-grants wider than the operation they buy, the argv hook that closed the ones a
-pattern could not, the edit-target hook that closed the one a *spelling* could
-not, and what separates the two sweeps.
+self-lock, the review sandbox and the residual that still stands, the numbered
+inventory of grants wider than the operation they buy, the argv hook that
+closed the ones a pattern could not, the edit-target hook that closed the one
+a *spelling* could not, and what separates the two sweeps.
 
 **Read it before touching anything under `.claude/`** — a command's
 frontmatter, a helper script, `settings.json`, a hook or a subagent profile.

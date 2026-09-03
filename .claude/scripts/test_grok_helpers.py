@@ -1831,59 +1831,117 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         self.assertEqual([], self.calls())
 
     TRAILER = "Filed by an authorised sweep and verified at filing by a second read-only auditor."
+    HAND_TRAILER = "Filed by hand rather than by a sweep: no second auditor verified it at filing."
     STDIN = f"a title\n\nthe body\n\n{TRAILER}\n"
+    HAND_STDIN = f"a title\n\nthe body\n\n{HAND_TRAILER}\n"
 
     def test_no_arguments_prints_the_usage_line(self):
         result = self.run_helper()
         self.assert_refused_before_gh(result)
         self.assertIn(
-            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low> < title, blank line, body ending in the trailer",
+            "usage: gh-issue-create.sh <security|bug> <critical|high|medium|low>"
+            " <sweep|hand> < title, blank line, body ending in the trailer",
             result.stderr,
         )
 
-    def test_the_argument_count_is_exactly_two(self):
+    def test_the_argument_count_is_exactly_three(self):
         # A title on the command line is the free parameter the fifth review
         # round named: it crossed the parent's shell before the helper ran.
         self.assert_refused_before_gh(self.run_helper("bug", body=self.STDIN))
-        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", body=self.STDIN))
-        self.assert_refused_before_gh(self.run_helper("bug", "low", "--repo", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("a title", "bug", "low", "sweep", body=self.STDIN))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", "--repo", body=self.STDIN))
 
     def test_a_kind_outside_the_vocabulary_is_refused(self):
         # `documentation` is a real label on this tracker and is refused on
         # purpose: neither sweep files one, so the helper's vocabulary is the
         # sweeps' and not the tracker's.
+        #
+        # **The `hand` route does not change that, and review asked whether it
+        # should.** `CLAUDE.md` says in the same sentence that names three
+        # kinds that the vocabulary is wider than the helper, because
+        # `gh-label-ensure.sh` creates six labels and `documentation` is one of
+        # GitHub's own defaults that this repository must not re-create.
+        # Admitting it here would mean widening that helper for a label it is
+        # deliberately not the owner of, and nothing denies a session's raw
+        # `gh issue create` — measured, there is no `gh` rule in
+        # `.claude/settings.json` at all — so a documentation issue is filed
+        # the way the eleven carrying that label already were.
         for kind in ("documentation", "Security", "security --force", "-R other/repo", ""):
             with self.subTest(kind=kind):
-                self.assert_refused_before_gh(self.run_helper(kind, "high", body=self.STDIN))
+                self.assert_refused_before_gh(self.run_helper(kind, "high", "sweep", body=self.STDIN))
 
     def test_a_severity_outside_the_four_is_refused(self):
         for severity in ("info", "High", "high --force", "-R other/repo", ""):
             with self.subTest(severity=severity):
-                self.assert_refused_before_gh(self.run_helper("bug", severity, body=self.STDIN))
+                self.assert_refused_before_gh(self.run_helper("bug", severity, "sweep", body=self.STDIN))
 
     def test_an_empty_title_is_refused(self):
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="\n\nthe body\n"))
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body=""))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="\n\nthe body\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body=""))
 
     def test_a_body_without_the_blank_separator_is_refused(self):
         # A body piped without its title line would otherwise file under its
         # own first sentence, with the second sentence lost into the title.
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="the body\nand more\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="the body\nand more\n"))
 
     def test_a_stdin_that_ends_before_the_separator_is_refused(self):
         # The sixth review round's case: `read` fails at EOF and leaves the
         # separator unset, which an `|| true` read as blank and filed with an
         # empty body.
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n"))
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="a title\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="a title"))
+
+    def test_a_route_outside_the_two_is_refused(self):
+        # #184: the route decides which fixed line the body must end with, and
+        # it is a closed set like the other two. A spelling outside it is
+        # refused rather than defaulted — a default is precisely how the
+        # unconditional provenance claim would come back.
+        for route in ("sweeps", "Sweep", "auto", "sweep --force", "-R other/repo", ""):
+            with self.subTest(route=route):
+                self.assert_refused_before_gh(
+                    self.run_helper("bug", "low", route, body=self.STDIN))
+
+    def test_each_route_requires_the_line_that_is_true_of_it(self):
+        # **The point of #184, stated as a test rather than as a sentence.**
+        # The helper required a sweep's provenance from every body it
+        # accepted, hand filings through it included — so an issue filed by
+        # hand out of a review triage was made to claim that a sweep filed it
+        # and that a second read-only auditor confirmed it. #183 carried that
+        # claim until it was edited afterwards.
+        #
+        # It is the sweeps' only route rather than every issue's: nothing
+        # denies a session's raw `gh issue create`. An earlier revision of this
+        # comment said otherwise, which is the same overstatement the helper's
+        # own header carried and this pull request corrected there.
+        #
+        # So neither line is accepted under the other's route. That is what
+        # keeps the sentence worth reading: a claim every issue makes is a
+        # claim that distinguishes nothing.
+        self.assert_refused_before_gh(
+            self.run_helper("bug", "low", "hand", body=self.STDIN))
+        self.assert_refused_before_gh(
+            self.run_helper("bug", "low", "sweep", body=self.HAND_STDIN))
+
+    def test_a_hand_filing_reaches_gh_with_its_own_trailer(self):
+        # And the positive control on the other half: the hand route files,
+        # rather than merely refusing the sweep's sentence. The body reaching
+        # `gh` is the one that was piped in, trailer included.
+        result = self.run_helper("bug", "low", "hand", body=self.HAND_STDIN)
+        self.assertEqual(0, result.returncode, result.stderr)
+        d = Path(self.dir)
+        self.assertEqual(
+            f"the body\n\n{self.HAND_TRAILER}\n",
+            (d / "body").read_text(encoding="utf-8"),
+        )
 
     def test_a_body_without_the_trailer_is_refused(self):
         # The detector for an early heredoc close: a body cut short by a
         # repository line equal to the delimiter has lost its last line.
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n\nthe body\n"))
-        self.assert_refused_before_gh(self.run_helper("bug", "low", body="a title\n\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="a title\n\nthe body\n"))
+        self.assert_refused_before_gh(self.run_helper("bug", "low", "sweep", body="a title\n\n"))
         self.assert_refused_before_gh(
-            self.run_helper("bug", "low", body=f"a title\n\n{self.TRAILER}\n\nmore after it\n")
+            self.run_helper("bug", "low", "sweep", body=f"a title\n\n{self.TRAILER}\n\nmore after it\n")
         )
 
     def test_a_repository_line_equal_to_a_naive_delimiter_is_the_hazard_and_the_token_is_the_rule(self):
@@ -1902,7 +1960,7 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         env["PATH"] = self.dir + os.pathsep + env["PATH"]
         script = (
             'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
-            f"bash {str(self.HELPER)!r} bug high <<'ISSUE_BODY_END'\n"
+            f"bash {str(self.HELPER)!r} bug high sweep <<'ISSUE_BODY_END'\n"
             "a title\n"
             "\n"
             f"{body}"
@@ -1933,7 +1991,7 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         env["PATH"] = self.dir + os.pathsep + env["PATH"]
         script = (
             'case "$(command -v gh)" in */issue-stub-*/gh) ;; *) exit 97 ;; esac\n'
-            f"bash {str(self.HELPER)!r} security high <<'ISSUE_BODY_END'\n"
+            f"bash {str(self.HELPER)!r} security high sweep <<'ISSUE_BODY_END'\n"
             f"{title}\n"
             "\n"
             "the body\n"
@@ -1955,7 +2013,7 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         # everything would pass every case above.
         title = "`/security-sweep` files a title that begins with a slash"
         body = f"the body\n\n{self.TRAILER}\n"
-        result = self.run_helper("security", "high", body=f"{title}\n\n{body}")
+        result = self.run_helper("security", "high", "sweep", body=f"{title}\n\n{body}")
         self.assertEqual(0, result.returncode, result.stderr)
         create = [c for c in self.calls() if c.startswith("issue create ")]
         self.assertEqual(1, len(create), self.calls())
@@ -3682,6 +3740,24 @@ class WhatSuppressesIsDecidedByCodeNow(unittest.TestCase):
                 )
 
 
+class _TallyingList(list):
+    """A list that records how many elements are read out of it.
+
+    The instrument for `test_the_whole_judgement_stays_linear_in_the_heredocs`,
+    which needs a count rather than a clock — the defect it pins re-read a
+    list, so reads are what it costs and reads are deterministic.
+    """
+
+    def __init__(self, items, tally):
+        super().__init__(items)
+        self.tally = tally
+
+    def __iter__(self):
+        for item in super().__iter__():
+            self.tally[0] += 1
+            yield item
+
+
 class TheGitArgvGuard(unittest.TestCase):
     """#30 and #23 — two holes a permission rule cannot close, closed at argv.
 
@@ -5138,6 +5214,1528 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("F=--output=/tmp/x; git log $F")
         self.assertAdmitted(
             'sh -c "$(echo \'git push origin +HEAD:main\')"')
+
+        # **Both of these refuse now, and the second one used to be the
+        # example of the residual.** It was admitted because `push_offence`
+        # stops at the first non-flag it does not recognise, and the paragraph
+        # in `docs/harness-boundaries.md` said so. Then the guard grew a
+        # reading where an expansion is WHITESPACE — `${IFS}` — and under that
+        # reading `${N}` splits the word, leaving `git >&1 push origin
+        # +HEAD:main` for the strip to resolve into the push it is.
+        #
+        # This pair is kept as the pin it was built to be: it fired the moment
+        # the residual narrowed, which is exactly what it was written for, and
+        # the paragraph moved in the same change rather than a release later.
+        self.assertRefused("git push origin ${N}>&1 main")
+        self.assertRefused("git ${N}>&1 push origin +HEAD:main")
+
+        # What actually remains is the run-time half, which no reading here can
+        # reach: a value the shell is TOLD at run time rather than one written
+        # in the source.
+        self.assertAdmitted("N=2; git log -${N}")
+
+    def test_a_redirection_is_not_an_argument_to_the_program(self):
+        # **#183, and the file descriptor is the whole of it.**
+        # `shlex(punctuation_chars=True)` emits a maximal run of `();<>|&` as
+        # ONE token, so `>&` arrives whole — but a digit is not punctuation, so
+        # the `2` of `2>&1` detaches and survives as an ordinary WORD. It then
+        # reaches every check that counts non-flags, and `push_offence` found
+        # three positionals where it requires two. Measured on this host while
+        # pushing PR #182's branch: the push was refused with the redirection
+        # and succeeded without it.
+        #
+        # Each of these is a push `ship.md` actually makes, wearing the
+        # redirection that captures its output.
+        for command in (
+            "git push -u origin fix/some-branch 2>&1",
+            "git push -u origin fix/some-branch 2>&1 | tail -5",
+            "git push origin fix/some-branch 2>/dev/null",
+            "git push origin fix/some-branch >/tmp/log 2>&1",
+            "git push origin fix/some-branch &>/tmp/log",
+            "git push origin fix/some-branch 1>&2",
+            "git push origin HEAD:refs/heads/fix/some-branch 2>&1",
+            "git -C /tmp/x push -u origin fix/some-branch 2>&1",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+    def test_a_redirection_hides_no_push_from_the_grammar(self):
+        # **The half the issue did not name, and it fails OPEN.** The same
+        # stray word shifts the positional UNPACK, not merely the count: in
+        # `git push -u origin 2>&1 +HEAD:main` the `2` is taken for the
+        # refspec — it satisfies `SAFE_REF` — while the real `+HEAD:main` falls
+        # past the `>&` boundary into a run of its own. Bash runs a FORCE PUSH
+        # TO MAIN, and the guard admitted it. Measured against the hook as
+        # shipped, alongside three further spellings.
+        #
+        # This is the third instance of one lesson: the lexer knows a rule the
+        # run splitter does not. It is why the fix is a strip in the ONE
+        # pipeline both paths read, rather than a relaxed count in the single
+        # check that happened to be looked at.
+        for command in (
+            "git push -u origin 2>&1 +HEAD:main",
+            "git push origin 2>&1 main",
+            "git push origin 2>&1 --mirror",
+            "git push -u origin 2>/dev/null +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_redirection_before_the_subcommand_hides_no_command(self):
+        # The same root cause reaching the run splitter rather than the push
+        # grammar. `git 2>&1 log --output=/tmp/probe` split into `['git','2']`
+        # and `['1','log',…]`: the second run holds no `git` token, so
+        # `git_segments` yielded nothing at all and #30's write primitive was
+        # admitted. The `ext::` check went the same way, because
+        # `subcommand_of` read `2` and found it in no repository subcommand.
+        for command in (
+            "git 2>&1 log --output=/tmp/probe",
+            "git 2>&1 push origin +HEAD:main",
+            "git 2>/dev/null fetch ext::sh -c touch% /tmp/pwned",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_substitution_is_part_of_the_target_word(self):
+        # **A word ends at a metacharacter, and the `(` of `$(…)` is not one to
+        # bash.** Stopping the target there left the parentheses standing,
+        # `is_boundary` read them as run boundaries, and
+        # `git >/tmp/$(echo x) push origin +HEAD:main` had its `git` severed
+        # from its own subcommand — the force push ran and the guard admitted
+        # it. Raised in review on the change that closed the descriptor half;
+        # all four verified allowed before the fix.
+        for command in (
+            "git >/tmp/$(echo x) push origin +HEAD:main",
+            "git >/tmp/$(echo x) log --output=/tmp/probe",
+            "git 2>/tmp/$((1+1)) push origin +HEAD:main",
+            "git >$(echo /tmp/x) push origin --mirror",
+            "git >/tmp/`echo x` push origin +HEAD:main",
+            "git <<<$(echo x) push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # A substitution swallowed into the span is still judged, because the
+        # recursion over `expandable_regions` runs on the raw command before
+        # anything is stripped. Without this the fix would trade one hole for
+        # another.
+        self.assertRefused("git log >/tmp/$(git push origin +HEAD:main)")
+        self.assertRefused("git log >/tmp/`git push origin +HEAD:main`")
+
+        # And an UNBALANCED opener stops the word rather than swallowing the
+        # rest of the line, which would hide whatever followed it.
+        self.assertRefused("git log >/tmp/$( ; git push origin +HEAD:main")
+        self.assertAdmitted("git log >/tmp/x")
+        self.assertAdmitted("git log >(cat) -1")
+
+    def test_a_process_substitution_can_be_the_target(self):
+        # **The round before this one asserted in a comment that the run
+        # splitter covered this, which was true of the INNER command and false
+        # of the outer one.** In `git > >(tee /tmp/log) push origin +HEAD:main`
+        # both `>` were removed separately and `(tee /tmp/log)` stayed as a
+        # boundary between `git` and its subcommand — bash runs the force push,
+        # and the guard admitted it. Raised in review; verified allowed.
+        self.assertRefused("git > >(tee /tmp/log) push origin +HEAD:main")
+        self.assertRefused("git 2> >(cat) push origin --mirror")
+
+        # Consuming it obliges the guard to judge it somewhere, so
+        # `substitutions` grew the same construct in the same change. Without
+        # this pair the fix would trade the outer hole for an inner one.
+        self.assertRefused("git log > >(git push origin +HEAD:main)")
+        self.assertRefused("git log 2> >(git push origin --mirror) -1")
+
+        # And the bound on that: bash does not perform a process substitution
+        # inside double quotes, so neither does the extractor. A commit body
+        # quoting one is prose, not a command.
+        self.assertAdmitted('git commit -m "see <(foo) in the notes"')
+        self.assertAdmitted(
+            'git commit -m "a <(git push origin +HEAD:main) quoted"')
+
+    def test_a_target_word_carries_its_expansions_whole(self):
+        # Two more shapes of one thing: what counts as part of the redirect
+        # WORD. Both verified allowed, both raised in review.
+        #
+        # The backtick scan was not escape-aware, so it ended the word at the
+        # inner delimiter of a NESTED backtick and left the outer one where the
+        # subcommand goes — `substitutions` already scanned this way, and the
+        # two now agree. And a parameter expansion is part of the word
+        # metacharacters and all: `>${PATH:+/tmp/x;y}` redirects to `/tmp/x;y`,
+        # where returning at the `;` left a separator standing.
+        for command in (
+            "git >/tmp/`echo \\`echo x\\`` push origin +HEAD:main",
+            "git >${PATH:+/tmp/x;y} push origin +HEAD:main",
+            "git >${HOME}/x push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_heredoc_delimiter_may_be_quoted_in_parts(self):
+        # **A delimiter is a WORD and a word may be quoted in fragments**,
+        # which three alternatives in one pattern could not express. `<<E"OF"`
+        # names `EOF` to bash and takes its body verbatim; the pattern matched
+        # `<<E`, left `"OF"` standing where the subcommand goes, and the push
+        # ran. Raised in review; verified allowed.
+        #
+        # The fix is in `HEREDOC` and `_heredoc_delimiter`, so it reaches
+        # `strip_heredocs` as well as the redirection strip — the same
+        # mis-parse decided where a body ended.
+        for command in (
+            'git <<E"OF" push origin +HEAD:main\nEOF',
+            'git <<"EOF" push origin +HEAD:main\nEOF',
+            "git <<E'OF' push origin --mirror\nEOF",
+            "git <<\\EOF push origin +HEAD:main\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **`$'…'` is a quoting form, and reading its `$` as an ordinary
+        # character was the same defect one spelling along.** `<<$'EOF'` names
+        # `EOF`; taking the delimiter for `$EOF` meant the real `EOF` line
+        # terminated nothing, so every command after it — the push included —
+        # was swallowed as body text. Raised in review; verified allowed.
+        self.assertRefused(
+            "git commit -F - <<$'EOF'\nEOF\ngit push origin +HEAD:main\n$EOF")
+
+        # **An UNDECODABLE delimiter is refused outright, and the fail-safe it
+        # replaces was wrong.** `$'…'` decodes escapes and this file does not.
+        # The first answer was to open no body, on the reasoning that lines
+        # left unstripped are read as commands and so refuse — true only while
+        # the command still TOKENISES. A body carrying an unmatched quote sends
+        # the guard down its `ValueError` path, and that fallback scans for
+        # forbidden flags and `ext::` alone: it does not enforce the push
+        # allow-list. Raised in review with exactly that body; measured, the
+        # force push was admitted.
+        #
+        # So both spellings refuse now, and the second is the one the old
+        # fail-safe let through.
+        self.assertRefused(
+            "git commit -F - <<$'E\\x4fF'\nEOF\ngit push origin +HEAD:main\nEOF")
+        self.assertRefused(
+            "git commit -F - <<$'E\\x4fF'\n"
+            "a line with an unmatched '\n"
+            "EOF\n"
+            "git push origin +HEAD:main")
+
+        # The control: a delimiter this file CAN decode is not refused for
+        # being quoted in the same form.
+        self.assertAdmitted("git commit -F - <<$'EOF'\na message\nEOF")
+
+    def test_an_apostrophe_inside_double_quotes_opens_nothing(self):
+        # **A quote character is only a quote where quoting can start.**
+        # `git log "don't $(git push origin +HEAD:main)"` runs the push; the
+        # substitution scanner entered single-quote state at `don't`, never saw
+        # the `$(`, and `shlex` then handed back the whole double-quoted value
+        # as data. Raised in review; verified allowed, on `main` as well.
+        #
+        # The state this needed had been added a few commits earlier for the
+        # process-substitution branch and simply was not read here — one model
+        # of the shell, consulted in one of the two places that needed it.
+        self.assertRefused('git log "don\'t $(git push origin +HEAD:main)"')
+        self.assertRefused('git commit -m "it\'s `git push origin --mirror`"')
+
+        # And the control, because the fix must not stop `'` quoting where it
+        # really does: an apostrophe OUTSIDE double quotes still opens a
+        # single-quoted string, so the substitution inside one is inert.
+        self.assertAdmitted("git commit -m 'a $(literal) mention'")
+
+    def test_a_continuation_cannot_smuggle_a_substitution_past_the_scan(self):
+        # The continuation join was in the tokenising pipeline only, so it ran
+        # after `expandable_regions` had already looked for substitutions.
+        # Bash removes `\<newline>` inside double quotes too, so
+        # `git log "$\<newline>(git push origin +HEAD:main)"` is a live `$(`
+        # that the scan never saw. Raised in review; verified allowed.
+        self.assertRefused('git log "$\\\n(git push origin +HEAD:main)"')
+        self.assertRefused("git log \"`git push \\\norigin +HEAD:main`\"")
+
+    def test_a_heredoc_body_performs_no_process_substitution(self):
+        # **The over-refusal the previous round introduced, and it is the
+        # failure this file's docstring says gets a guard turned off.** A bare
+        # heredoc body expands parameters, commands and arithmetic — not
+        # process substitutions — so reading `<(…)` there made literal prose
+        # executable, and a heredoc quoting a push as an EXAMPLE was refused.
+        # Raised in review; measured.
+        self.assertAdmitted(
+            "git commit -F - <<EOF\n"
+            "see <(git push origin +HEAD:main) in the docs\n"
+            "EOF")
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\n"
+            "and >(git push origin --mirror) too\n"
+            "EOF")
+
+        # The control on the other side: a command line still performs one, so
+        # the narrowing must not reach the case the previous round closed.
+        self.assertRefused("git log > >(git push origin +HEAD:main)")
+
+    def test_a_line_continuation_is_removed_before_anything_reads_a_word(self):
+        # **bash deletes a backslash-newline before it tokenises**, so
+        # `git 2\<newline>>&1 push origin +HEAD:main` reaches git as
+        # `git push origin +HEAD:main`. The guard read the backslash as an
+        # ordinary escape: the descriptor scan stopped at it, `>&1` was
+        # stripped alone, and `2` was left sitting where the subcommand goes.
+        # The bare form does the same with no descriptor at all.
+        #
+        # Raised in review. **Both verified allowed against `main` as well as
+        # against the commit before the fix** — the first measurement of this
+        # used a backslash and the letter `n` rather than a real newline, and
+        # said the guard was already refusing them. A test that constructs the
+        # bytes it means is the answer to that, which is why `\\\n` is written
+        # rather than pasted.
+        for command in (
+            "git 2\\\n>&1 push origin +HEAD:main",
+            "git \\\npush origin +HEAD:main",
+            "git push \\\norigin +HEAD:main",
+            "git \\\nlog --output=/tmp/probe",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The honest form this repository actually writes, and the one place a
+        # continuation is NOT removed: inside single quotes a backslash is
+        # literal, so the pair is two ordinary characters of an argument.
+        self.assertAdmitted("git log --oneline \\\n  -5")
+        self.assertAdmitted("git commit -m 'a \\\n literal'")
+
+    def test_ansi_c_and_locale_quoting_are_quoting(self):
+        # **`$'…'` and `$"…"` are quoting forms and `shlex` has no rule for
+        # either**, so the `$` stayed glued outside the quote and the token was
+        # `$git`. `program_name` matched nothing, `git_segments` yielded no
+        # segment at all, and every check that lives inside that loop — the
+        # push allow-list, the forbidden flags, `ext::` — was skipped at once.
+        # Measured under bash 5.2.26: all of these run. Found by an adversarial
+        # audit after the review rounds; allowed on `main` too.
+        for command in (
+            "$'git' push origin +HEAD:main",
+            '$"git" push origin +HEAD:main',
+            "$'g'it push origin +HEAD:main",
+            "git p$'ush' origin +HEAD:main",
+            "$'git' log --output=/tmp/x",
+            "$'git' fetch ext::sh -c id",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **An escape inside one is refused rather than decoded**, which is the
+        # decision `undecodable_heredoc` already records one construct along.
+        # `$'\\x67it'` is `git`, and decoding every escape bash supports is a
+        # list that trails bash's. The shape that forces it is `$'\\''` — a
+        # quote produced by an escape, which desynchronised `substitutions`
+        # and sent the whole line down the `ValueError` path.
+        self.assertRefused("$'\\x67it' push origin +HEAD:main")
+        self.assertRefused("$'\\'' ; git push origin +HEAD:main")
+
+        # The control: ordinary quoting still resolves, and a `$` that opens no
+        # quote is left alone.
+        self.assertAdmitted("git push -u origin fix/some-branch")
+        self.assertAdmitted("git log --grep='$x' -5")
+
+        # **The escapes are DECODED, and refusing them all cost too much.** The
+        # first form of this refused any `$'…'` carrying a backslash, which
+        # took `echo $'\\n'` and `grep -n $'\\t' file.txt` with it — traffic
+        # with nothing to do with git, refused by a git guard. Decoding is safe
+        # because the list decides only how much honest traffic is admitted:
+        # an escape `decode_ansi_c` does not know returns None and the command
+        # is refused, so a gap costs a false positive rather than a force push.
+        self.assertAdmitted("echo $'\\n'")
+        self.assertAdmitted("printf $'\\t'")
+        self.assertAdmitted("grep -n $'\\t' file.txt")
+
+        # And what decoding buys on the other side: the hex spelling now IS
+        # `git` and is judged as one, rather than refused for being unreadable.
+        self.assertRefused("$'\\x67it' push origin +HEAD:main")
+        self.assertAdmitted("$'\\x67it' log -5")
+
+    def test_a_dollar_quote_is_checked_on_the_string_that_is_resolved(self):
+        # **The check and the code acting on it must read the same string.**
+        # `undecodable_dollar_quote` ran on the RAW command while
+        # `strip_dollar_quotes` ran at the end of the pipeline, and the two
+        # disagreed in both directions.
+        #
+        # It refused a heredoc body or a comment that merely mentions an
+        # escape — data on every path, which is the invariant the whole
+        # pipeline rests on, and it made a commit message describing this
+        # change unwritable.
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\nUse $'\\n' for newlines\nEOF")
+        self.assertAdmitted("git status # mentions $'\\t'")
+
+        # And it missed a `$'…'` the CONTINUATION assembles: nothing was there
+        # to refuse on the raw string, while the strip — running after the
+        # join — found the quote and un-sigilled it. Found by an adversarial
+        # audit; allowed on `main` too.
+        self.assertRefused("git $\\\n'\\x70ush' origin +HEAD:main")
+        self.assertRefused("git log --out$\\\n'\\x70ut'=/tmp/probe")
+
+    def test_a_dollar_quote_closer_is_escape_aware(self):
+        # A plain `find` closed `$"\\"'"` on the ESCAPED quote, resumed inside
+        # the string, read the `'` there as opening single quotes, and from
+        # then on saw nothing — so a later `$'push'` was never un-sigilled and
+        # the force push was admitted. That is the `$'\\''` desync of an
+        # earlier round, in the sibling quoting form. Found by an adversarial
+        # audit.
+        self.assertRefused(
+            ': $"\\"\'" ; git $\'push\' origin +HEAD:main')
+        self.assertRefused(
+            'git status $"a\\"\'x" ; git $\'push\' origin +HEAD:main')
+
+    def test_a_parameter_expansion_glued_into_a_word_joins_it(self):
+        # `${x}` on an unset name expands to nothing, so the neighbours join —
+        # the identical argument `without_substitutions` makes for `git $( )`.
+        # No run-time state is needed: the dangerous string is in the source.
+        # Found by an adversarial audit; allowed on `main` too.
+        for command in (
+            "${x}git push origin +HEAD:main",
+            "git ${x}push origin +HEAD:main",
+            "git log --out${x}put=/tmp/probe",
+            "git fetch ext${x}::sh -c id",
+            "git ${x}push origin main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **The line between the two cases is adjacency**, and it is why a
+        # whole-word expansion is left alone: `git push origin $BRANCH` is
+        # traffic this repository writes. It is refused here for a different
+        # and older reason — the destination cannot be shown not to be `main`,
+        # which `main` refuses too — so the control is a command where the
+        # expansion is a whole word and the push is not the subject.
+        self.assertAdmitted("git log --format=$FORMAT -5")
+        self.assertAdmitted("git checkout $BRANCH")
+
+    def test_the_fallback_still_reads_the_push_grammar(self):
+        # The `ValueError` path scanned for forbidden flags and `ext::` alone,
+        # so a command this guard cannot tokenise had the push allow-list
+        # switched off entirely — and a line is easy to make untokenisable on
+        # purpose. The check here can only be the crude one, which is the point
+        # of the path.
+        self.assertRefused("git push origin +HEAD:main \"unbalanced")
+        self.assertRefused("git push origin main 'unbalanced")
+
+    def test_a_continuation_inside_a_heredoc_delimiter(self):
+        # `<<EO\<newline>F` names `EOF` to bash, which removes the pair at the
+        # input level. Reading the delimiter as `EO` made the guard's body
+        # start a line early and end a line early, so the real command line was
+        # swallowed as data. `join_continuations` cannot help — `strip_heredocs`
+        # runs on the raw command, before it, and must, because a heredoc body
+        # is not a command line. Found by an adversarial audit; verified
+        # allowed, on `main` as well, with `printf` standing in for `git`.
+        self.assertRefused(
+            "git <<EO\\\nF push origin +HEAD:main\nEO\nEOF\n")
+        self.assertRefused(
+            "git <<-EO\\\nF push origin --mirror\nEO\nEOF\n")
+
+    def test_an_empty_substitution_joins_the_words_around_it(self):
+        # **A substitution that prints nothing leaves the words around it
+        # joined**, and that is quote removal rather than run-time content: the
+        # dangerous string is literally in the source. `shlex` emitted `(` and
+        # `)` as their own tokens, `command_runs` ended the run there, and the
+        # second run held no `git` token — so `--out$( )put=` and `ext$( )::`
+        # went the same way and all three checks reopened at once. Found by an
+        # adversarial audit; measured under bash, allowed on `main` too.
+        for command in (
+            "git $( )push origin +HEAD:main",
+            "git $(:)push origin +HEAD:main",
+            "git ``push origin +HEAD:main",
+            "git pu$( )sh origin +HEAD:main",
+            "git log --out$( )put=/tmp/x",
+            "git fetch ext$( )::sh -c id",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **The bound, and it is why a parameter expansion is not deleted the
+        # same way.** `$BRANCH` can be empty too, but `git push origin $BRANCH`
+        # is traffic this repository writes, and deleting it would refuse an
+        # honest push for naming no destination. A substitution whose output is
+        # genuinely used stays admitted for the same reason.
+        self.assertAdmitted("git log --format=$(cat /tmp/fmt) -5")
+        self.assertAdmitted("git commit -m \"built at $(date)\"")
+
+    def test_a_dollar_quote_inside_double_quotes_is_not_one(self):
+        # **Neither form is a quoting form inside double quotes**, and missing
+        # that broke three things at once — all of them this branch's own
+        # doing, all found by an adversarial audit.
+        #
+        # `"$'\\x22'"` was decoded and re-emitted as a single-quoted word
+        # INSIDE the surrounding double quotes, which unbalanced the line, sent
+        # it to the `ValueError` path, and let the command beside it through.
+        # `"a$"` closed on the wrong quote and swallowed the rest of the line
+        # into one word.
+        self.assertRefused(
+            'git log "$\'\\x22\'" ; git p\'\'ush origin +HEAD:main')
+        self.assertRefused(
+            'git log "a$" ; git push origin +HEAD:main ; echo "b"')
+
+        # And the over-refusal half: to bash this is an ordinary message about
+        # a regex, and it was refused as an undecodable escape.
+        self.assertAdmitted('git commit -m "regex $\'\\d\' matches"')
+        self.assertAdmitted('git log "$\'\\x22\'"')
+
+    def test_a_locale_quote_is_translated_and_so_cannot_be_read(self):
+        # **`$"…"` is a TRANSLATED double-quoted string and the translation is
+        # the part that cannot be read.** An earlier revision of this test knew
+        # the first half and refused only the expansions inside the body, as
+        # though `$"safe"` were the word `safe` once no substitution was
+        # present. Bash resolves it through gettext against `TEXTDOMAIN` and
+        # `TEXTDOMAINDIR` — ordinary environment variables — so a catalogue
+        # placed in the checkout decides what the word says. Measured with a
+        # hand-built `.mo`: `$"safe"` printed `printf`, and in command position
+        # `$"safe" RAN` executed it. The same lookup can return `git`. Raised
+        # in review.
+        #
+        # The mechanism is asserted and not only the verdicts: every case below
+        # would still refuse under the old expansion-only rule but the first,
+        # so a verdict-only test would go on passing while the rule it pins had
+        # been replaced.
+        guard = self.guard_module()
+        self.assertTrue(guard.undecodable_dollar_quote('git $"safe" -5'),
+                        "a locale quote is refused for being one")
+        self.assertFalse(guard.undecodable_dollar_quote("git $'push' -5"),
+                         "and a decodable ANSI-C one is still read")
+
+        for command in (
+            'git $"safe" origin +HEAD:main',
+            'git $"push" origin +HEAD:main',
+            'git $"$(echo push)" origin +HEAD:main',
+            'git $"`echo push`" origin +HEAD:main',
+            'git $"${x}"push origin +HEAD:main',
+            'git log $"$(echo --output=/tmp/probe)"',
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The cost is every `$"…"`, and it is bounded by where bash reads one:
+        # a `$` before a quote it does not open is left alone, and nothing in
+        # this repository writes the construct.
+        self.assertAdmitted('git log --grep="cost: $"')
+        self.assertAdmitted("git log --grep='$\"x\"' -5")
+        self.assertAdmitted("gh api x --jq 'select(.b | test(\"^a$\"))'")
+
+    def test_a_nul_truncates_the_word_the_way_bash_does(self):
+        # `$'a\\0b'` is the single byte `a`, so `git p$'\\0'ush` is `git push`.
+        # Keeping the NUL left a token nothing would match, and the earlier
+        # answer — refusing any backslash — had hidden it. Truncating models
+        # the shell exactly rather than refusing around it.
+        for command in (
+            "git p$'\\0'ush origin +HEAD:main",
+            "git $'push\\0IGNORED' origin +HEAD:main",
+            "git p$'\\400'ush origin +HEAD:main",
+            "git log --out$'\\0'put=/tmp/probe",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_an_expansion_beside_a_quoted_fragment_is_still_glued(self):
+        # **A quote ends no word in bash**, and counting one as a boundary left
+        # half of the glued-expansion fix open: `git $x'push' …` and
+        # `git 'pu'$x'sh' …` are one word each. Found by an adversarial audit
+        # after the `${x}` half had been closed — the same lesson this file
+        # keeps paying for, about fixing the case rather than the grammar.
+        for command in (
+            "git $x'push' origin +HEAD:main",
+            "git 'push'$x origin +HEAD:main",
+            'git $x"push" origin +HEAD:main',
+            "git 'pu'$x'sh' origin +HEAD:main",
+            "git ${x}'push' origin +HEAD:main",
+            "git log $x'--output=/tmp/probe'",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The controls, which are why `glued` exists rather than a blanket
+        # deletion: an expansion supplying a value is ordinary traffic.
+        self.assertAdmitted('git commit -m "msg-$VERSION"')
+        self.assertAdmitted("git tag v$VERSION")
+        self.assertAdmitted("git log -${N}")
+
+    def test_the_guard_never_exits_on_an_exception(self):
+        # **A hook that raises fails OPEN**, which makes this the worst shape a
+        # defect in this file can take: `chr()` raised `OverflowError` on
+        # `$'\\UFFFFFFFF'`, the process exited 1 with empty stdout, and
+        # `PreToolUse` treats that as a non-blocking error — so the command
+        # ran. Every refusal here is reached by RETURNING a string, and none of
+        # that happens after a traceback. Found by an adversarial audit.
+        for command in (
+            "echo $'\\UFFFFFFFF'; git push origin +HEAD:main",
+            "echo $'\\U00110000'; git push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # And the property behind those two, asserted over the corpus rather
+        # than over the one input that exposed it: nothing in this suite may
+        # take the hook down. `judge` already fails the test on a non-zero
+        # exit, so this is the subject stated where a reader will find it.
+        for command in (
+            "git log $'\\u0000' -5",
+            "git log $'\\777' -5",
+            "git log $'\\c' -5",
+            "git log $'\\' -5",
+            "git log $'\\x' -5",
+        ):
+            with self.subTest(command=command):
+                self.judge(command)
+
+    def test_an_expansion_has_more_than_one_reading(self):
+        # **The whole expansion model was "an empty one joins its
+        # neighbours", and bash has three more.** Each of these is what the
+        # shell these commands run in actually does — no positional
+        # parameters, no variables set — so none is the run-time residual
+        # `docs/harness-boundaries.md` names: the dangerous string is in the
+        # source every time. All found by an adversarial audit, all live on
+        # `main`.
+        #
+        # The special parameters are expansions the bare-name scan could not
+        # see, because it accepted only `[A-Za-z0-9_]`.
+        for command in (
+            "git $@push origin +HEAD:main",
+            "git $*push origin +HEAD:main",
+            "git $!push origin +HEAD:main",
+            'git p"$@"ush origin +HEAD:main',
+            "$@git push origin +HEAD:main",
+            "git log --out$@put=/tmp/probe",
+            "git fetch ext$@::sh -c id",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # An expansion can SPLIT one word into several — `${IFS}` holds a
+        # space — which is the converse of the reading that was there.
+        self.assertRefused("git push${IFS}origin +HEAD:main")
+        self.assertRefused("git${IFS}push${IFS}origin${IFS}+HEAD:main")
+
+        # And it can supply its own default text, in plain sight.
+        for command in (
+            "git ${x:-push} origin +HEAD:main",
+            "git ${x-push} ${y-origin} ${z-+HEAD:main}",
+            "git ${x:=push} origin +HEAD:main",
+            "git log ${x:---output=/tmp/probe}",
+            "git log --${x:-output}=/tmp/probe",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # A single-element brace range is pure obfuscation: `{`/`}` are in
+        # neither METACHARACTERS nor PUNCTUATION, so `p{u..u}sh` survived as
+        # one opaque token past every check.
+        self.assertRefused("git p{u..u}sh origin +HEAD:main")
+        self.assertRefused("git {p..p}ush origin +HEAD:main")
+        self.assertRefused("git log --out{p..p}ut=/tmp/probe")
+
+        # The controls that decide whether the readings are worth their cost:
+        # ordinary traffic passes every one of them.
+        for command in (
+            'git commit -m "$MSG"',
+            'git tag -a v"$V" -m "rel $V"',
+            'git log --author="$USER"',
+            "git checkout $BRANCH",
+            "git log --format=$(cat /tmp/fmt) -5",
+            "git commit -F - <<'EOF'\nUse ${x} and $(y)\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+    def test_a_shell_reads_a_script_from_its_stdin(self):
+        # **`evaluated_scripts` modelled one channel by which a shell receives
+        # a script, and bash has three.** It read the argv element after `-c`;
+        # a shell also runs what arrives on stdin, and both spellings of that
+        # put the text in the command string where a hook can read it.
+        #
+        # Found by an adversarial audit that generated 3,696 obfuscations, took
+        # the 919 the guard allowed, ran each under a shimmed bash, and found
+        # 431 that executed the push. Live on `main`.
+        #
+        # **These are not the residual the docstring names.** That one is
+        # `bash script.sh`, a file the hook is not given. Here nothing is on
+        # disk and nothing is computed: the script is a literal word in the
+        # argv, exactly as in `bash -c '…'` — which this guard already refused.
+        # The two halves disagreed, and this is the half that was wrong.
+        for command in (
+            "bash <<<'git push origin +HEAD:main'",
+            "bash <<'EOF'\ngit push origin +HEAD:main\nEOF",
+            "bash <<EOF\ngit push origin +HEAD:main\nEOF",
+            "zsh <<-EOF\ngit push origin +HEAD:main\nEOF",
+            "sh -s <<<'git log --output=/tmp/x'",
+            "bash <<<'git fetch ext::sh -c id'",
+            "echo 'git push origin +HEAD:main' | bash",
+            "printf 'git push origin --mirror' | sh",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **The discrimination is the leading word of the run**, and it is what
+        # keeps a filing a filing: every other reader of these constructs is
+        # left alone, so the body of `git commit -F -` is still data and so is
+        # `cat`'s. Without this the fix would re-open the over-refusal an
+        # earlier round closed.
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\ndo not git push to main\nEOF")
+        self.assertAdmitted(
+            "cat <<'EOF'\ngit push origin +HEAD:main\nEOF")
+        self.assertAdmitted("echo 'git push origin +HEAD:main'")
+        self.assertAdmitted("bash <<<'git log --oneline -5'")
+
+    def test_a_printer_that_formats_is_not_read_as_its_arguments(self):
+        # **Joining a printer's argv is not the bytes it writes**, and where
+        # the two differ the join is the safe-looking one:
+        # `printf 'git p%ssh origin +HEAD:main' u | bash` runs the push while
+        # the join reads as harmless. `echo -e` does it through escapes.
+        # Raised in review; both verified allowed.
+        #
+        # Reproducing `printf` is a specification this file will not carry —
+        # the same reason it refuses to enumerate git's executing config keys —
+        # so the unmodellable case refuses instead of being guessed at.
+        self.assertRefused("printf 'git p%ssh origin +HEAD:main' u | bash")
+        self.assertRefused("echo -e 'git\\x20push origin +HEAD:main' | bash")
+
+        # The plain forms still go through the reading that judges the literal
+        # text, so the narrowing costs nothing it did not have to.
+        self.assertRefused("echo 'git push origin +HEAD:main' | bash")
+        self.assertAdmitted("echo 'git status' | bash")
+        self.assertAdmitted("printf '%s\\n' hello")
+
+    def test_an_escaped_metacharacter_is_part_of_the_word(self):
+        # The here-string scan stopped at the first escaped space, so
+        # `bash <<<git\\ push\\ origin\\ +HEAD:main` yielded `git\\` alone —
+        # and the redirection strip then removed the whole here-string, so
+        # nothing downstream saw the push either. Raised in review; verified
+        # allowed.
+        self.assertRefused("bash <<<git\\ push\\ origin\\ +HEAD:main")
+        self.assertRefused("sh <<<git\\ log\\ --output=/tmp/x")
+
+    def test_the_octal_escape_counts_from_the_right_place(self):
+        # `\\0nnn` takes its three digits AFTER the zero. Reading the zero as
+        # one of them made `$'\\0165'` two characters where bash gives `u`, so
+        # `git p$'\\0165'sh origin +HEAD:main` was a push nothing could see.
+        # Raised in review; verified allowed.
+        self.assertRefused("git p$'\\0165'sh origin +HEAD:main")
+
+        # And the bare form keeps its own count, which is the control that the
+        # fix did not simply shift the error one place along.
+        self.assertRefused("git p$'\\165'sh origin +HEAD:main")
+        self.assertAdmitted("echo $'\\0101'")
+
+    def test_an_assignment_prefix_is_not_the_command(self):
+        # **`X=1 bash` is a run led by `bash`**, and reading the first token
+        # instead made it a run led by `X=1`: the here-string was stripped as
+        # an ordinary redirect target, the evaluator scan then saw a `bash`
+        # with no script, and the push ran. Raised in review; verified allowed.
+        #
+        # The same reading is owed at three sites — the stdin scan, the
+        # printer's end of a pipe and the shell's — which is why it is one
+        # function rather than a test repeated at each. The printer's arguments
+        # are sliced past the COMMAND word for the same reason: past the first
+        # token they began with `echo`, and the data-only exemption then waved
+        # the judgement through.
+        for command in (
+            "X=1 bash <<<'git push origin +HEAD:main'",
+            "X=1 Y=2 bash <<EOF\ngit push origin +HEAD:main\nEOF",
+            "X=1 echo 'git push origin +HEAD:main' | bash",
+            "echo 'git push origin +HEAD:main' | X=1 bash",
+            "X=1 printf 'git p%ssh origin +HEAD:main' u | bash",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The controls: an assignment prefix on honest traffic is ordinary, and
+        # a printer with no shell behind it is still text.
+        self.assertAdmitted("X=1 git log --oneline -5")
+        self.assertAdmitted("GIT_DIR=/tmp/x git status")
+        self.assertAdmitted("X=1 echo 'git push origin +HEAD:main'")
+
+    def test_a_nested_default_is_unwrapped_one_layer_at_a_time(self):
+        # Raised in review as a miss, and it is not one — recorded because the
+        # reasoning is the interesting part. `DEFAULTED` is a flat regex and
+        # does reject braces in the name, but `${x:-${y:-push}}` does not need
+        # one pass: the reading rewrites the outer expansion, the result
+        # differs from its input, and `offence` recurses onto it — so the
+        # nesting is unwrapped a layer per level. The refusal reason says so
+        # out loud, carrying "with an expansion taken as its default" once per
+        # layer.
+        self.assertRefused("git ${x:-${y:-push}} origin +HEAD:main")
+        self.assertRefused("git ${a:-${b:-${c:-push}}} origin +HEAD:main")
+        self.assertRefused("git log ${x:-${y:---output=/tmp/probe}}")
+
+        reason = self.judge("git ${x:-${y:-push}} origin +HEAD:main")
+        self.assertEqual(2, reason.count("taken as its default"))
+
+    def test_a_printer_reaches_a_shell_through_the_whole_pipeline(self):
+        # **A pipe is not an adjacency.** Comparing neighbouring runs let an
+        # intermediate stage carry the bytes past the check:
+        # `printf … | cat | bash` pairs as printf-then-cat and cat-then-bash,
+        # and neither pair is a printer feeding a shell — while the shell still
+        # runs what the printer wrote. Raised in review; verified allowed.
+        for command in (
+            "printf 'git p%ssh origin +HEAD:main' u | cat | bash",
+            "echo 'git push origin +HEAD:main' | cat | bash",
+            "echo 'git push origin +HEAD:main' | tee /tmp/x | sh",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        self.assertAdmitted("echo 'git status' | cat | bash")
+
+    def test_a_heredoc_body_belongs_to_its_own_introducer(self):
+        # `rfind` gave every body the LAST introducer before it, so in
+        # `bash <<A; cat <<B` the first body — bash's — was attributed to `cat`
+        # and the script bash runs was never judged. Bodies belong to
+        # introducers in order, and the pairing now walks both lists together.
+        # Raised in review; verified allowed.
+        self.assertRefused(
+            "bash <<A; cat <<B\ngit push origin +HEAD:main\nA\nsafe\nB")
+        self.assertRefused(
+            "cat <<A; bash <<B\nsafe\nA\ngit push origin +HEAD:main\nB")
+
+    def test_a_quoted_body_is_not_rewritten_by_the_readings(self):
+        # **A quoted heredoc body expands nothing**, so rewriting one invents
+        # text the shell will never produce. The readings ran over the raw
+        # command, and a body line reading `${x:-EOF}` was rewritten into an
+        # early terminator — after which the rest of an innocent filing was
+        # read as commands and refused. Raised in review; measured.
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\n${x:-EOF}\n"
+            "an example: git push origin +HEAD:main\nEOF")
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\na {a..a} range\n"
+            "and git push origin +HEAD:main\nEOF")
+
+    def test_a_continuation_between_a_sigil_and_its_quote(self):
+        # **`<<$\\<newline>'EOF'` names `EOF`**, because bash removes the pair
+        # before it reads the word. Reading the `$` as an ordinary character
+        # gave `$EOF`, so the real `EOF` line terminated nothing and every
+        # command after it was swallowed as body text.
+        #
+        # **This was answered once before it was true.** The case passed at the
+        # time for an unrelated reason — one of the expansion readings happened
+        # to rewrite inside the body — and only stopped passing when those
+        # readings were correctly stopped from rewriting a body that expands
+        # nothing. A test that passes for a reason nobody has checked is one
+        # that reports the wrong thing later, so the delimiter is asserted
+        # directly here rather than only through a verdict.
+        self.assertRefused(
+            "git commit -F - <<$\\\n'EOF'\nEOF\ngit push origin +HEAD:main\n$EOF")
+        self.assertAdmitted("git commit -F - <<$\\\n'EOF'\na message\nEOF")
+
+    def test_a_delimiter_fragment_ends_at_an_unescaped_quote(self):
+        # `<<"E\\"OF"` names `E"OF` to bash. The fragment closed at the
+        # ESCAPED quote, the scan then ran on across the newline and took the
+        # next line into the word, and the delimiter came out as nonsense.
+        # Raised in review; and the verdict was already a refusal, which is why
+        # the parse is asserted here and not just the answer — that direction
+        # happened to refuse, while the mirror of it, where the nonsense
+        # delimiter matches a line the payload plants, swallows whatever sits
+        # between.
+        guard = self.guard_module()
+        command = 'git commit -F - <<"E\\"OF"\nE"OF\ngit push origin +HEAD:main\nE\\OF'
+        match = guard.HEREDOC.match(command, 16)
+        self.assertIsNotNone(match)
+        self.assertEqual(
+            'E"OF', guard._heredoc_delimiter(match.group("word"))[0],
+            "the delimiter bash uses, not the one an early closer gives")
+        self.assertRefused(command)
+
+        # A delimiter may not span a line either, which is the second half of
+        # the same fix, and the ordinary quoted forms still work.
+        self.assertAdmitted("git commit -F - <<\"EOF\"\na message\nEOF")
+        self.assertAdmitted("git commit -F - <<'EOF'\na message\nEOF")
+
+    def test_a_stdin_script_that_builds_itself_is_refused(self):
+        # **A substitution inside a script a shell will run supplies the
+        # command itself**, and no reading models that:
+        # `bash <<<"$(printf git) push origin +HEAD:main"` runs the push, while
+        # the inner `printf git` is judged as the data it is and the
+        # empty-substitution reading leaves a bare `push …`. Raised in review;
+        # verified allowed.
+        #
+        # The same answer `unmodelled_printer` gives, for the same reason: the
+        # text that decides is not in the source. Quoting the here-string does
+        # not help, because the inner shell performs the substitution when it
+        # runs the line.
+        for command in (
+            'bash <<<"$(printf git) push origin +HEAD:main"',
+            "bash <<<'$(printf git) push origin +HEAD:main'",
+            'bash <<EOF\n$(printf git) push origin +HEAD:main\nEOF',
+            'sh <<<"`printf git` log --output=/tmp/x"',
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # And the control: a stdin script that says what it does is still read
+        # rather than refused for being one.
+        self.assertAdmitted("bash <<<'git log --oneline -5'")
+        self.assertAdmitted("bash <<'EOF'\ngit status\nEOF")
+
+    def test_an_ansi_c_word_ends_at_an_unescaped_quote(self):
+        # `$'\''` is the one-character word `'` to bash: inside `$'…'` a
+        # backslash escapes, so the quote after it does NOT close the word.
+        # Read by the ordinary single-quote rule the word closes at the escaped
+        # quote, the next quote opens one that never closes, and the whole
+        # remainder of the line reads as quoted — so `redirection_spans` left
+        # `2>&1` standing, the glued `>&` became a run boundary, and `git` was
+        # severed from its own subcommand. Raised in review; verified allowed,
+        # with the command run under a `bash` that reported `': command not
+        # found` and then executed the push.
+        #
+        # The scanner is asserted rather than only the verdict: the defect is a
+        # position this file's other passes are read off, so a verdict
+        # assertion pins the symptom and leaves the desynchronisation free to
+        # surface somewhere else.
+        guard = self.guard_module()
+        word = "$'\\''"
+        quoted = dict((index, in_quotes)
+                      for index, in_quotes, _ in guard.shell_positions(
+                          word + " ; git status"))
+        self.assertTrue(quoted[3], "the ESCAPED quote is inside the word")
+        self.assertFalse(quoted[len(word)],
+                         "and the word ends at the one that follows it")
+
+        self.assertRefused(word + " ; git 2>&1 push origin +HEAD:main")
+        self.assertRefused(word + "; git >out 2>&1 push origin +HEAD:main")
+
+        # The ordinary forms are untouched: a backslash in a plain single-
+        # quoted word is literal, and `$'…'` without an escape still decodes.
+        self.assertAdmitted("$'\\n' ; git status")
+        self.assertAdmitted("git commit -m 'a \\\\ literal'")
+
+    def test_a_script_forwarded_down_a_pipeline_is_still_a_script(self):
+        # **A heredoc belongs to the run that opens it and its BYTES belong to
+        # whatever is downstream of the pipe.** `cat <<'EOF' | bash` runs the
+        # push in its body: the opener is `cat`'s, so nothing was yielded, and
+        # `strip_heredocs` then removed the body — the only copy of the script
+        # — before any other pass could look. Raised in review; both spellings
+        # verified allowed, and both live on `main`.
+        body = "\ngit push origin +HEAD:main\nEOF"
+        for command in (
+            "cat <<'EOF' | bash" + body,
+            "cat <<EOF | bash" + body,
+            "cat <<EOF | tee /dev/null | bash" + body,
+            "cat <<EOF |& bash" + body,
+            "(cat <<EOF) | bash" + body,
+            "X=1 cat <<EOF | X=2 bash" + body,
+            "cat <<<'git push origin +HEAD:main' | bash",
+            "printf %s 'git push origin +HEAD:main' | sudo bash",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # Only a `|` carries stdout onward, and every other reader of these
+        # constructs is still left alone — which is what keeps
+        # `git commit -F - <<EOF` a filing rather than a command.
+        self.assertAdmitted("cat <<EOF | grep foo\nhello\nEOF")
+        self.assertAdmitted("cat <<EOF || bash\nhello\nEOF")
+        self.assertAdmitted("cat <<EOF ; bash\nhello\nEOF")
+        self.assertAdmitted("git commit -F - <<EOF\nmessage\nEOF")
+        self.assertAdmitted("cat <<<'git log --oneline -5' | bash")
+
+    def test_a_wrapper_in_front_of_a_shell_still_reads_stdin(self):
+        # `echo '…' | command bash` runs the push, and so does the `env`
+        # spelling found beside it, while the run's LEADING word is `command`
+        # or `env` and the pipeline pass found no shell. Raised in review;
+        # verified allowed.
+        #
+        # The shell is looked for anywhere in the run rather than the wrappers
+        # being enumerated: listing the ones that DO exec their argument is the
+        # direction `DATA_ONLY_COMMANDS` argues against in its own comment, and
+        # `command`, `env`, `nohup`, `nice`, `stdbuf`, `setsid`, `timeout`,
+        # `ionice` and `chrt` are nine before anyone has looked hard.
+        guard = self.guard_module()
+        self.assertTrue(guard.reads_stdin_as_script(["command", "bash"]))
+        self.assertTrue(guard.reads_stdin_as_script(["stdbuf", "-o0", "sh"]))
+        self.assertFalse(guard.reads_stdin_as_script(["echo", "bash"]),
+                         "a printer's argument is text, wrapper or not")
+        self.assertFalse(guard.reads_stdin_as_script(["bash", "-c", "x"]),
+                         "a `-c` script comes from the argv, not from stdin")
+
+        for command in (
+            "echo 'git push origin +HEAD:main' | command bash",
+            "echo 'git push origin +HEAD:main' | env bash",
+            "echo 'git push origin +HEAD:main' | nohup bash",
+            "echo 'git push origin +HEAD:main' | stdbuf -o0 bash",
+            "echo 'git push origin +HEAD:main' | timeout 5 sh",
+            "printf 'git p%ssh origin +HEAD:main' u | command bash",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The over-refusal this costs needs a printer feeding it, so an
+        # ordinary pipeline naming a shell is unaffected.
+        self.assertAdmitted("echo hello | grep bash")
+        self.assertAdmitted("git log --oneline -5 | grep bash")
+
+    def test_a_sigil_quoted_delimiter_refuses_a_backslash_in_either_form(self):
+        # `<<$"E\"OF"` names `E"OF` to bash, where `word.index` finds the
+        # ESCAPED quote and derives `E\OF` — a delimiter matching nothing, so
+        # a line the payload plants can end the body early or late and take an
+        # intervening push with it. The ANSI-C sigil already refused a
+        # backslash; the locale one did not, on the reasoning that it "carries
+        # double-quote semantics" — which is exactly why its closer is not the
+        # first quote it meets. Raised in review; measured.
+        guard = self.guard_module()
+        for word in ('$"E\\"OF"', "$'E\\'OF'"):
+            with self.subTest(word=word):
+                self.assertEqual((None, False), guard._heredoc_delimiter(word),
+                                 "an escape in the delimiter is not decoded")
+
+        for command in (
+            'git commit -F - <<$"E\\"OF"\nE"OF\ngit push origin '
+            '+HEAD:main\nE\\OF',
+            "git commit -F - <<$'E\\'OF'\ngit push origin +HEAD:main\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **The locale sigil names no delimiter at all, and the assertion
+        # that used to stand here pinned the opposite.** `$"EOF"` is a
+        # TRANSLATED word like any other, so a catalogue decides where the body
+        # ends — while `undecodable_dollar_quote` was refusing the same
+        # construct three functions along. Raised in review, which caught the
+        # defect and the assertion together: the test had been written in the
+        # same commit that refused every other locale quote.
+        self.assertEqual((None, False), guard._heredoc_delimiter('$"EOF"'))
+        self.assertRefused("git commit -F - <<$\"EOF\"\na message\nEOF")
+
+        # The ANSI-C sigil still names one: its escapes are decoded, and one
+        # outside the decoded set is refused rather than read.
+        self.assertEqual(("EOF", False), guard._heredoc_delimiter("$'EOF'"))
+        self.assertAdmitted("git commit -F - <<$'EOF'\na message\nEOF")
+
+    def test_a_here_string_is_quote_removed_before_the_shell_runs_it(self):
+        # **`shlex` has no rule for either dollar quote**, so
+        # `bash <<<$'git push origin +HEAD:main'` handed the recursion
+        # `$git push …` — a name `program_name` does not match — while bash ran
+        # the push. Raised in review; verified allowed, in three spellings.
+        for command in (
+            "bash <<<$'git push origin +HEAD:main'",
+            "bash <<<$'\\x67it push origin +HEAD:main'",
+            'bash <<<$"git push origin +HEAD:main"',
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # An undecodable one is yielded whole rather than normalised, so the
+        # recursion refuses it with the reason the fail-closed check states
+        # rather than a second sentence saying the same thing.
+        self.assertIn("carries an escape this guard does not decode",
+                      self.guard_module().offence("bash <<<$'\\M-x'") or "")
+
+        # The control: an ordinary here-string is still read rather than
+        # refused for carrying a `$`.
+        self.assertAdmitted("bash <<<'git log --oneline -5'")
+        self.assertAdmitted("bash <<<'git log --grep=$x -5'")
+
+    def test_a_body_does_not_carry_its_quotes_into_the_next_heredoc(self):
+        # **`shell_positions` had no notion of a heredoc body, so an
+        # apostrophe in one opened a quote that ran to the end of the
+        # command.** Every later opener then sat `in_quotes` and was skipped,
+        # `strip_heredocs` left that body standing, and its lines were
+        # tokenised as commands. Found by hitting it: writing these very
+        # replies to disk with four `cat > f <<'EOF'` heredocs was refused,
+        # because a body quoting `bash -c` reached the evaluator scan as a
+        # command line.
+        #
+        # **Over-refusal in every direction probed, which is why it survived
+        # this long**: a push after such a body was refused before the fix and
+        # is refused after it, on both this branch and its parent. The cost was
+        # honest traffic, and the traffic was this repository writing about
+        # itself.
+        guard = self.guard_module()
+        command = ("cat > a.md <<'EOF'\n"
+                   "it is the reviewer's point\n"
+                   "EOF\n"
+                   "cat > b.md <<'EOF'\n"
+                   "the shape `echo x | bash` is the one at issue\n"
+                   "EOF")
+        self.assertEqual(
+            2, len(guard.heredoc_spans(command)),
+            "both bodies are found, not just the one before the apostrophe")
+        self.assertAdmitted(command)
+
+        # And the fail-safe direction is unchanged: a command after a body,
+        # however the body quotes, is still judged.
+        self.assertRefused("cat > a.md <<'EOF'\n"
+                           "don't\n"
+                           "EOF\n"
+                           "git push origin +HEAD:main")
+
+    def test_finding_the_bodies_stays_one_pass(self):
+        # The spans tell the scanner which characters are body text and the
+        # scanner is what finds the spans, so the two have to be interleaved.
+        # **Feeding the spans back between whole passes instead recovers
+        # exactly one body per pass** — each newly visible body breaks the
+        # state again at its own apostrophe — which was measured at n+1 passes
+        # for n heredocs. `heredoc_spans` appends to the list the scanner is
+        # walking rather than repeating itself.
+        #
+        # A thousand of them, each with an apostrophe, and every one found.
+        # **The assertion is the count of spans, not a duration**: a timing
+        # assertion on CI is a flake, which this file says elsewhere and this
+        # test used to contradict. Raised in review.
+        guard = self.guard_module()
+        body = "cat > f.md <<'EOF'\ndon't\nEOF\n"
+        self.assertEqual(1000, len(guard.heredoc_spans(body * 1000)),
+                         "every body, not one per pass")
+
+    def test_the_whole_judgement_stays_linear_in_the_heredocs(self):
+        # **The test above measures `heredoc_spans` and the hook runs
+        # `offence`**, which was the gap: the containment scan that had just
+        # been removed from `heredoc_spans` was still standing in
+        # `stdin_scripts` AND in `undecodable_heredoc`, each re-reading every
+        # earlier body for every opener. Raised in review for the first; the
+        # second was found by profiling the fix, at ten million comparisons for
+        # 3,200 heredocs. **A guard that runs past its timeout produces no
+        # verdict, and `PreToolUse` reads that as non-blocking.**
+        #
+        # **Counted rather than timed, and the count is exact.** The earlier
+        # form of this test asserted a wall-clock ratio, which a contended or
+        # paused runner can violate with no regression at all — raised in
+        # review, against this file's own rule that a timing assertion on CI is
+        # a flake. What the defect actually did was READ the span list once per
+        # opener, so the instrument is a list that tallies how often it is
+        # iterated: doubling the heredocs doubles the reads when the passes are
+        # linear and quadruples them when they are not. Measured on the commit
+        # that carried the defect: 1.00 -> 3.93 -> 3.97 against 2.00 -> 2.00
+        # here.
+        guard = self.guard_module()
+        body = "cat > f.md <<'EOF'\nplain\nEOF\n"
+        original = guard.heredoc_spans
+        reads = {}
+        try:
+            for count in (100, 200, 400):
+                tally = [0]
+                guard.heredoc_spans = (
+                    lambda command, _o=original, _t=tally:
+                    _TallyingList(_o(command), _t))
+                # A distinct trailing comment per size, because `offence`
+                # memoises its verdict per string.
+                guard.offence(body * count + "# " + str(count))
+                reads[count] = tally[0]
+        finally:
+            guard.heredoc_spans = original
+
+        self.assertGreater(reads[100], 0, "the instrument saw the list at all")
+        for smaller, larger in ((100, 200), (200, 400)):
+            with self.subTest(sizes=(smaller, larger)):
+                self.assertLess(
+                    reads[larger], reads[smaller] * 2.5,
+                    "twice the heredocs is twice the reads, not four times")
+
+    def test_a_wrappers_own_option_is_not_the_shells_script_flag(self):
+        # `ionice -c 2 bash` runs bash on its stdin — `-c` there is the
+        # scheduling class — and reading the whole run for a script flag
+        # dismissed it as a shell that brought its own. Raised in review;
+        # verified allowed. The flag only counts after the shell token.
+        guard = self.guard_module()
+        self.assertTrue(guard.reads_stdin_as_script(["ionice", "-c", "2", "bash"]))
+        self.assertTrue(guard.reads_stdin_as_script(["nice", "-n", "5", "sh"]))
+        self.assertFalse(guard.reads_stdin_as_script(["bash", "-c", "x"]))
+        self.assertFalse(guard.reads_stdin_as_script(["ionice", "-c", "2",
+                                                      "bash", "-c", "x"]),
+                         "and a real script flag after the shell still counts")
+        self.assertRefused("echo 'git push origin +HEAD:main' | ionice -c 2 bash")
+
+    def test_a_process_substitution_may_not_feed_a_shell_its_script(self):
+        # **`bash < <(printf …)` runs the push and every pass judged the halves
+        # apart**: the inner `printf` is data, the redirection strip removes
+        # `< <(…)` whole because a process substitution IS the target, and what
+        # is left is a `bash` with no script. Raised in review; verified
+        # allowed, and `bash <(echo …)` runs it too — the substitution being a
+        # filename the shell is told to execute.
+        #
+        # Refused rather than read, on `unmodelled_printer`'s argument: what
+        # runs is the substitution's OUTPUT, and reading the inner command
+        # instead would be right for `<(echo '…')` and wrong for every spelling
+        # that computes.
+        for command in (
+            "bash < <(printf '%s' 'git push origin +HEAD:main')",
+            "bash < <(echo 'git push origin +HEAD:main')",
+            "bash <(echo 'git push origin +HEAD:main')",
+            "sh < <(cat script.sh)",
+            "command bash < <(echo hi)",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # A run led by a printer is left alone exactly as the pipeline pass
+        # leaves one, and an ordinary reader of a substitution is not a shell.
+        self.assertAdmitted("echo <(git log --oneline -5)")
+        self.assertAdmitted("diff <(git show a:f) <(git show b:f)")
+        self.assertAdmitted("cat <(git log --oneline -5)")
+
+    def test_one_parse_of_a_word_reaches_the_here_string(self):
+        # `stdin_scripts` had a word parse of its own, ending at the first
+        # unquoted metacharacter — so `bash <<<$(printf 'git push …')` yielded
+        # `$` as the script, the inner `printf` was judged as data, and the
+        # redirection strip removed the rest. **That is `word_end`'s OWN
+        # recorded fail-open arriving a second time**, in the function that did
+        # not share it, which is why the parse is now one function both call.
+        # Raised in review; verified allowed, with the backtick spelling.
+        for command in (
+            "bash <<<$(printf 'git push origin +HEAD:main')",
+            "bash <<<`printf 'git push origin +HEAD:main'`",
+            "bash <<<${x:-git push origin +HEAD:main}",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # An escaped metacharacter is still part of the word, which is what the
+        # parse this replaced was carrying `literal` for.
+        self.assertRefused("bash <<<git\\ push\\ origin\\ +HEAD:main")
+        self.assertAdmitted("bash <<<'git log --oneline -5'")
+
+    def test_one_model_of_quoting_reaches_every_scanner(self):
+        # **`shell_positions` was taught that `$'…'` takes escapes and its five
+        # siblings were not.** `without_substitutions`, `rewriting_expansions`,
+        # `dollar_quotes`, `join_continuations` and `substitutions` each
+        # carried their own copy of bash's quote rules, so one prefix —
+        # `: $'x\''; `, where the escaped quote does NOT close the word — left
+        # every one of them a quote out of step, and each pass walked straight
+        # past the shape it exists to catch. Four were verified allowed; all
+        # five raised in review.
+        #
+        # They read `quote_states` now. The prefix is one string across every
+        # case below on purpose: the defect is one model, so the cases differ
+        # only in which pass the desynchronisation reached.
+        prefix = ": $'x\\''; "
+        for name, rest in (
+            ("the empty-substitution reading", "git $( )push origin +HEAD:main"),
+            ("the default reading", "git ${x:-push} origin +HEAD:main"),
+            ("the whitespace reading", "git push${IFS}origin +HEAD:main"),
+            ("the brace reading", "git p{u..u}sh origin +HEAD:main"),
+            ("a nested substitution", 'git log "$(git push origin +HEAD:main)"'),
+            ("a dollar quote", "git $'\\x70ush' origin +HEAD:main"),
+            ("a line continuation", "git \\\npush origin +HEAD:main"),
+        ):
+            with self.subTest(pass_=name):
+                self.assertRefused(prefix + rest)
+
+        # **The prefix is doing the work, not the payload**: each of these is
+        # refused without it, which is what makes the pair a measurement of the
+        # scanner rather than of the grammar behind it.
+        self.assertRefused("git $( )push origin +HEAD:main")
+        self.assertRefused(": $'x'; git $( )push origin +HEAD:main")
+
+        # And the state those scanners read is the one bash uses: the escaped
+        # quote is inside the word, and the quote after it closes it.
+        guard = self.guard_module()
+        states = guard.quote_states("$'x\\''; git status")
+        self.assertEqual("single", states[3], "the escaped quote is inside")
+        self.assertEqual("", states[5], "and the word has ended after it")
+
+        # Honest traffic carrying the same shapes is still admitted.
+        self.assertAdmitted("echo $'\\n'; git log --oneline -5")
+        self.assertAdmitted("git log --grep='$x' -5")
+
+    def test_the_nested_closers_read_the_shared_quoting(self):
+        # **`_closing_paren` and `_closing_brace` were the sixth and seventh
+        # copies of the model**, consolidated one round after the other five —
+        # so `git log "$( : $'\\'x\\\\'\\''; git push origin +HEAD:main)"` closed
+        # and reopened on the wrong quotes, `_closing_paren` returned None, no
+        # substitution was extracted, and `shlex` kept the outer one opaque.
+        # Raised in review; verified allowed.
+        guard = self.guard_module()
+        command = ('git log "$( : $\'x\\\'\'; git push origin +HEAD:main)"')
+        self.assertIsNotNone(
+            guard._closing_paren(command, command.index("$(") + 2),
+            "the substitution has a closer and it is found")
+        self.assertRefused(command)
+
+        # **Over `command[start:]`, because a substitution body is re-parsed as
+        # a fresh command line.** Asking about absolute positions would mark
+        # the whole body of a substitution inside double quotes as quoted and
+        # lose its own closer — so this control matters as much as the case
+        # above.
+        plain = 'git log "$(printf x)"'
+        self.assertEqual(
+            plain.index(")"),
+            guard._closing_paren(plain, plain.index("$(") + 2))
+        self.assertAdmitted(plain)
+
+        # The quoted-paren and commented-paren cases this function was fixed
+        # for before are still right.
+        self.assertRefused(
+            'git log "$(printf \')\'; git push origin +HEAD:main)"')
+        self.assertRefused(
+            'git log "$(echo ok # )\ngit push origin +HEAD:main)"')
+
+    def test_an_assignment_prefix_has_four_spellings(self):
+        # Bash reads `NAME=value`, `NAME+=value`, `NAME[i]=value` and
+        # `NAME[i]+=value` all as assignment prefixes, and this knew one — so
+        # `X+=1 printf 'git p%ssh …' u | bash` ran the push while both printer
+        # passes took `X+=1` for the command word and left the run alone.
+        # Raised in review; verified allowed, with the `arr[0]=v` form beside
+        # it.
+        guard = self.guard_module()
+        for word in ("X=1", "X+=1", "arr[0]=v", "arr[0]+=v", "PATH=/x:/y"):
+            with self.subTest(word=word):
+                self.assertIsNotNone(guard.ASSIGNMENT.match(word))
+        for word in ("git", "--grep=x", "=x", "1X=y", "echo"):
+            with self.subTest(word=word):
+                self.assertIsNone(guard.ASSIGNMENT.match(word),
+                                  "and a command word is not an assignment")
+
+        for command in (
+            "X+=1 printf 'git p%ssh origin +HEAD:main' u | bash",
+            "X+=1 echo 'git push origin +HEAD:main' | bash",
+            "arr[0]=v echo 'git push origin +HEAD:main' | bash",
+            "X+=1 bash <<<'git push origin +HEAD:main'",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        self.assertAdmitted("GIT_PAGER=cat git log --oneline -5")
+
+    def test_a_locale_quote_is_refused_for_its_own_reason(self):
+        # One sentence covered two decisions and said the wrong thing about
+        # one: a plain `$"safe"` carries no escape at all, and telling a caller
+        # to go looking for one in a command that has none sends them somewhere
+        # there is nothing to find. Raised in review.
+        guard = self.guard_module()
+        translated = guard.offence('git $"safe" -5')
+        self.assertIn("translated string", translated)
+        self.assertIn("message catalogue", translated)
+
+        undecodable = guard.offence("git $'\\M-x' -5")
+        self.assertIn("escape this guard does not decode", undecodable)
+        self.assertNotIn("catalogue", undecodable,
+                         "the two reasons stay apart")
+
+    def test_the_undecodable_heredoc_scan_knows_where_a_body_is(self):
+        # The scan had its own `shell_positions` call with no body spans, so an
+        # apostrophe in an earlier body left it in quote state and a later
+        # undecodable opener looked quoted — the refusal never fired. **The
+        # same oversight `heredoc_spans` had just been fixed for, in the
+        # function beside it.** Raised in review.
+        guard = self.guard_module()
+        command = ("cat > a.md <<'EOF'\n"
+                   "don't\n"
+                   "EOF\n"
+                   "git commit -F - <<$'E\\'OF'\n"
+                   "git push origin +HEAD:main\n"
+                   "EOF")
+        self.assertTrue(guard.undecodable_heredoc(command),
+                        "the second opener is seen, apostrophe or not")
+        self.assertRefused(command)
+
+    def test_a_run_of_assignments_alone_has_no_command_word(self):
+        # `leading_command` answers `""` for a run that is all assignments, and
+        # `list.index` does not find it — so `X=1 | bash` raised `ValueError`
+        # out of the hook. **A crash is empty stdout and `PreToolUse` reads
+        # empty stdout as non-blocking**, which makes every crash in this file
+        # a fail-open. Raised in review; verified as a crash.
+        for command in ("X=1 | bash", "X=1 Y=2 | sh", "X=1 | bash -c true"):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+        # And the run before a shell is still judged when it has one.
+        self.assertRefused("X=1 echo 'git push origin +HEAD:main' | bash")
+
+    def test_a_crash_while_judging_refuses_the_command_it_crashed_on(self):
+        # **Four crash paths have been found in this file and each was a
+        # fail-open**: two `str.index`, one `list.index` and one recursion.
+        # Fixing them one at a time leaves the next one open, so the direction
+        # is set at the door — a crash while judging THIS command says this
+        # command broke the parser, and refusing one command is proportionate.
+        #
+        # **Not the same answer as the malformed-event case beside it**, which
+        # allows: an unreadable event has established nothing about any
+        # command, so refusing there stops the session for a defect in this
+        # file.
+        guard = self.guard_module()
+        original = guard.offence
+        try:
+            guard.offence = self._raising_offence
+            decision = self._run_hook(guard, "git status")
+        finally:
+            guard.offence = original
+        self.assertEqual(
+            "deny",
+            decision["hookSpecificOutput"]["permissionDecision"],
+            "a crash refuses rather than admitting what could not be read")
+        self.assertIn("crashed the guard that judges it",
+                      decision["hookSpecificOutput"]["permissionDecisionReason"])
+
+    @staticmethod
+    def _raising_offence(command, depth=0, judged=None):
+        raise RuntimeError("deliberate, to observe the direction of a crash")
+
+    @staticmethod
+    def _run_hook(guard, command):
+        """`guard.main()` over one Bash event, returning the JSON it wrote."""
+        import contextlib
+        import io as _io
+        import json as _json
+        import sys as _sys
+
+        event = _json.dumps({"tool_name": "Bash",
+                             "tool_input": {"command": command}})
+        out, err = _io.StringIO(), _io.StringIO()
+        stdin = _sys.stdin
+        try:
+            _sys.stdin = _io.StringIO(event)
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                guard.main()
+        finally:
+            _sys.stdin = stdin
+        return _json.loads(out.getvalue())
+
+    def test_the_readings_do_not_multiply(self):
+        # **The four readings and the substitution recursion each descend onto
+        # a string barely shorter than the one they came from, so a command
+        # nesting them multiplies.** `$( echo ${a:-{z,X}} )` repeated seven
+        # times is 155 characters and took over sixty seconds — past the hook
+        # timeout, which produces no verdict, which `PreToolUse` treats as
+        # non-blocking. Fail-open by exhaustion, on an INNOCENT command, and a
+        # regression from the commit that added the readings. Found by an
+        # adversarial audit; measured at 394 seconds for eight levels.
+        #
+        # `offence` caches the verdict per string, so each distinct string is
+        # judged once. The cache holds the verdict rather than the visit, which
+        # is the half that has to be right: remembering only that a string had
+        # been seen would return None the second time a REFUSING string
+        # appeared and lose the refusal.
+        #
+        # Asserted as a verdict rather than a duration — a timing assertion on
+        # CI is a flake — but the case cannot return at all if the cost
+        # multiplies, so a green run is the bound.
+        nested = "b"
+        for _ in range(8):
+            nested = "$( echo ${a:-{z," + nested + "}} )"
+        self.assertAdmitted("git commit -m " + nested)
+
+        # And the control that the cache cannot swallow a refusal: the same
+        # shape carrying a push is still refused, and a repeated string that
+        # refuses on its first reading refuses on every later one.
+        self.assertRefused(
+            "git commit -m $( echo ${a:-{z,b}} ) ; git push origin +HEAD:main")
+        self.assertRefused(
+            "git ${x:-push} origin +HEAD:main ; git ${x:-push} origin +HEAD:main")
+
+    def test_an_unbalanced_brace_ends_the_scan(self):
+        # **A hook that runs out of time is non-blocking, which is fail-open by
+        # exhaustion rather than by misreading.** The `${` branch advanced one
+        # character and rescanned to the end of the string from the next `${`,
+        # which is quadratic: `"${" * 20000` took the hook past its 60-second
+        # timeout and produced no verdict at all. `$(` and the backtick already
+        # ended the scan on a missing closer; this now does too. Found by an
+        # adversarial audit.
+        #
+        # Asserted as a verdict rather than as a duration, because a timing
+        # assertion on CI is a flake — `judge` fails the test if the hook exits
+        # non-zero, and the case cannot return at all if the scan is quadratic.
+        self.judge("${" * 20000)
+        self.judge('git commit -m "' + "${" * 5000)
+        self.assertRefused("${" * 500 + "; git push origin +HEAD:main")
+
+    def test_an_expanding_heredoc_body_removes_its_continuations(self):
+        # **A body whose delimiter is unquoted expands, and removes
+        # `\\<newline>` before it does.** The continuation join was applied
+        # only to command-line regions, so
+        # `<<EOF` / `$\\<newline>(git push …)` / `EOF` formed a live `$(…)`
+        # that the substitution scan never saw. Raised in review; verified
+        # allowed.
+        #
+        # A quote is an ordinary character in a body, which is why the join
+        # takes the same `quotes` flag the extractor does rather than tracking
+        # quoting that is not there.
+        self.assertRefused(
+            "git commit -F - <<EOF\n$\\\n(git push origin +HEAD:main)\nEOF")
+        self.assertRefused(
+            "git commit -F - <<EOF\n`\\\ngit push origin --mirror`\nEOF")
+
+        # The control: a QUOTED delimiter expands nothing, so the same body is
+        # data and stays admitted.
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\n$\\\n(git push origin +HEAD:main)\nEOF")
+
+    def test_a_delimiter_inside_a_body_is_data(self):
+        # The over-refusal half of the same reading: a `<<` inside a heredoc
+        # BODY is text, and `undecodable_heredoc` was treating one as an
+        # opener — so a body documenting this very mechanism was refused as an
+        # undecodable delimiter. `shell_positions` does not mark a body,
+        # because a body is not quoted; `heredoc_spans` is what knows where one
+        # is. Raised in review; measured.
+        self.assertAdmitted(
+            "git commit -F - <<'BODY'\nsee <<$'E\\x4fF' here\nBODY")
+        self.assertAdmitted(
+            "git commit -F - <<'BODY'\nand <<EOF too\nBODY")
+
+        # And the control that the exemption did not swallow the check: an
+        # undecodable delimiter on the COMMAND LINE is still refused.
+        self.assertRefused(
+            "git commit -F - <<$'E\\x4fF'\nEOF\ngit push origin +HEAD:main\n$EOF")
+
+    def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
+        # The boundary of the exemption, and it is bash's own rule: digits are
+        # a descriptor only where they are a WHOLE token glued to the operator.
+        # In `echo foo2>x` bash writes the word `foo2`, so a strip that ate the
+        # `2` would be editing an argument rather than removing syntax — the
+        # thing `shell_positions` exists to stop this file doing.
+        #
+        # So `feat2` is still the refspec, and the protected one is still
+        # refused with the redirection standing next to it.
+        self.assertAdmitted("git push origin feat2>/tmp/log")
+        self.assertRefused("git push origin main2>/tmp/log; git push origin main")
+        self.assertAdmitted("git log --grep=x2 -1")
+
+    def test_a_quoted_or_escaped_redirection_is_data(self):
+        # The control every strip in this file owes. A `>` inside quotes is an
+        # argument and an escaped one is a literal, so neither is syntax to
+        # remove — and a commit body quoting a redirected push must still reach
+        # the scan whole rather than arrive with its middle deleted.
+        self.assertAdmitted("git commit -m 'run it 2>&1 and log'")
+        self.assertAdmitted('git log --grep="2>&1" -5')
+        self.assertAdmitted("git commit -m 'git push origin 2>&1 +HEAD:main'")
+        self.assertRefused("git commit -m x; git push origin '2>&1' +HEAD:main")
+
+    def test_a_named_descriptor_is_a_descriptor_too(self):
+        # **The descriptor grammar is not only digits, and reading it as digits
+        # alone left a force push admitted.** Bash takes `{name}>&1` as well,
+        # so `git {fd}>&1 push origin +HEAD:main` had `>&1` removed, `{fd}`
+        # left standing, and `push_offence` took that word for the subcommand
+        # and stopped looking. Raised in review on the change that closed the
+        # digit half; verified allowed before the fix, and allowed on `main`
+        # before this file grew a strip at all.
+        for command in (
+            "git {fd}>&1 push origin +HEAD:main",
+            "git {fd}>&1 log --output=/tmp/probe",
+            "git push origin {fd}>&1 +HEAD:main",
+            "git {n}>/dev/null push origin --mirror",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # And the boundary, which is bash's: `{name}` is an identifier, so a
+        # leading digit is not one and `${N}` is not one either — the brace
+        # there does not begin a word. Both stay whole, which costs a
+        # positional and refuses rather than admits.
+        self.assertAdmitted("git push origin fix/some-branch {fd}>&1")
+        self.assertRefused("git push origin ${N}>&1 main")
+
+    def test_a_heredoc_introducer_goes_with_its_delimiter(self):
+        # **Leaving the introducer standing was a fail-open, and this test used
+        # to assert the opposite.** `strip_heredocs` takes the body and leaves
+        # `<<EOF` behind so the line still tokenises — but `<<` is whole
+        # punctuation, so `is_boundary` ends the run there: in
+        # `git <<EOF push origin +HEAD:main` the `git` token was severed from
+        # its own subcommand, `git_segments` yielded nothing, and bash ran the
+        # push. Raised in review; verified allowed, and allowed on `main` too.
+        #
+        # Removing the delimiter with the introducer is what leaves no stray
+        # word behind, which was the reason the exemption existed.
+        for command in (
+            "git <<EOF push origin +HEAD:main\nEOF",
+            "git <<'EOF' push origin +HEAD:main\nEOF",
+            "git <<-EOF push origin --mirror\nEOF",
+            "git <<<x push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The controls: an honest heredoc still files, and a push after one is
+        # still judged rather than swallowed with the body.
+        self.assertAdmitted("git commit -F - <<'EOF'\na message\nEOF")
+        self.assertRefused(
+            "git commit -F - <<'EOF'\na message\nEOF\ngit push origin +HEAD:main")
 
     def test_a_non_bash_tool_is_not_judged(self):
         self.assertIsNone(self.judge("git push origin +HEAD:main", tool="Read"))
