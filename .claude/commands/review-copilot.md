@@ -1,7 +1,7 @@
 ---
 description: Triage Copilot's review comments on a PR — verify each before acting on it
 argument-hint: "[PR number — omit for the current branch's PR]"
-allowed-tools: Read, Grep, Glob, Edit, Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(gh pr diff:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-comment-reply.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/pr-thread-resolve.sh:*), Bash(git log:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a)
+allowed-tools: Read, Grep, Glob, Edit, Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(bash .claude/scripts/pr-locality.sh:*), Bash(gh pr diff:*), Bash(bash .claude/scripts/pr-review-comments.sh:*), Bash(bash .claude/scripts/pr-review-bodies.sh:*), Bash(bash .claude/scripts/pr-issue-comments.sh:*), Bash(bash .claude/scripts/pr-comment-reply.sh:*), Bash(bash .claude/scripts/pr-review-threads.sh:*), Bash(bash .claude/scripts/pr-thread-resolve.sh:*), Bash(git log:*), Bash(git diff:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a)
 ---
 
 Work through the Copilot review on PR $1 — if empty, the PR for the current
@@ -205,7 +205,11 @@ So for each finding, before changing anything:
   evidence.
 - **Search for the symbol, inside the touch set.** If the finding is real it
   is real at the owner site; fix it there and at the sites the PR body's
-  `| Touch set |` row covers. A comment asking for a restated count, a
+  `| Touch set |` row covers — read with
+  `bash .claude/scripts/pr-locality.sh <n>`, a fixed-field helper, because
+  `gh pr view` reaches the feeds this command filters. A body carrying no
+  rows leaves the class's own row in `docs/change-locality.md` as the bound,
+  and the report says so. A comment asking for a restated count, a
   "since PR-NN" sentence, or a value quoted a second time where the owner
   site is already correct is asking for the tour `docs/change-locality.md`
   §2 withdraws — reject it, citing that section.

@@ -670,8 +670,13 @@ same argument as never calling a branch clean because asking failed.
    before anything is committed to it. The same goes for the directory: name
    the worktree the run is in, and if it is the main checkout say that too.
 
-2. **Checks** — `/validate-blueprint`, plus `/check-links` when the change
-   touched links, cross-references or nav footers.
+2. **Checks**, selected by the class the PR body will carry
+   (`docs/change-locality.md` §3): `/validate-blueprint` after Class C, or
+   after any edit under `docs/backend-architecture/`, `docs/roadmap.md` or
+   `docs/testing.md`; `/check-links` when the change touched links,
+   cross-references or nav footers. A Class A change runs neither, and its
+   PR body says so under the rule below rather than claiming a run that did
+   not happen — a body that names the class has named the reason.
 
    **Before `/commit`, not after.** A defect found after the commit costs a
    second commit or a rewrite; found here it is an edit. This is also the step a

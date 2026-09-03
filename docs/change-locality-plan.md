@@ -76,76 +76,37 @@ one service will meet at.
 
 ## 3. The target model
 
-### Source-of-trust order
+The model — the source-of-trust order, the rule, the change classes with
+their touch sets, the partitions and the mutex surfaces — is
+[`docs/change-locality.md`](change-locality.md), and this plan does not
+repeat it. A second copy here would be the first restatement written under
+a rule against them, and the first draft of this section was exactly that:
+its Class E row and its mutex list had both drifted from the contract's
+before the pull request introducing them was reviewed. What this section
+keeps is the reasoning the contract states without arguing.
 
-A lower layer cites a higher one by name. It does not copy the value.
+**Why an owner per fact rather than a tour.** The old method kept a value
+consistent by copying it and visiting every copy; every copy was then a site
+the next change had to visit, and two agents touching the same fact met in
+the same file whatever slice each was given. With one owner and citations
+there is no second site to tour, so the obligation is withdrawn rather than
+relaxed.
 
-1. **Gates and tests.** Green means the claim they cover is true.
-2. **Code.** Types, registrations, options, constants, SQL, Helm values. A
-   value that a document needs to mention lives in one named symbol, and the
-   document names the symbol.
-3. **ADRs.** Append-only. The only document that changes a rule.
-4. **Chapters.** The rule and the reason. Not an inventory, not a changelog,
-   not a copy of a constant, not a copy of a type.
-5. **Git.** Commit bodies argue the change, the PR body is the house form, and
-   `git log` is the index. This is the change record; nothing else is.
-6. **`CLAUDE.md`.** How to act in this repository. Nothing that moves when a
-   PR lands.
+**Why Class A holds no Markdown.** Class A is the target for most bugfixes,
+and its touch set contains no Markdown at all. That is the whole point of the
+plan.
 
-### The one rule, restated
+**Why two agents fit inside one service.** Handlers, queries, validators and
+their tests are scanned in by `PluggableInterfaces`, so a new slice needs
+none of the per-service mutexes the contract names, and two agents meet only
+when both need the same one.
 
-"The blueprint must not contradict itself" stays. What changes is the method:
-**every fact has exactly one owner, and every other mention cites the owner.**
-A change to a fact is then one edit plus a grep for the symbol, not a grep for
-the value. The obligation to tour the corpus is withdrawn, because after the
-cleanup below there is no second site to tour.
+**Why `.claude/**` is one agent.** `settings.json` self-locks and `ship.md`
+is one file.
 
-Concretely, a document may say "`RetentionPolicy.IdempotencyWindow` has a
-floor, and the floor is the claim's window (ADR-038)". It may not say "seven
-days" unless it is the file that defines seven days.
-
-### Change classes and touch sets
-
-An agent names the class in the PR body and does not edit outside the set. A
-CI gate (step 5) enforces it.
-
-| Class | Example | May touch | Never touches |
-|---|---|---|---|
-| **A — local** | fix a handler, tighten a test, add a validator rule | the owning slice `src/Services/<Svc>/**` and `tests/<Svc>.*`; one building-block project and its tests; a migration if that service's schema moved; `docs/runbooks/<alert>.md` if the change alters what an operator does for that alert | any other `docs/**`, `CLAUDE.md`, a second service, `.claude/**` |
-| **B — shared mechanism** | change `IdempotencyBehavior`, a `Common.Web` middleware, outbox retention | the building block and `tests/Common.*`; the one service test that proves wiring; `tools/new-service` if a Catalog file was added or removed; the one chapter paragraph that states the rule | every chapter that mentions the mechanism; Appendix D; both services' copies unless the scaffold is the subject |
-| **C — a rule moved** | a floor changes meaning, a token bound is introduced | code and tests; one new ADR file; the single chapter section the ADR amends; Appendix B if a package was added | historical paragraphs describing the old rule; the decision log; `CLAUDE.md` |
-| **D — docs or harness** | a new command, a style pass, a runbook, this cleanup | only the docs or `.claude/` tree the issue names | inventories "while here"; `src/**` |
-| **E — dependency graph** | add a package, raise a pin, add a project | `Directory.Packages.props`, the `.csproj`, Appendix B (identity and licence, not the version), `global.json`, `Platform.slnx` | the chapters that use the package |
-
-Class A is the target for most bugfixes, and its touch set contains no
-Markdown at all. That is the whole point of the plan.
-
-### Partitions for parallel agents
-
-Safe to run concurrently, one worktree each:
-
-| Agent owns | Notes |
-|---|---|
-| `src/Services/Catalog/**`, `tests/Catalog.*` | plus `tools/new-service` if it adds or removes a file, because the scaffold reads Catalog |
-| `src/Services/Ordering/**`, `tests/Ordering.*` | |
-| one project under `src/BuildingBlocks/` and its tests | not two agents on `Common.Infrastructure` |
-| one of `deploy/**`, `.github/**`, `docs/backend-architecture/<one chapter>` | one chapter per agent; ADRs are per-file after step 3 |
-| `.claude/**` | one agent, because `settings.json` self-locks and `ship.md` is one file |
-
-**Two agents inside one service** is safe when neither needs the same
-per-service mutex. Those mutexes are `Program.cs`, the `DbContext` and its
-model snapshot (one migration-adding agent per service at a time), the
-`.csproj`, and `tests/<Svc>.TestSupport/ServiceFixture.cs`. Handlers, queries,
-validators and their tests are scanned in by `PluggableInterfaces`, so a new
-slice needs none of them. State in the issue which mutex a task needs; do not
-start a second agent on the same one.
-
-**Repo-wide mutex surfaces**, edited by one agent at a time and named in the
-issue when needed: `Directory.Packages.props`, `Directory.Build.props`,
-`Platform.slnx`, `.editorconfig`, `deploy/compose/docker-compose.yml`,
-`deploy/compose/keycloak/realm-export.json`,
-`.github/secret-scan/allowed-secrets.txt`, `appendix-b-licences.md`, and
-`CLAUDE.md` until step 2 lands.
+**Why two of the mutexes are temporary.** `CLAUDE.md` is a mutex until step 2
+rewrites it and `appendix-a-adrs.md` until step 3 splits it; the contract
+marks both.
 
 ## 4. The work, in order
 
@@ -179,8 +140,10 @@ tour.
   and chapters are out of scope; the command runs after Class C and chapter
   edits, not after Class A.
 
-Touch set: `docs/change-locality.md` (new), `CLAUDE.md`, five files under
-`.claude/commands/`, one subagent profile. Done when a Class A PR opened after
+Touch set: `docs/change-locality.md` (new), this plan, `CLAUDE.md`, six
+files under `.claude/commands/` — the five above and `ship.md`, whose checks
+step selects by class — one subagent profile, and one helper that reads the
+two body rows for the review commands. Done when a Class A PR opened after
 it passes both review loops without editing Markdown.
 
 ### Step 1 — freeze the changelogs ∥
@@ -260,11 +223,16 @@ when no command or chapter tells an agent to update Appendix D.
 `.github/locality-gate/` in the house pattern (Python, tested, then run in
 `ci.yml`, on `pull_request` including `edited`):
 
-- reads the class from the PR body's `| Class |` row and the diff's file
-  list;
-- holds the class → allowed-path map in one YAML file the gate reads and
-  `docs/change-locality.md` quotes, so the table exists once;
-- fails the PR on a file outside the set, naming it;
+- reads the PR body's `| Class |` and `| Touch set |` rows and the diff's
+  file list, and fails on a body carrying neither;
+- holds the class → allowed-path map in one YAML file the gate reads, and
+  `docs/change-locality.md`'s table becomes a citation of that file, so the
+  map exists once;
+- checks each diff path against **both**: the class's map, and the touch set
+  the author declared. A Catalog Class A change that also edits Ordering is
+  inside the class map and outside its own declared set, and it is the
+  second check that catches it;
+- fails the PR on a file outside either, naming it;
 - its own test's subject is what it looks at: a PR with a class row and a
   file outside the set must be observed red before the gate is trusted.
 

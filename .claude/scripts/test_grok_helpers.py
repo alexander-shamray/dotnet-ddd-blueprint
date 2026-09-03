@@ -2523,6 +2523,30 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
             with self.subTest(helper=path.name):
                 self.assertIn(f"bash .claude/scripts/{path.name}:*", frontmatter)
 
+    def test_the_locality_rows_go_through_the_fixed_helper(self):
+        # `docs/change-locality.md` asks a PR body for `| Class |` and
+        # `| Touch set |`; /review-branch's touch-set finding and
+        # /review-copilot's edit bound both read them. Neither command may
+        # hold `gh pr view`, so the rows arrive through a helper that reads
+        # `body` and no other field — a caller that chooses fields can choose
+        # `reviews` — and takes one shape-checked argument.
+        helper = SCRIPTS / "pr-locality.sh"
+        text = helper.read_text(encoding="utf-8")
+        self.assertIn("--json body", text)
+        self.assertNotIn("$2", text)
+        for name in ("review-branch.md", "review-copilot.md"):
+            with self.subTest(command=name):
+                frontmatter = (COMMANDS / name).read_text(encoding="utf-8")
+                frontmatter = frontmatter.split("---")[1]
+                self.assertIn(
+                    "bash .claude/scripts/pr-locality.sh:*", frontmatter)
+        for bad in ("--json", "12x", "-1", "1 --json reviews"):
+            with self.subTest(arg=bad):
+                out = subprocess.run(
+                    [BASH, str(helper), bad], capture_output=True, text=True,
+                )
+                self.assertEqual(out.returncode, 2, out.stderr)
+
 
 # The one bounded read of the reviewer transcript, spelled out so the
 # allow-list can require it exactly. grok-review.sh writes it across two

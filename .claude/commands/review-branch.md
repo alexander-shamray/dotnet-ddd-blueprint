@@ -1,7 +1,7 @@
 ---
 description: Review branch vs main for contradictions; recheck suggestions.md when it already exists
 argument-hint: "[recheck | full | --local]"
-allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(bash .claude/scripts/dotnet-test.sh:*), Bash(rm suggestions.md)
+allowed-tools: Read, Grep, Glob, Write, Edit, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(git merge-base:*), Bash(git branch --list:*), Bash(git branch --show-current), Bash(git branch -a), Bash(python .github/licence-gate/licence_gate.py), Bash(bash .claude/scripts/dotnet-test.sh:*), Bash(bash .claude/scripts/pr-for-branch.sh:*), Bash(bash .claude/scripts/pr-locality.sh:*), Bash(rm suggestions.md)
 disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(docs/**), Edit(./docs/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
@@ -51,9 +51,14 @@ taste. Prefer:
 6. **A file outside the declared touch set.** The PR body's `| Class |` and
    `| Touch set |` rows say what this branch may edit; a path in
    `git diff --name-only` that neither row covers is a finding, and its
-   resolution is a narrower diff or a different class, never a wider row. A
-   `--local` review of uncommitted work has no body to read the rows from —
-   say so and skip this check rather than inferring a class.
+   resolution is a narrower diff or a different class, never a wider row.
+   The rows come from `bash .claude/scripts/pr-locality.sh <n>`, with `<n>`
+   from `bash .claude/scripts/pr-for-branch.sh` — a fixed-field helper,
+   because `gh pr view` reaches the review feeds. Where they cannot be read
+   — a `--local` review with no PR yet, a body carrying neither row, or the
+   sandbox clone, which has no network — say so and skip this check rather
+   than inferring a class. The plan's locality gate is the enforcement; this
+   is the early read.
 
 Reject as non-findings the house styles `docs/style-guide.md` tabulates on
 purpose (braceless single statements, file-scoped namespaces, explicit

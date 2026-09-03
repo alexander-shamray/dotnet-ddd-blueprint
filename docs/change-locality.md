@@ -56,6 +56,13 @@ Never write, in any document:
 - "since PR-NN", "this used to say", or the history of how a rule was
   corrected. The ADR trail is the history.
 
+A measurement is not a restatement. A commit body, a PR body, an issue, or
+[`change-locality-plan.md`](change-locality-plan.md) may state a count or a
+value **as of a named date or commit**, because a record of what was true
+when it was taken is not a claim that it is true now, and nothing has to
+keep it current. The prohibition is on a document stating a fact in the
+present tense in a second place.
+
 ## 3. Change classes
 
 Name the class in the PR body before editing. Do not grow the set "just in
@@ -67,7 +74,7 @@ it, the class is wrong, so change the class, not the set.
 | **A — local** | fix a handler, tighten a test, add a validator rule, add a command field the aggregate already has | the owning slice `src/Services/<Svc>/**` and `tests/<Svc>.*`; **or** one project under `src/BuildingBlocks/` and its `tests/Common.<That>.Tests`; a migration if that service's schema moved; `docs/runbooks/<alert>.md` if the change alters what an operator does for that alert | any other `docs/**`; `CLAUDE.md`; a second service "to keep the sample in sync"; `.claude/**` |
 | **B — shared mechanism** | change `IdempotencyBehavior`, outbox retention, a `Common.Web` middleware, a MassTransit registration helper | the building block and its tests; the *one* service test that proves the wiring; `tools/new-service` if a Catalog file was added or removed; the one chapter paragraph that states the rule; a runbook as in A | every chapter that *mentions* the mechanism; Appendix D; both services' copies unless the scaffold template is the subject; the decision log, lessons, repo map, style guide |
 | **C — a rule moved** | a floor changes meaning; a host must refuse a token above a bound; a prohibition gains an exception | code and tests; one new ADR; the single chapter section the ADR amends; Appendix B if a package was added | every historical paragraph describing the old rule (the ADR is the correction, and chapters point at it); `docs/pr-decision-log.md`; `CLAUDE.md` |
-| **D — docs or harness** | a new `/command`, a style pass, a chapter split, a runbook for an alert that already fires, this contract | only the docs or `.claude/` tree the issue names | inventories "while we are here"; `src/**` |
+| **D — docs or harness** | a new `/command`, a style pass, a chapter split, a runbook for an alert that already fires, this contract | only the docs or `.claude/` tree the issue names — or, when no issue was filed, the paths the PR body's touch-set row declares before the first edit | inventories "while we are here"; `src/**` |
 | **E — dependency graph** | add a package, raise a pin, add a project | `Directory.Packages.props` (exact pin, no `Version=` on the reference); the `.csproj`; `appendix-b-licences.md` — identity and licence, not the version unless the version is the decision; `global.json` or `.config/dotnet-tools.json`; `Platform.slnx` | the chapters that use the package |
 
 Notes that decide the edge cases:
@@ -143,7 +150,7 @@ What an agent does instead of touring the corpus:
 6. If a Catalog file was added or removed, run the scaffold's unit tests
    with `py -3.12` and the four-command dogfood in `docs/repo-map.md`.
 7. `/validate-blueprint` after Class C or any chapter edit. Not after
-   Class A.
+   Class A. `/ship` selects its checks by the same class.
 8. Commit with `/commit`; the body argues the change and carries the bare
    `Closes #n` line. Open the PR with `/pr`.
 9. In the review loops, a finding that asks for a restated count, a

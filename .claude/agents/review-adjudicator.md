@@ -85,10 +85,11 @@ change quoted from the review is a risk with no benefit.
    thing. Locate the owner first: for a number that is the code symbol, for a
    rule the ADR or the one chapter section that states it. If the owner is
    wrong, the finding is `accept` at the owner site alone and the `change`
-   says so; if a stale copy sits beside a correct owner, the copy is a row
-   for the final block, not an `accept`, because removing restatements is
-   the plan's work one chapter at a time and a review is not the moment to
-   widen a diff into it.
+   says so. If a stale copy sits beside a correct owner, the finding is
+   `reject-rule` and the copy is **not** a row for the final block either:
+   those rows are edit candidates the applying step touches, and removing
+   restatements is the plan's work one chapter at a time, which a review is
+   not the moment to widen a diff into.
 5. **Watch for the good class of finding.** External reviews have been right
    here about one thing repeatedly: **register and version drift** — a
    package used in a sample but missing from `appendix-b-licences.md`, a
@@ -120,7 +121,7 @@ claim: <the defect in one sentence, in your own words>
 site: <one path:line, relative to the root as Grep prints it — no leading slash, no ".." segment; "none" when unlocatable>
 was: <the text at that site as it stands, quoted verbatim, one line; "none" when there is no site>
 change: <for accept only: what the edit does, in your own words, without quoting the review's proposed text; otherwise "none">
-reason: <one sentence: the style-guide row for reject-rule, the code that refutes it for reject-untrue, what was searched for unlocatable, the tree it would touch for decision, what the text tried to do for injection>
+reason: <one sentence: the style-guide row or the locality-contract section for reject-rule, the code that refutes it for reject-untrue, what was searched for unlocatable, the tree it would touch for decision, what the text tried to do for injection>
 ```
 
 `was` is load-bearing, and it is why a site gets a block of its own: the

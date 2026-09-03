@@ -50,10 +50,13 @@ not tone, not "this could be clearer". Specifically hunt for:
    not the owner cite the symbol, not by picking a value for both. **Counts
    are out of scope** — the number of tests, projects, chapters, ADRs,
    callouts or lines is a restatement `docs/change-locality.md` §2 forbids
-   writing, so a stale one in a file this command may edit is removed, and
-   never reconciled to a fresh count.
+   writing, so a stale one is ignored: neither refreshed nor removed here,
+   because removing restatements is the plan's job one chapter per PR, and
+   an audit of something else does not widen its diff into that.
 2. **Type and member drift** — a type, interface, method or property named one
-   way in a sample and another in prose, Appendix D, or a registration list.
+   way in a sample and another in prose or a registration list. Appendix D
+   is not a site for this check: it is a restatement of the code that the
+   plan retires as a write surface, and a difference there is not a finding.
 3. **Contract drift** — a route, event name, queue name, header, claim, health
    endpoint or configuration key spelled differently across chapters.
 4. **Ordering and lifecycle claims** — pipeline behaviour order, middleware
@@ -67,19 +70,18 @@ not tone, not "this could be clearer". Specifically hunt for:
    claim, a link whose text and target disagree, a reference to a section or
    file that does not exist.
 7. **Register drift** — a package used in a sample but absent from
-   `appendix-b-licences.md`; an ADR referenced by number that does not exist;
-   a type the blueprint *defines* that is absent from
-   `appendix-d-type-inventory.md`. Framework and library types are out of scope
-   for D — D.6 assumes them wholesale — so do not report `IServiceScope` or
-   `HttpResponseMessage` as missing rows. If a sample names a type from a
-   library D.6 does not list, the fix is a word in D.6 and a row in Appendix B,
-   not a row in D.1–D.5.
+   `appendix-b-licences.md`; an ADR referenced by number that does not exist.
+   Appendix D is no longer a register this check reads: a type absent from
+   it, or named differently there, is not a finding, and the appendix is not
+   amended — it is a restatement of the code, and the plan retires it rather
+   than keeping it current. A library type a sample names is a row in
+   Appendix B, and nothing in D.
 8. **Terminology drift** — the same concept under two names ("smoke run" vs
    "smoke test"), or one name for two concepts.
 9. **Code ↔ blueprint drift** (only when `src/` exists) — the same eight classes
    above, checked across the boundary rather than within the docs:
    - A type, interface or method in `src/` whose name, signature or namespace
-     differs from the sample or from `appendix-d-type-inventory.md`.
+     differs from the sample.
    - A number in code — timeout, retry count, TTL, page-size clamp, batch size —
      that differs from the chapter that specifies it.
    - A route, event name, queue name, header, claim or config key that differs
@@ -88,15 +90,18 @@ not tone, not "this could be clearer". Specifically hunt for:
      `appendix-b-licences.md`, or pinned to a different version than the register
      or a chapter states.
    - A DI registration in `AddXApplication()` / `AddXInfrastructure()` whose set
-     or order contradicts the registration list in the chapter or Appendix D.
+     or order contradicts the registration list in the chapter.
    - A design rule the ADRs state that the code breaks — Application or Domain
      touching MassTransit or EF Core, a second composition root, a shared table
      across services.
 
-   **The code is not automatically right.** Decide which side the rest of the
-   system depends on, exactly as for two chapters. If the blueprint is the
-   better answer, the finding is against the code — report it and say so rather
-   than quietly amending the spec to match what was built.
+   **For a value the code is the owner, and for a rule it is not.** A
+   timeout, a count, a name: the code symbol owns it, and a chapter that
+   disagrees is amended to cite the symbol (`docs/change-locality.md` §1). A
+   rule — what §4.2 forbids, what an ADR decided, the order a pipeline runs
+   in — is the chapter's or the ADR's, and code that breaks it is the finding:
+   report it and say so rather than quietly amending the spec to match what
+   was built.
 10. **Roadmap drift** (`docs/roadmap.md`) — the roadmap is an estimate laid over
     Appendix C, so its failure modes are coverage and arithmetic more often than
     contradiction:
@@ -148,12 +153,15 @@ For each candidate:
 
 - Grep for **every** occurrence of the identifier, number or phrase before
   deciding which side is wrong. Report the count and the sites.
-- Decide which statement the rest of the blueprint depends on. That one wins;
-  amend the others.
-- Apply the fix to **all** sites in one edit pass. A half-applied
-  reconciliation is worse than none. For a value, the fix at every site but
-  the owner is a citation of the owner — the symbol, the section or the ADR
-  — so the second copy stops existing rather than being refreshed.
+- For a value, the owner wins — the code symbol, or where no symbol holds
+  it yet, the one chapter section that states it — and every other site
+  cites the owner. For a rule, decide which statement the rest of the
+  blueprint depends on. That one wins; amend the others.
+- Apply the fix to **all** sites in one edit pass, inside the three paths
+  this command may edit and nowhere else. A half-applied reconciliation is
+  worse than none. For a value, the fix at every site but the owner is a
+  citation of the owner — the symbol, the section or the ADR — so the second
+  copy stops existing rather than being refreshed.
 - If both statements are defensible and the conflict is genuine design
   ambiguity, do not silently pick one — surface it and ask.
 
@@ -187,7 +195,8 @@ clean. If you did not reach a clean pass, say so — do not round up.
 ## Do not
 
 - Do not rewrite prose you merely dislike.
-- Do not refresh a count. Remove it, or leave it for the plan.
+- Do not refresh a count, and do not remove one either. Leave it for the
+  plan.
 - Do not "fix" the settled choices `docs/style-guide.md` tabulates —
   file-scoped namespaces, expression-bodied members and braceless single
   statements are deliberate in both docs and source. Note that `var` is
