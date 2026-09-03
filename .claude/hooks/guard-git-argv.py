@@ -516,6 +516,23 @@ def undecodable_heredoc(command):
     return False
 
 
+def glued(command, start, end):
+    """Whether `command[start:end]` touches other characters of its own word.
+
+    A word boundary is whitespace, a metacharacter, a quote, or the end of the
+    string — so an expansion standing alone as `$BRANCH` is not glued, and the
+    `${x}` of `--out${x}put=` is. This is the whole of the line between an
+    expansion whose emptiness closes a word up and one that simply supplies a
+    value.
+    """
+    def boundary(position):
+        if position < 0 or position >= len(command):
+            return True
+        return command[position] in METACHARACTERS or command[position] in "'\""
+
+    return not (boundary(start - 1) and boundary(end))
+
+
 def without_substitutions(command):
     """`command` with every command substitution deleted rather than tokenised.
 
@@ -534,11 +551,18 @@ def without_substitutions(command):
     does when the substitution prints something, the other is what it does when
     it prints nothing, and both have to be safe.
 
-    A parameter expansion is deliberately NOT deleted here. `$BRANCH` can be
-    empty too, but `git push origin $BRANCH` is traffic this repository writes,
-    and deleting it would refuse an honest push for naming no destination. That
-    one stays where the residual in `docs/harness-boundaries.md` already puts
-    it — the shell computes it and this hook does not.
+    **A parameter expansion is deleted only where it is GLUED into a word**,
+    and the line between the two cases is the one the paragraph above draws.
+    `git ${x}push origin +HEAD:main` and `git log --out${x}put=/tmp/probe` run
+    exactly as their `$( )` spellings do — the dangerous string is literally in
+    the source and only an empty expansion is needed to close the word up. But
+    `git push origin $BRANCH` is traffic this repository writes, and deleting a
+    WHOLE word would refuse an honest push for naming no destination. So the
+    test is adjacency: an expansion touching other characters of its own word
+    goes, one standing alone stays. Raised in an adversarial audit, which
+    pointed out that the residual named in `docs/harness-boundaries.md` is
+    about a value assembled at run time — `F=--output=x; git log $F` — and that
+    this is not that.
     """
     out, index = [], 0
     in_single = in_double = False
@@ -574,6 +598,22 @@ def without_substitutions(command):
                 break
             index = close + 1
             continue
+        if char == "$" and command[index + 1:index + 2] not in ("'", '"'):
+            end = None
+            if command.startswith("${", index):
+                close = _closing_brace(command, index + 2)
+                if close is not None:
+                    end = close + 1
+            else:
+                scan = index + 1
+                while scan < len(command) and (command[scan].isalnum()
+                                               or command[scan] == "_"):
+                    scan += 1
+                if scan > index + 1:
+                    end = scan
+            if end is not None and glued(command, index, end):
+                index = end
+                continue
         if char == "'" and not in_double:
             in_single = True
         elif char == '"':
@@ -611,9 +651,23 @@ def dollar_quotes(command):
             index += 2
             continue
         if char == "$" and command[index + 1:index + 2] in ("'", '"'):
+            # **Escape-aware, like every other closer in this file.** A plain
+            # `find` closed `$"\"'"` on the ESCAPED quote, resumed inside the
+            # string, read the `'` there as opening single quotes, and from
+            # then on saw nothing — so a later `$'push'` was never un-sigilled
+            # and `git $'push' origin +HEAD:main` was admitted. That is the
+            # `$'\''` desync of the round before, in the sibling form. Raised
+            # in an adversarial audit.
             quote = command[index + 1]
-            close = command.find(quote, index + 2)
-            if close == -1:
+            close = index + 2
+            while close < len(command):
+                if command[close] == "\\" and close + 1 < len(command):
+                    close += 2
+                    continue
+                if command[close] == quote:
+                    break
+                close += 1
+            if close >= len(command):
                 break
             found.append((index, close + 1, quote == "'"))
             index = close + 1
@@ -626,8 +680,96 @@ def dollar_quotes(command):
     return found
 
 
+ANSI_C_SIMPLE = {
+    "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n",
+    "r": "\r", "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?",
+}
+
+
+def decode_ansi_c(body):
+    """The text `$'<body>'` names, or None where an escape is not decodable.
+
+    **Refusing every escape was safe and cost too much.** The first form of
+    this refused any `$'…'` carrying a backslash, which took `echo $'\\n'`,
+    `printf $'\\t'` and `grep -n $'\\t' file.txt` with it — ordinary traffic
+    that has nothing to do with git, refused by a git guard. Raised in an
+    adversarial audit.
+
+    Decoding instead is safe **because the list only decides how much honest
+    traffic is admitted, never whether a bypass gets through**: an escape this
+    does not know returns None and the command is refused, so a gap costs a
+    false positive rather than a force push. That is the opposite direction
+    from the deny-lists this file refuses elsewhere, and it is why a list is
+    affordable here.
+    """
+    out, index = [], 0
+    while index < len(body):
+        char = body[index]
+        if char != "\\":
+            out.append(char)
+            index += 1
+            continue
+        if index + 1 >= len(body):
+            return None
+        escape = body[index + 1]
+        if escape in ANSI_C_SIMPLE:
+            out.append(ANSI_C_SIMPLE[escape])
+            index += 2
+            continue
+        if escape in "01234567":
+            digits = body[index + 1:index + 4]
+            while digits and not all(d in "01234567" for d in digits):
+                digits = digits[:-1]
+            out.append(chr(int(digits, 8) & 0xFF))
+            index += 1 + len(digits)
+            continue
+        if escape in "xuU":
+            width = {"x": 2, "u": 4, "U": 8}[escape]
+            digits = body[index + 2:index + 2 + width]
+            while digits and not all(d in "0123456789abcdefABCDEF" for d in digits):
+                digits = digits[:-1]
+            if not digits:
+                return None
+            out.append(chr(int(digits, 16)))
+            index += 2 + len(digits)
+            continue
+        if escape == "c":
+            if index + 2 >= len(body):
+                return None
+            out.append(chr(ord(body[index + 2].upper()) ^ 0x40))
+            index += 3
+            continue
+        return None
+    return "".join(out)
+
+
+def decode_locale_quote(body):
+    """The text `$"<body>"` names — double-quote semantics, so this cannot fail.
+
+    Bash translates the string and then reads it as a double-quoted one, where
+    a backslash is special only before `$`, a backtick, `"`, `\\` or a newline
+    and is otherwise literal.
+    """
+    out, index = [], 0
+    while index < len(body):
+        char = body[index]
+        if char == "\\" and index + 1 < len(body) and body[index + 1] in "$`\"\\\n":
+            if body[index + 1] != "\n":
+                out.append(body[index + 1])
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def single_quoted(text):
+    """`text` as a single-quoted shell word, whatever it contains."""
+    return "'" + text.replace("'", "'\"'\"'") + "'"
+
+
 def undecodable_dollar_quote(command):
-    """Whether an ANSI-C quote in `command` carries an escape to decode.
+    """Whether a `$'…'` or `$"…"` in `command` carries an escape to decode.
 
     The same decision `undecodable_heredoc` records, one construct along, and
     for the same reason: decoding every escape bash supports is a list that
@@ -635,27 +777,40 @@ def undecodable_dollar_quote(command):
     close. `$'\\''` is the shape that forces the question — it is a single
     quote produced by an escape, which desynchronised `substitutions` and sent
     the whole command down the `ValueError` path, where the push allow-list
-    does not run. So a `$'…'` with a backslash in it is refused rather than
-    guessed at.
+    does not run.
+
+    **Both forms are read, and only the ANSI-C one can fail.** `$"…"` has
+    double-quote semantics, which `decode_locale_quote` implements completely;
+    `$'…'` can carry an escape outside the set `decode_ansi_c` knows, and that
+    is the case with no safe reading.
     """
     return any(
-        ansi_c and "\\" in command[start + 2:end - 1]
+        ansi_c and decode_ansi_c(command[start + 2:end - 1]) is None
         for start, end, ansi_c in dollar_quotes(command)
     )
 
 
 def strip_dollar_quotes(command):
-    """`command` with the `$` removed from every `$'…'` and `$"…"`.
+    """`command` with every `$'…'` and `$"…"` replaced by what it names.
 
-    What is left is ordinary quoting, which `shlex` does resolve — so `$'git'`
-    becomes `'git'` and the token is `git`. Only the sigil goes; the quoted
-    text is untouched, because an escape inside one is refused before this runs
-    rather than decoded here.
+    `shlex` has no rule for either form, so the `$` stayed glued outside the
+    quote and `$'git'` tokenised as `$git` — which `program_name` did not match,
+    so `git_segments` yielded nothing and the push allow-list, the forbidden
+    flags and `ext::` were all skipped at once.
+
+    The escapes are decoded rather than dropped, so `$'\\x67it'` becomes `git`
+    and is judged as one. An ANSI-C body this file cannot read is refused
+    before this runs, so the `None` case cannot arrive here.
     """
     out, cursor = [], 0
-    for start, _end, _ansi_c in dollar_quotes(command):
+    for start, end, ansi_c in dollar_quotes(command):
+        body = command[start + 2:end - 1]
+        text = decode_ansi_c(body) if ansi_c else decode_locale_quote(body)
+        if text is None:
+            continue
         out.append(command[cursor:start])
-        cursor = start + 1
+        out.append(single_quoted(text))
+        cursor = end
     out.append(command[cursor:])
     return "".join(out)
 
@@ -1583,12 +1738,6 @@ def offence(command, depth=0):
             "commands; refusing rather than reading part of it."
         )
 
-    if undecodable_dollar_quote(command):
-        return (
-            "an ANSI-C quote carries an escape this guard does not decode, so "
-            "it cannot tell what the word says; refusing rather than reading "
-            "part of it."
-        )
 
     # **What bash does when a substitution prints nothing, judged beside what
     # it does when one prints something.** The words around an empty
@@ -1631,12 +1780,31 @@ def offence(command, depth=0):
     # `join_continuations` sits after `strip_comments` because a backslash at
     # the end of a COMMENT continues nothing — bash ends a comment at the
     # newline — so joining first would have swallowed the next line into it.
-    # `strip_dollar_quotes` turns `$'…'` and `$"…"` into the ordinary quoting
-    # `shlex` resolves. It runs last of the five because the escape that would
-    # make one ambiguous has already been refused above.
-    stripped = strip_dollar_quotes(strip_redirections(
+    resolved = strip_redirections(
         separate_lines(
-            join_continuations(strip_comments(strip_heredocs(command))))))
+            join_continuations(strip_comments(strip_heredocs(command)))))
+
+    # **The check and the code that acts on it must read the SAME string**, and
+    # putting this on the raw command was wrong twice over. It refused a
+    # heredoc body or a comment that merely mentions `$'\n'` — data on every
+    # path, which is the invariant the rest of this pipeline is built on, and
+    # it made a commit message describing this very change unwritable. And it
+    # missed `git $\<newline>'\x70ush' origin +HEAD:main`, where the sigil and
+    # its quote are separated by a continuation: nothing was there to refuse on
+    # the raw string, while `strip_dollar_quotes` — running after the join —
+    # found the quote and un-sigilled it, leaving `shlex` a literal
+    # `\x70ush` that is not `push`. Both raised in an adversarial audit; the
+    # bypass was live on `main` too, the over-refusal was this branch's own.
+    if undecodable_dollar_quote(resolved):
+        return (
+            "a `$'…'` or `$\"…\"` carries an escape this guard does not "
+            "decode, so it cannot tell what the word says; refusing rather "
+            "than reading part of it."
+        )
+
+    # `strip_dollar_quotes` turns `$'…'` and `$"…"` into the ordinary quoting
+    # `shlex` resolves, on the string just checked.
+    stripped = strip_dollar_quotes(resolved)
     try:
         lexer = shlex.shlex(stripped, posix=True, punctuation_chars=True)
         # Comments are already gone, and `shlex` would take a second, wider view

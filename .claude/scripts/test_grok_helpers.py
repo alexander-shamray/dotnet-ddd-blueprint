@@ -5504,6 +5504,79 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("git push -u origin fix/some-branch")
         self.assertAdmitted("git log --grep='$x' -5")
 
+        # **The escapes are DECODED, and refusing them all cost too much.** The
+        # first form of this refused any `$'…'` carrying a backslash, which
+        # took `echo $'\\n'` and `grep -n $'\\t' file.txt` with it — traffic
+        # with nothing to do with git, refused by a git guard. Decoding is safe
+        # because the list decides only how much honest traffic is admitted:
+        # an escape `decode_ansi_c` does not know returns None and the command
+        # is refused, so a gap costs a false positive rather than a force push.
+        self.assertAdmitted("echo $'\\n'")
+        self.assertAdmitted("printf $'\\t'")
+        self.assertAdmitted("grep -n $'\\t' file.txt")
+
+        # And what decoding buys on the other side: the hex spelling now IS
+        # `git` and is judged as one, rather than refused for being unreadable.
+        self.assertRefused("$'\\x67it' push origin +HEAD:main")
+        self.assertAdmitted("$'\\x67it' log -5")
+
+    def test_a_dollar_quote_is_checked_on_the_string_that_is_resolved(self):
+        # **The check and the code acting on it must read the same string.**
+        # `undecodable_dollar_quote` ran on the RAW command while
+        # `strip_dollar_quotes` ran at the end of the pipeline, and the two
+        # disagreed in both directions.
+        #
+        # It refused a heredoc body or a comment that merely mentions an
+        # escape — data on every path, which is the invariant the whole
+        # pipeline rests on, and it made a commit message describing this
+        # change unwritable.
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\nUse $'\\n' for newlines\nEOF")
+        self.assertAdmitted("git status # mentions $'\\t'")
+
+        # And it missed a `$'…'` the CONTINUATION assembles: nothing was there
+        # to refuse on the raw string, while the strip — running after the
+        # join — found the quote and un-sigilled it. Found by an adversarial
+        # audit; allowed on `main` too.
+        self.assertRefused("git $\\\n'\\x70ush' origin +HEAD:main")
+        self.assertRefused("git log --out$\\\n'\\x70ut'=/tmp/probe")
+
+    def test_a_dollar_quote_closer_is_escape_aware(self):
+        # A plain `find` closed `$"\\"'"` on the ESCAPED quote, resumed inside
+        # the string, read the `'` there as opening single quotes, and from
+        # then on saw nothing — so a later `$'push'` was never un-sigilled and
+        # the force push was admitted. That is the `$'\\''` desync of an
+        # earlier round, in the sibling quoting form. Found by an adversarial
+        # audit.
+        self.assertRefused(
+            ': $"\\"\'" ; git $\'push\' origin +HEAD:main')
+        self.assertRefused(
+            'git status $"a\\"\'x" ; git $\'push\' origin +HEAD:main')
+
+    def test_a_parameter_expansion_glued_into_a_word_joins_it(self):
+        # `${x}` on an unset name expands to nothing, so the neighbours join —
+        # the identical argument `without_substitutions` makes for `git $( )`.
+        # No run-time state is needed: the dangerous string is in the source.
+        # Found by an adversarial audit; allowed on `main` too.
+        for command in (
+            "${x}git push origin +HEAD:main",
+            "git ${x}push origin +HEAD:main",
+            "git log --out${x}put=/tmp/probe",
+            "git fetch ext${x}::sh -c id",
+            "git ${x}push origin main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **The line between the two cases is adjacency**, and it is why a
+        # whole-word expansion is left alone: `git push origin $BRANCH` is
+        # traffic this repository writes. It is refused here for a different
+        # and older reason — the destination cannot be shown not to be `main`,
+        # which `main` refuses too — so the control is a command where the
+        # expansion is a whole word and the push is not the subject.
+        self.assertAdmitted("git log --format=$FORMAT -5")
+        self.assertAdmitted("git checkout $BRANCH")
+
     def test_the_fallback_still_reads_the_push_grammar(self):
         # The `ValueError` path scanned for forbidden flags and `ext::` alone,
         # so a command this guard cannot tokenise had the push allow-list
