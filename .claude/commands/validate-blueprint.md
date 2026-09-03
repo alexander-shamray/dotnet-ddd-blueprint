@@ -182,7 +182,7 @@ For each finding, one block:
 
 ```
 FINDING — <one-line claim of the defect>
-  Sites:    07-persistence.md:112, 09-messaging.md:340, appendix-d:44
+  Sites:    07-persistence.md:112, 09-messaging.md:340, appendix-c-delivery-plan.md:44
   Conflict: <A says X; B says Y>
   Resolved: <what you changed and why that side won>
 ```
