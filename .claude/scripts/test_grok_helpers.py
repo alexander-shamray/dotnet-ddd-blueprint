@@ -5339,6 +5339,45 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertRefused(command)
 
+    def test_a_heredoc_delimiter_may_be_quoted_in_parts(self):
+        # **A delimiter is a WORD and a word may be quoted in fragments**,
+        # which three alternatives in one pattern could not express. `<<E"OF"`
+        # names `EOF` to bash and takes its body verbatim; the pattern matched
+        # `<<E`, left `"OF"` standing where the subcommand goes, and the push
+        # ran. Raised in review; verified allowed.
+        #
+        # The fix is in `HEREDOC` and `_heredoc_delimiter`, so it reaches
+        # `strip_heredocs` as well as the redirection strip — the same
+        # mis-parse decided where a body ended.
+        for command in (
+            'git <<E"OF" push origin +HEAD:main\nEOF',
+            'git <<"EOF" push origin +HEAD:main\nEOF',
+            "git <<E'OF' push origin --mirror\nEOF",
+            "git <<\\EOF push origin +HEAD:main\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_heredoc_body_performs_no_process_substitution(self):
+        # **The over-refusal the previous round introduced, and it is the
+        # failure this file's docstring says gets a guard turned off.** A bare
+        # heredoc body expands parameters, commands and arithmetic — not
+        # process substitutions — so reading `<(…)` there made literal prose
+        # executable, and a heredoc quoting a push as an EXAMPLE was refused.
+        # Raised in review; measured.
+        self.assertAdmitted(
+            "git commit -F - <<EOF\n"
+            "see <(git push origin +HEAD:main) in the docs\n"
+            "EOF")
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\n"
+            "and >(git push origin --mirror) too\n"
+            "EOF")
+
+        # The control on the other side: a command line still performs one, so
+        # the narrowing must not reach the case the previous round closed.
+        self.assertRefused("git log > >(git push origin +HEAD:main)")
+
     def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
         # The boundary of the exemption, and it is bash's own rule: digits are
         # a descriptor only where they are a WHOLE token glued to the operator.

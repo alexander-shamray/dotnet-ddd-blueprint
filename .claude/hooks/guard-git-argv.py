@@ -172,11 +172,50 @@ PROTECTED_BRANCHES = {"main"}
 # `[ \t]*` rather than `\s*`, because a newline between `<<` and its delimiter
 # is not a heredoc to bash either. The quote characters are spelled \x27 and
 # \x22 so that neither this pattern nor anything quoting it has to escape them.
+# **And a WORD may be quoted in PARTS, which matching one alternative could not
+# express.** `<<E"OF"` names the delimiter `EOF` to bash and takes its body
+# verbatim; the three-alternative form matched `<<E`, left `"OF"` standing where
+# the subcommand goes, and `git <<E"OF" push origin +HEAD:main` was admitted
+# while bash ran the push. Raised in review; verified allowed. So the word is
+# one or more fragments — single-quoted, double-quoted, escaped or bare — and
+# `_heredoc_delimiter` below does the quote removal the shell does.
 HEREDOC = re.compile(
-    r"<<(?P<dash>-?)[ \t]*(?:\x27(?P<single>[^\x27]*)\x27"
-    r"|\x22(?P<double>[^\x22]*)\x22"
-    r"|(?P<bare>[^\s;&|<>()\x27\x22]+))"
+    r"<<(?P<dash>-?)[ \t]*"
+    r"(?P<word>(?:\x27[^\x27]*\x27|\x22[^\x22]*\x22|\\.|"
+    r"[^\s;&|<>()\x27\x22\\])+)"
 )
+
+
+def _heredoc_delimiter(word):
+    """The literal delimiter `word` names, and whether its body expands.
+
+    Bash removes the quoting from a heredoc delimiter and expands the body only
+    when the word carried **no** quoting at all — and the quoting may be
+    partial, which is the whole of why this is a function rather than a group
+    in the pattern. `<<E"OF"`, `<<"EOF"`, `<<'EOF'` and `<<\\EOF` all name
+    `EOF` and all take their bodies verbatim; only a wholly bare `<<EOF`
+    expands.
+
+    The pattern admits a fragment only in complete form, so every quote opened
+    here is closed and the searches below cannot fail.
+    """
+    out, index, quoted = [], 0, False
+    while index < len(word):
+        char = word[index]
+        if char in "'\"":
+            close = word.index(char, index + 1)
+            out.append(word[index + 1:close])
+            index = close + 1
+            quoted = True
+            continue
+        if char == "\\" and index + 1 < len(word):
+            out.append(word[index + 1])
+            index += 2
+            quoted = True
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out), not quoted
 
 
 def shell_positions(command):
@@ -303,18 +342,10 @@ def heredoc_spans(command):
         if not openers or index >= openers[-1][0]:
             match = HEREDOC.match(command, index)
             if match:
-                bare = match.group("bare")
-                if bare is None:
-                    delimiter = match.group("single")
-                    if delimiter is None:
-                        delimiter = match.group("double")
-                    expands = False
-                else:
-                    # `<<\EOF` is a quoted delimiter to bash: the body is
-                    # handed over verbatim, and the backslash is not part of
-                    # the word.
-                    delimiter = bare.replace("\\", "")
-                    expands = "\\" not in bare
+                # One parse of the delimiter word, quote removal included —
+                # `<<\EOF` is a quoted delimiter to bash the same way `<<'EOF'`
+                # is, and `<<E"OF"` is one in parts.
+                delimiter, expands = _heredoc_delimiter(match.group("word"))
                 openers.append(
                     (match.end(), expands, delimiter, bool(match.group("dash"))))
 
@@ -440,8 +471,9 @@ def separate_lines(command):
 
 
 # Redirection operators, longest first so that `>>` is never read as a `>`
-# with a stray `>` behind it. **`<<` is deliberately absent**, and
-# `redirection_spans` argues why.
+# with a stray `>` behind it. **`<<` and `<<<` are absent from this tuple
+# because they are matched before it**, each by a branch of its own:
+# `redirection_spans` argues both.
 REDIRECTION_OPERATORS = ("&>>", "&>", ">>", ">&", ">|", "<>", "<&", ">", "<")
 
 
@@ -453,12 +485,20 @@ def redirection_spans(command):
     `command[start:end]` is everything bash consumes as redirection syntax and
     never hands to the program.
 
-    **A heredoc is not one of these.** `strip_heredocs` has already taken its
-    body and leaves the introducer standing so the rest of the line still
-    tokenises; removing `<<` here would leave its delimiter behind as a stray
-    word, which is the defect this function exists to remove rather than a fix
-    for it. A descriptor written in front of one still goes, because that is
-    the same stray word in every other spelling.
+    **A heredoc introducer IS one of these, and an earlier revision of this
+    docstring said the opposite.** The reasoning then was that `strip_heredocs`
+    leaves the introducer standing so the line still tokenises, and that
+    removing `<<` would strand its delimiter as a stray word. The second half
+    was true and the conclusion did not follow: `<<` is whole punctuation, so
+    leaving it made it a run boundary and severed `git` from its own
+    subcommand — a fail-open. The introducer goes **with** its delimiter, which
+    strands nothing, and `HEREDOC` is the one parse of that grammar this file
+    has. A here-string is matched before either, since `<<<` has `<<` as a
+    prefix.
+
+    Raised in review, and the paragraph is kept in this shape deliberately: a
+    docstring that still argued for the old behaviour is how the next edit
+    restores it.
     """
     ordinary = [False] * len(command)
     escaped = None
@@ -775,13 +815,22 @@ def substitutions(command, quotes=True):
             found.append(command[index + 2:end])
             index = end + 1
             continue
-        if not in_double and (command.startswith("<(", index)
-                              or command.startswith(">(", index)):
+        if quotes and not in_double and (command.startswith("<(", index)
+                                         or command.startswith(">(", index)):
             # **A process substitution is a command the shell runs**, and until
             # the redirection strip could consume one it was reached only by
             # the run splitter — which sees it while it stands as its own run
             # and not once it is part of a redirect target. Both halves of that
             # are now true in one place.
+            #
+            # **`quotes` is false for a heredoc BODY, and a body performs no
+            # process substitution** — parameter, command and arithmetic
+            # expansion only. Reading one there made literal prose executable,
+            # so a heredoc quoting `<(git push …)` as an example was refused.
+            # Raised in review; measured, and it is the over-refusal this
+            # file's own docstring says gets a guard turned off. The flag is
+            # reused rather than a second one added, because it already means
+            # "this region is a command line" everywhere it is passed.
             end = _closing_paren(command, index + 2)
             if end is None:
                 break
