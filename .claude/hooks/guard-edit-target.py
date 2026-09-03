@@ -90,6 +90,34 @@ def under(child, parent):
     return child.startswith(parent)
 
 
+def checkout_root(path):
+    """The nearest ancestor of `path` holding a `.git`, or `None`.
+
+    **An anchor has to be a checkout ROOT rather than any directory the session
+    happens to stand in**, and the difference is a bypass rather than a
+    nicety. An anchor excuses exactly one link traversal — the one on its own
+    root prefix — so an anchor at `<checkout>/docs/tree`, where `tree` links
+    into `.claude/scripts`, excuses precisely the traversal this file exists
+    to refuse: the target's spelling is `docs/tree/helper.sh`, its resolution
+    is `.claude/scripts/helper.sh`, and re-anchoring on that directory makes
+    the two agree. Raised by Copilot against the first form, which took the
+    event's `cwd` as an anchor whatever it pointed at.
+
+    Walked lexically from the spelling, which is what makes it the right root
+    for the case above: `<checkout>/docs/tree` walks to `<checkout>/docs` and
+    then to `<checkout>`, where the `.git` is. A worktree's `.git` is a file
+    rather than a directory, so this asks whether the entry exists at all.
+    """
+    current = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(current, ".git")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
 def anchors(event):
     """The checkouts this guard is standing in, as (spelled, resolved) pairs.
 
@@ -100,15 +128,33 @@ def anchors(event):
     sibling worktree; and this file's own location is the checkout that owns
     the guard, which is true even if the other two are absent or wrong.
 
+    The first and the last are roots by construction — the harness sets one to
+    a project root and the other is this file's own tree — so they are taken as
+    given. `cwd` is not: it is wherever the session stands, so it is walked up
+    to its checkout root and **dropped** when it has none, because a directory
+    that belongs to no checkout is not a root and excusing a traversal at it is
+    the bypass `checkout_root` documents.
+
     Each is kept as the pair it is — the spelling and its resolution — because
     the whole judgement below is a comparison between those two, and an anchor
     reached through a link would otherwise make every edit under it look like
     the thing this file refuses.
+
+    **Adding an anchor can only narrow this guard, never widen it**, because
+    the caller requires every anchor containing the target to agree. That is
+    what makes an environment-supplied `CLAUDE_PROJECT_DIR` safe to trust here:
+    a wrong one cannot excuse a traversal that this file's own tree refuses.
     """
     here = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
+    cwd = event.get("cwd")
+    roots = [
+        os.environ.get("CLAUDE_PROJECT_DIR"),
+        checkout_root(cwd) if isinstance(cwd, str) and cwd else None,
+        here,
+    ]
     found = []
-    for path in (os.environ.get("CLAUDE_PROJECT_DIR"), event.get("cwd"), here):
+    for path in roots:
         if not path or not isinstance(path, str):
             continue
         spelled = os.path.abspath(path)
@@ -158,7 +204,14 @@ def offence(event):
     lexical = os.path.normpath(os.path.abspath(joined))
     resolved = os.path.realpath(joined)
 
-    refusal = None
+    # **Every anchor containing the target must agree, and the first form said
+    # ANY.** One agreeing anchor was enough to admit the write, so a second
+    # anchor could excuse what the first refused — and that is not hypothetical
+    # arithmetic: with `cwd` taken as an anchor whatever it pointed at, a
+    # session standing in a linked directory admitted the exact write this file
+    # exists to refuse. Requiring agreement is what makes an extra anchor
+    # incapable of widening the guard, which is the property `anchors` rests
+    # its trust in `CLAUDE_PROJECT_DIR` on. Raised by Copilot.
     for spelled_root, real_root in anchors(event):
         if under(lexical, spelled_root):
             base = spelled_root
@@ -169,12 +222,10 @@ def offence(event):
 
         expected = os.path.normpath(
             os.path.join(real_root, os.path.relpath(lexical, base)))
-        if same(resolved, expected):
-            return None
-        if refusal is None:
+        if not same(resolved, expected):
             escaped = not under(resolved, real_root)
             where = "outside the checkout" if escaped else "elsewhere in it"
-            refusal = (
+            return (
                 f"guard-edit-target: {spelled} resolves {where} — to "
                 f"{resolved}. A permission rule matches the path as written, "
                 "so an edit through a link lands where no deny has judged it. "
@@ -182,10 +233,11 @@ def offence(event):
                 "there (#181, docs/harness-boundaries.md)."
             )
 
-    # A target under no anchor at all is not this guard's subject; the module
-    # docstring argues why, and a test pins the residual so the next reader
-    # does not have to take the paragraph's word for it.
-    return refusal
+    # Reached when every anchor containing the target agreed, or when none
+    # contained it at all — a target under no anchor is not this guard's
+    # subject, and the module docstring argues why. A test pins that residual
+    # so the next reader does not have to take the paragraph's word for it.
+    return None
 
 
 def main():

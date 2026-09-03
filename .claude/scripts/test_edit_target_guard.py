@@ -97,7 +97,13 @@ class GuardCase(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="guard-root-")
         self.outside = tempfile.mkdtemp(prefix="guard-outside-")
-        for tree in ("docs", os.path.join(".claude", "scripts")):
+        # **The fixture is a real checkout, and the `.git` is load-bearing.**
+        # An anchor is a checkout root, so a scratch tree without one has no
+        # root to derive from `cwd` — and the case below that stands the
+        # session inside a linked directory would then pass because the anchor
+        # was dropped rather than because the guard refused. A marker directory
+        # is all `checkout_root` looks for.
+        for tree in ("docs", os.path.join(".claude", "scripts"), ".git"):
             os.makedirs(os.path.join(self.root, tree), exist_ok=True)
         self.write(os.path.join(self.root, "docs", "chapter.md"), "prose\n")
         self.write(
@@ -242,6 +248,27 @@ class ALinkIsNotTheFileItIsSpelledAs(GuardCase):
                 else:
                     self.assertIn("resolves elsewhere in it",
                                   self.assertRefused(spelled))
+
+    def test_a_cwd_inside_a_link_does_not_excuse_that_link(self):
+        # **The bypass an anchor becomes when it is not a checkout root.** An
+        # anchor excuses exactly one link traversal — the one on its own root
+        # prefix — so an anchor at `docs/tree`, where `tree` links into
+        # `.claude/scripts`, excuses precisely the traversal this guard exists
+        # to refuse: re-anchoring `docs/tree/helper.sh` on that directory makes
+        # the spelling and the resolution agree. The first form took the
+        # event's `cwd` as an anchor whatever it pointed at, and admitted this.
+        # Raised by Copilot.
+        #
+        # Two changes close it and the case is written to fail if either is
+        # reverted: `cwd` is walked up to its checkout root, and every anchor
+        # containing the target must agree rather than any one of them.
+        real = os.path.join(self.root, ".claude", "scripts")
+        for linker in linkers():
+            with self.subTest(link=linker):
+                linkdir = self.link_dir("standing-in", real, linker)
+                reason = self.assertRefused(
+                    os.path.join(linkdir, "helper.sh"), cwd=linkdir)
+                self.assertIn("resolves elsewhere in it", reason)
 
     def test_a_notebook_path_is_judged_too(self):
         # `NotebookEdit` carries its target under another key, and a guard that

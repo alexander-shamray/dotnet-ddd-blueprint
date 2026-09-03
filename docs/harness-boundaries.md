@@ -760,6 +760,21 @@ target, Windows collapses it before the filesystem sees it — and the guard
 follows each rather than picking one, measured both ways in
 `.claude/scripts/test_edit_target_guard.py`.
 
+**What an anchor is, and why it is two rules rather than one, is the part
+that shipped wrong.** An anchor excuses exactly one link traversal: the one
+on its own root prefix. So an anchor is a checkout **root** — the event's
+`cwd` is walked up to the directory holding a `.git` and dropped if it has
+none — and **every** anchor containing the target must agree, where the first
+form admitted on the first that did. Either rule alone leaves the bypass: a
+session standing in `docs/tree`, where `tree` links into `.claude/scripts`,
+took that directory as an anchor, and re-anchoring `docs/tree/helper.sh` on
+it makes the spelling and the resolution agree — so the guard admitted
+precisely the write it exists to refuse. Raised by Copilot, and **measured
+both ways** against the shipped commit: it admits, and the fix refuses.
+Requiring agreement is also what makes an environment-supplied
+`CLAUDE_PROJECT_DIR` safe to take as given, since an added anchor can then
+only narrow the guard and never widen it.
+
 **Its residual is the half the harness itself needs, stated rather than
 rounded up.** The subject is a target spelled *inside* a checkout the session
 is standing in; a path spelled entirely outside one is not judged, because
