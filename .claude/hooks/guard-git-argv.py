@@ -186,9 +186,19 @@ PROTECTED_BRANCHES = {"main"}
 # command after it swallowed as body text — `git push origin +HEAD:main`
 # included. Raised in review; verified allowed. `$"…"` is the locale form and
 # is listed beside it for the same reason.
+#
+# **A continuation may split the delimiter itself**, and the word class has to
+# say so before anything else can. `<<EO\<newline>F` names `EOF` to bash, which
+# removes the pair at the input level; reading the delimiter as `EO` made the
+# guard's body start a line early and end a line early, so the real command
+# line was swallowed as data and `git <<EO\<newline>F push origin +HEAD:main`
+# was admitted. `join_continuations` cannot help here — `strip_heredocs` runs
+# on the raw command, before it, and must, because a heredoc body is not a
+# command line. Raised in an adversarial audit; verified allowed, on `main` as
+# well. `\\\n` leads the alternatives because `\\.` cannot match a newline.
 HEREDOC = re.compile(
     r"<<(?P<dash>-?)[ \t]*"
-    r"(?P<word>(?:\$?\x27[^\x27]*\x27|\$?\x22[^\x22]*\x22|\\.|"
+    r"(?P<word>(?:\\\n|\$?\x27[^\x27]*\x27|\$?\x22[^\x22]*\x22|\\.|"
     r"[^\s;&|<>()\x27\x22\\])+)"
 )
 
@@ -233,6 +243,11 @@ def _heredoc_delimiter(word):
             out.append(word[index + 1:close])
             index = close + 1
             quoted = True
+            continue
+        if char == "\\" and word[index + 1:index + 2] == "\n":
+            # A continuation inside the delimiter contributes nothing and
+            # quotes nothing — bash removes the pair before it reads the word.
+            index += 2
             continue
         if char == "\\" and index + 1 < len(word):
             out.append(word[index + 1])
@@ -499,6 +514,150 @@ def undecodable_heredoc(command):
         if delimiter is None:
             return True
     return False
+
+
+def without_substitutions(command):
+    """`command` with every command substitution deleted rather than tokenised.
+
+    **A substitution that prints nothing leaves the words around it joined**,
+    and that is quote removal rather than run-time content: the dangerous
+    string is literally in the source. `git $( )push origin +HEAD:main` runs
+    the push — measured — while `shlex(punctuation_chars=True)` emitted `(` and
+    `)` as their own tokens, `command_runs` ended the run there, and the second
+    run held no `git` token for `git_segments` to find. The same shape hid
+    `--out$( )put=` and `ext$( )::`, so it reopened all three checks at once.
+    Raised in an adversarial audit; verified allowed, on `main` as well.
+
+    `word_end` already implements exactly this rule — a substitution is part of
+    the word it sits in — but only for a redirect target. Judging this string
+    **beside** the ordinary one is the general form: one reading is what bash
+    does when the substitution prints something, the other is what it does when
+    it prints nothing, and both have to be safe.
+
+    A parameter expansion is deliberately NOT deleted here. `$BRANCH` can be
+    empty too, but `git push origin $BRANCH` is traffic this repository writes,
+    and deleting it would refuse an honest push for naming no destination. That
+    one stays where the residual in `docs/harness-boundaries.md` already puts
+    it — the shell computes it and this hook does not.
+    """
+    out, index = [], 0
+    in_single = in_double = False
+    while index < len(command):
+        char = command[index]
+        if in_single:
+            if char == "'":
+                in_single = False
+            out.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(command):
+            out.append(char)
+            out.append(command[index + 1])
+            index += 2
+            continue
+        if command.startswith("$(", index):
+            close = _closing_paren(command, index + 2)
+            if close is None:
+                break
+            index = close + 1
+            continue
+        if char == "`":
+            close = index + 1
+            while close < len(command):
+                if command[close] == "\\" and close + 1 < len(command):
+                    close += 2
+                    continue
+                if command[close] == "`":
+                    break
+                close += 1
+            if close >= len(command):
+                break
+            index = close + 1
+            continue
+        if char == "'" and not in_double:
+            in_single = True
+        elif char == '"':
+            in_double = not in_double
+        out.append(char)
+        index += 1
+    return "".join(out) + command[index:] if index < len(command) else "".join(out)
+
+
+def dollar_quotes(command):
+    """Every `$'…'` and `$"…"` in `command`, as `(start, end, ansi_c)`.
+
+    **These are QUOTING FORMS and `shlex` has no rule for either**, so the `$`
+    stayed glued outside the quote and the token was `$git` rather than `git`.
+    `program_name` then matched nothing, `git_segments` yielded no segment at
+    all, and every check that lives inside that loop — the push allow-list, the
+    forbidden flags, `ext::` — was skipped at once. Measured on bash 5.2.26:
+    `$'git' push origin +HEAD:main`, `$"git" …`, `$'g'it …` and
+    `git p$'ush' …` all run the push, and all were admitted here and on `main`.
+    Raised in an adversarial audit.
+
+    `end` is just past the closing quote, and `ansi_c` says which form it is,
+    because only `$'…'` decodes escapes.
+    """
+    found, index = [], 0
+    in_single = in_double = False
+    while index < len(command):
+        char = command[index]
+        if in_single:
+            if char == "'":
+                in_single = False
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(command):
+            index += 2
+            continue
+        if char == "$" and command[index + 1:index + 2] in ("'", '"'):
+            quote = command[index + 1]
+            close = command.find(quote, index + 2)
+            if close == -1:
+                break
+            found.append((index, close + 1, quote == "'"))
+            index = close + 1
+            continue
+        if char == "'" and not in_double:
+            in_single = True
+        elif char == '"':
+            in_double = not in_double
+        index += 1
+    return found
+
+
+def undecodable_dollar_quote(command):
+    """Whether an ANSI-C quote in `command` carries an escape to decode.
+
+    The same decision `undecodable_heredoc` records, one construct along, and
+    for the same reason: decoding every escape bash supports is a list that
+    trails bash's, and each gap in one reopens the hole it was written to
+    close. `$'\\''` is the shape that forces the question — it is a single
+    quote produced by an escape, which desynchronised `substitutions` and sent
+    the whole command down the `ValueError` path, where the push allow-list
+    does not run. So a `$'…'` with a backslash in it is refused rather than
+    guessed at.
+    """
+    return any(
+        ansi_c and "\\" in command[start + 2:end - 1]
+        for start, end, ansi_c in dollar_quotes(command)
+    )
+
+
+def strip_dollar_quotes(command):
+    """`command` with the `$` removed from every `$'…'` and `$"…"`.
+
+    What is left is ordinary quoting, which `shlex` does resolve — so `$'git'`
+    becomes `'git'` and the token is `git`. Only the sigil goes; the quoted
+    text is untouched, because an escape inside one is refused before this runs
+    rather than decoded here.
+    """
+    out, cursor = [], 0
+    for start, _end, _ansi_c in dollar_quotes(command):
+        out.append(command[cursor:start])
+        cursor = start + 1
+    out.append(command[cursor:])
+    return "".join(out)
 
 
 def join_continuations(command):
@@ -1424,6 +1583,24 @@ def offence(command, depth=0):
             "commands; refusing rather than reading part of it."
         )
 
+    if undecodable_dollar_quote(command):
+        return (
+            "an ANSI-C quote carries an escape this guard does not decode, so "
+            "it cannot tell what the word says; refusing rather than reading "
+            "part of it."
+        )
+
+    # **What bash does when a substitution prints nothing, judged beside what
+    # it does when one prints something.** The words around an empty
+    # substitution join, so `git $( )push origin +HEAD:main` is a push — and
+    # the tokeniser saw `(` and `)` as run boundaries instead. Both readings
+    # have to be safe, and only one of them is the string that was typed.
+    skeleton = without_substitutions(command)
+    if skeleton != command:
+        refusal = offence(skeleton, depth + 1)
+        if refusal is not None:
+            return f"with a command substitution taken as empty: {refusal}"
+
     for text, quotes in expandable_regions(command):
         # **The continuation join has to happen before anything looks for a
         # substitution, not only before the tokeniser.** Bash removes
@@ -1454,9 +1631,12 @@ def offence(command, depth=0):
     # `join_continuations` sits after `strip_comments` because a backslash at
     # the end of a COMMENT continues nothing — bash ends a comment at the
     # newline — so joining first would have swallowed the next line into it.
-    stripped = strip_redirections(
+    # `strip_dollar_quotes` turns `$'…'` and `$"…"` into the ordinary quoting
+    # `shlex` resolves. It runs last of the five because the escape that would
+    # make one ambiguous has already been refused above.
+    stripped = strip_dollar_quotes(strip_redirections(
         separate_lines(
-            join_continuations(strip_comments(strip_heredocs(command)))))
+            join_continuations(strip_comments(strip_heredocs(command))))))
     try:
         lexer = shlex.shlex(stripped, posix=True, punctuation_chars=True)
         # Comments are already gone, and `shlex` would take a second, wider view
@@ -1479,6 +1659,20 @@ def offence(command, depth=0):
                     "tokenise; refusing on the raw string, which is the weaker "
                     "check the settings deny already performs."
                 )
+        # **The push allow-list has to reach this path too, and it did not.**
+        # The fallback scanned for forbidden flags and `ext::` alone, so any
+        # command this guard cannot tokenise had the push grammar switched off
+        # entirely — and a line is easy to make untokenisable on purpose. An
+        # audit reached it through `$'\''`, whose escaped quote left `shlex`
+        # with no closing quotation; the push then sat in plain text and was
+        # admitted. Here the check can only be the crude one, which is the
+        # point of the path.
+        if re.search(r"\bgit\b[^;&|\n]*\bpush\b", stripped):
+            return (
+                "a `git push` appears in a command this guard could not "
+                "tokenise, so its remote and refspec cannot be read; refusing "
+                "rather than admitting a push nothing checked."
+            )
         return None
 
     for script in evaluated_scripts(tokens):

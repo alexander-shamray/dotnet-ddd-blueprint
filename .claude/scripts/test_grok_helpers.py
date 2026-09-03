@@ -5471,6 +5471,88 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("git log --oneline \\\n  -5")
         self.assertAdmitted("git commit -m 'a \\\n literal'")
 
+    def test_ansi_c_and_locale_quoting_are_quoting(self):
+        # **`$'…'` and `$"…"` are quoting forms and `shlex` has no rule for
+        # either**, so the `$` stayed glued outside the quote and the token was
+        # `$git`. `program_name` matched nothing, `git_segments` yielded no
+        # segment at all, and every check that lives inside that loop — the
+        # push allow-list, the forbidden flags, `ext::` — was skipped at once.
+        # Measured under bash 5.2.26: all of these run. Found by an adversarial
+        # audit after the review rounds; allowed on `main` too.
+        for command in (
+            "$'git' push origin +HEAD:main",
+            '$"git" push origin +HEAD:main',
+            "$'g'it push origin +HEAD:main",
+            "git p$'ush' origin +HEAD:main",
+            "$'git' log --output=/tmp/x",
+            "$'git' fetch ext::sh -c id",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **An escape inside one is refused rather than decoded**, which is the
+        # decision `undecodable_heredoc` already records one construct along.
+        # `$'\\x67it'` is `git`, and decoding every escape bash supports is a
+        # list that trails bash's. The shape that forces it is `$'\\''` — a
+        # quote produced by an escape, which desynchronised `substitutions`
+        # and sent the whole line down the `ValueError` path.
+        self.assertRefused("$'\\x67it' push origin +HEAD:main")
+        self.assertRefused("$'\\'' ; git push origin +HEAD:main")
+
+        # The control: ordinary quoting still resolves, and a `$` that opens no
+        # quote is left alone.
+        self.assertAdmitted("git push -u origin fix/some-branch")
+        self.assertAdmitted("git log --grep='$x' -5")
+
+    def test_the_fallback_still_reads_the_push_grammar(self):
+        # The `ValueError` path scanned for forbidden flags and `ext::` alone,
+        # so a command this guard cannot tokenise had the push allow-list
+        # switched off entirely — and a line is easy to make untokenisable on
+        # purpose. The check here can only be the crude one, which is the point
+        # of the path.
+        self.assertRefused("git push origin +HEAD:main \"unbalanced")
+        self.assertRefused("git push origin main 'unbalanced")
+
+    def test_a_continuation_inside_a_heredoc_delimiter(self):
+        # `<<EO\<newline>F` names `EOF` to bash, which removes the pair at the
+        # input level. Reading the delimiter as `EO` made the guard's body
+        # start a line early and end a line early, so the real command line was
+        # swallowed as data. `join_continuations` cannot help — `strip_heredocs`
+        # runs on the raw command, before it, and must, because a heredoc body
+        # is not a command line. Found by an adversarial audit; verified
+        # allowed, on `main` as well, with `printf` standing in for `git`.
+        self.assertRefused(
+            "git <<EO\\\nF push origin +HEAD:main\nEO\nEOF\n")
+        self.assertRefused(
+            "git <<-EO\\\nF push origin --mirror\nEO\nEOF\n")
+
+    def test_an_empty_substitution_joins_the_words_around_it(self):
+        # **A substitution that prints nothing leaves the words around it
+        # joined**, and that is quote removal rather than run-time content: the
+        # dangerous string is literally in the source. `shlex` emitted `(` and
+        # `)` as their own tokens, `command_runs` ended the run there, and the
+        # second run held no `git` token — so `--out$( )put=` and `ext$( )::`
+        # went the same way and all three checks reopened at once. Found by an
+        # adversarial audit; measured under bash, allowed on `main` too.
+        for command in (
+            "git $( )push origin +HEAD:main",
+            "git $(:)push origin +HEAD:main",
+            "git ``push origin +HEAD:main",
+            "git pu$( )sh origin +HEAD:main",
+            "git log --out$( )put=/tmp/x",
+            "git fetch ext$( )::sh -c id",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **The bound, and it is why a parameter expansion is not deleted the
+        # same way.** `$BRANCH` can be empty too, but `git push origin $BRANCH`
+        # is traffic this repository writes, and deleting it would refuse an
+        # honest push for naming no destination. A substitution whose output is
+        # genuinely used stays admitted for the same reason.
+        self.assertAdmitted("git log --format=$(cat /tmp/fmt) -5")
+        self.assertAdmitted("git commit -m \"built at $(date)\"")
+
     def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
         # The boundary of the exemption, and it is bash's own rule: digits are
         # a descriptor only where they are a WHOLE token glued to the operator.
