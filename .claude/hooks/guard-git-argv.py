@@ -1687,6 +1687,87 @@ def program_name(token):
     return name
 
 
+def _run_leader(command, position, ordinary):
+    """The first word of the command run containing `position`."""
+    start = position
+    while start > 0:
+        previous = start - 1
+        if ordinary[previous] and command[previous] in ";&|()\n":
+            break
+        start = previous
+    while start < position and command[start] in " \t":
+        start += 1
+    end = start
+    while end < position and not (
+            ordinary[end] and command[end] in METACHARACTERS):
+        end += 1
+    return command[start:end]
+
+
+def stdin_scripts(command):
+    """Every script a shell in `command` is handed on its STDIN.
+
+    **`evaluated_scripts` models one channel by which a shell receives a
+    script, and bash has three.** It reads the argv element after `-c`; a shell
+    also runs what arrives on stdin, and both spellings of that put the script
+    text in the command string where a hook can read it:
+
+        bash <<<'git push origin +HEAD:main'
+        bash <<EOF
+        git push origin +HEAD:main
+        EOF
+
+    Both ran the push and both were admitted — on `main` as well. Found by an
+    adversarial audit, which generated 3,696 obfuscations, took the 919 the
+    guard allowed, ran each under a shimmed bash and found 431 that executed
+    the push.
+
+    **These are not the residual that file's docstring names.** That one is
+    `bash script.sh`, a file the hook is not given, and the computed shape
+    `sh -c "$(echo …)"`. Here nothing is computed and nothing is on disk: the
+    script is a literal word in the argv, exactly as it is in `bash -c '…'` —
+    which this guard already refuses. The two halves disagreed, and this is the
+    half that was wrong.
+
+    Every other reader of these constructs is left alone, which is what keeps
+    `git commit -F - <<EOF` a filing rather than a command: the leading word of
+    the run has to be a shell.
+    """
+    ordinary = [False] * len(command)
+    for index, in_quotes, in_comment in shell_positions(command):
+        ordinary[index] = not in_quotes and not in_comment
+
+    for start, end, _expands in heredoc_spans(command):
+        introducer = command.rfind("<<", 0, start)
+        if introducer == -1:
+            continue
+        leader = _run_leader(command, introducer, ordinary)
+        if program_name(leader) in EVALUATORS:
+            yield command[start:end]
+
+    index = 0
+    while index < len(command):
+        if not (ordinary[index] and command.startswith("<<<", index)):
+            index += 1
+            continue
+        leader = _run_leader(command, index, ordinary)
+        cursor = index + 3
+        while cursor < len(command) and command[cursor] in " \t":
+            cursor += 1
+        word = cursor
+        while word < len(command) and not (
+                ordinary[word] and command[word] in METACHARACTERS):
+            word += 1
+        if program_name(leader) in EVALUATORS:
+            try:
+                parts = shlex.split(command[cursor:word], posix=True)
+            except ValueError:
+                parts = [command[cursor:word]]
+            if parts:
+                yield " ".join(parts)
+        index = max(word, index + 3)
+
+
 def evaluated_scripts(tokens):
     """Every token a shell evaluator in `tokens` will execute as a command.
 
@@ -1706,6 +1787,12 @@ def evaluated_scripts(tokens):
     and a hook is handed an argv rather than a filesystem — that is outside what
     any argv guard can see, and it is the same shape as the parameter-expansion
     residual rather than a new one.
+
+    **That bound was stated correctly and applied too widely.** `-c` is one of
+    three channels a shell takes a script through, and the other two —
+    `bash <<<'…'` and a heredoc — put the text in the command string, where it
+    is as readable as the argument to `-c` this function already judges.
+    `stdin_scripts` covers them; the file half is what remains outside.
     """
     for run in command_runs(tokens):
         if not run or program_name(run[0]) in DATA_ONLY_COMMANDS:
@@ -1722,6 +1809,27 @@ def evaluated_scripts(tokens):
                 argv = run[index + 1:]
                 if argv:
                     yield " ".join(argv)
+
+    # **A shell with no script of its own reads one from the pipe**, and the
+    # run before it is where that text is written: `echo 'git push origin
+    # +HEAD:main' | bash` ran the push and was admitted. The printer is exempt
+    # from the scan by `DATA_ONLY_COMMANDS` — correctly, its arguments are text
+    # — but they stop being text the moment a shell is on the other end of the
+    # pipe. Found by an adversarial audit.
+    runs = list(command_runs(tokens))
+    for before, after in zip(runs, runs[1:]):
+        if not before or not after:
+            continue
+        if program_name(before[0]) not in DATA_ONLY_COMMANDS:
+            continue
+        if program_name(after[0]) not in EVALUATORS:
+            continue
+        if any(SCRIPT_FLAG.match(element) for element in after[1:]):
+            continue
+        written = [element for element in before[1:]
+                   if not element.startswith("-")]
+        if written:
+            yield " ".join(written)
 
 
 # Commands whose arguments are text and never a command line.
@@ -1988,6 +2096,11 @@ def _offence(command, depth, judged):
             refusal = offence(variant, depth + 1, judged)
             if refusal is not None:
                 return f"with {description}: {refusal}"
+
+    for script in stdin_scripts(command):
+        refusal = offence(script, depth + 1, judged)
+        if refusal is not None:
+            return f"in a script handed to a shell on stdin: {refusal}"
 
     for text, quotes in expandable_regions(command):
         # **The continuation join has to happen before anything looks for a

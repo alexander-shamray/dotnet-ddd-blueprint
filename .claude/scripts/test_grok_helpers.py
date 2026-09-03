@@ -5793,6 +5793,46 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertAdmitted(command)
 
+    def test_a_shell_reads_a_script_from_its_stdin(self):
+        # **`evaluated_scripts` modelled one channel by which a shell receives
+        # a script, and bash has three.** It read the argv element after `-c`;
+        # a shell also runs what arrives on stdin, and both spellings of that
+        # put the text in the command string where a hook can read it.
+        #
+        # Found by an adversarial audit that generated 3,696 obfuscations, took
+        # the 919 the guard allowed, ran each under a shimmed bash, and found
+        # 431 that executed the push. Live on `main`.
+        #
+        # **These are not the residual the docstring names.** That one is
+        # `bash script.sh`, a file the hook is not given. Here nothing is on
+        # disk and nothing is computed: the script is a literal word in the
+        # argv, exactly as in `bash -c '…'` — which this guard already refused.
+        # The two halves disagreed, and this is the half that was wrong.
+        for command in (
+            "bash <<<'git push origin +HEAD:main'",
+            "bash <<'EOF'\ngit push origin +HEAD:main\nEOF",
+            "bash <<EOF\ngit push origin +HEAD:main\nEOF",
+            "zsh <<-EOF\ngit push origin +HEAD:main\nEOF",
+            "sh -s <<<'git log --output=/tmp/x'",
+            "bash <<<'git fetch ext::sh -c id'",
+            "echo 'git push origin +HEAD:main' | bash",
+            "printf 'git push origin --mirror' | sh",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # **The discrimination is the leading word of the run**, and it is what
+        # keeps a filing a filing: every other reader of these constructs is
+        # left alone, so the body of `git commit -F -` is still data and so is
+        # `cat`'s. Without this the fix would re-open the over-refusal an
+        # earlier round closed.
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\ndo not git push to main\nEOF")
+        self.assertAdmitted(
+            "cat <<'EOF'\ngit push origin +HEAD:main\nEOF")
+        self.assertAdmitted("echo 'git push origin +HEAD:main'")
+        self.assertAdmitted("bash <<<'git log --oneline -5'")
+
     def test_the_readings_do_not_multiply(self):
         # **The four readings and the substitution recursion each descend onto
         # a string barely shorter than the one they came from, so a command
