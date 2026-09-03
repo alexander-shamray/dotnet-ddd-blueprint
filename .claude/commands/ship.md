@@ -880,12 +880,14 @@ same argument as never calling a branch clean because asking failed.
       done, and otherwise go back to (1) and run one more. Keep the count in
       the report, because "clean twice" and "clean once" are what separate
       convergence from a lull, and a Grok recheck of nothing costs a few
-      minutes. Present → run `bash .claude/scripts/pr-locality.sh <n>`,
-      write its output to a scratchpad file with `Write`, and run
-      `/review-grok` with the review's path and that file's — the triage
-      holds no `Bash` and cannot judge the touch set itself, and without
-      the verdict it applies every accepted site, which is the widening the
-      contract refuses. `/review-grok`
+      minutes. Present → run `bash .claude/scripts/pr-locality.sh <n>`
+      and `git diff origin/main...HEAD`, write each output to a scratchpad
+      file with `Write`, and run `/review-grok` with the review's path,
+      the verdict's and the diff's — the triage holds no `Bash` and cannot
+      judge the touch set or read the diff itself; without the verdict it
+      applies every accepted site, which is the widening the contract
+      refuses, and without the diff its adjudicator cannot tell a
+      restatement the branch wrote from one it left alone. `/review-grok`
       triages and fixes — **its tool grant deliberately stops short of
       committing**. Then rerun the step 2 checks that apply to what it
       changed: a review fix is still an edit, and committing it unchecked

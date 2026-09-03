@@ -59,6 +59,11 @@ change quoted from the review is a risk with no benefit.
   exceptions. Read that section before adjudicating a finding about a
   number, a version, or a phrase that appears more than once, and cite it
   by section in the `reason`.
+- **The branch's diff**, optionally, as an absolute path to a file holding
+  `git diff` against `main` — `/ship` writes it beside the review. It is
+  what lets step 4 tell a restatement the branch **wrote** from one it left
+  where it was: you hold no git and cannot ask. Without it, say so in the
+  `reason` of every row that needed it.
 
 ## Method
 
@@ -94,7 +99,13 @@ change quoted from the review is a risk with no benefit.
    `reject-rule` and the copy is **not** a row for the final block either:
    those rows are edit candidates the applying step touches, and removing
    restatements is the plan's work one chapter at a time, which a review is
-   not the moment to widen a diff into.
+   not the moment to widen a diff into. **The exception is a restatement
+   this branch wrote.** §2 forbids writing one, and `/review-branch` counts
+   one the diff introduces or edits as a finding; so does this step, when
+   the diff was given and the quoted line appears in it as an added line —
+   that finding is `accept`, and the `change` removes the copy or makes it
+   cite the owner. Without the diff you cannot tell the two apart: return
+   `reject-rule` and say in the `reason` that the diff was not supplied.
 5. **Watch for the good class of finding.** External reviews have been right
    here about one thing repeatedly: **register and version drift** — a
    package used in a sample but missing from `appendix-b-licences.md`, a

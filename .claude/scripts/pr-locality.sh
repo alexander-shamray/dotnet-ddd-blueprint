@@ -27,10 +27,11 @@
 # A row that fails its grammar is refused with exit 3 naming the row and not
 # its content: a class cell is one letter A–E or two distinct letters joined
 # by `+`; a touch-set cell is a comma-separated list of path tokens, bare or
-# in balanced backticks, of path and glob characters, each carrying a `/` or
-# a `.`, and each repository-relative — no leading `/`, no `./`, no `..`
-# segment, brace alternatives included, since the edit-target guard judges
-# where an edit inside the checkout lands and not a path naming the outside.
+# in balanced backticks, of path and glob characters — `*`, `**`, `?` and a
+# brace alternation — each carrying a `/` or a `.`, and each
+# repository-relative: no leading `/`, no `./`, no `..` segment, brace
+# alternatives included, since the edit-target guard judges where an edit
+# inside the checkout lands and not a path naming the outside.
 #
 # **The verdict narrows and grants nothing.** What holds authority is the
 # caller's own deny list and the class's tree set in the contract; an
@@ -84,7 +85,7 @@ for item in "${items[@]}"; do
     '`'*'`') t="${t:1:${#t}-2}" ;;
     *'`'*) refuse "the Touch set row has an unbalanced backtick" ;;
   esac
-  grep -Eq '^[A-Za-z0-9_./*{},()-]+$' <<<"$t" ||
+  grep -Eq '^[A-Za-z0-9_./*?{},()-]+$' <<<"$t" ||
     refuse "the Touch set row is not a path list"
   case "$t" in *[/.]*) ;; *) refuse "the Touch set row is not a path list" ;; esac
   # A brace alternative is a segment start too: `{../outside,docs/x.md}`
@@ -92,7 +93,7 @@ for item in "${items[@]}"; do
   # over the token with its braces dropped and its alternatives joined as
   # segments, where a leading `/`, a `./` and a `..` all show as segments.
   n="${t//[\{\}]/}"
-  n="${n//,//}"
+  n="${n//,//}"   # every `,` becomes `/`: the replacement is the last `/`
   case "/$n/" in
     *//*|*/./*|*/../*) refuse "the Touch set row names a path outside the repository" ;;
   esac

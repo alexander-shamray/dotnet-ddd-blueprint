@@ -2718,7 +2718,8 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
         body = (
             "| Class | C+E |\n"
             "| Touch set | `src/Services/Ordering/**`, `tests/Ordering.*`, "
-            "`.claude/commands/{pr,ship}.md`, CLAUDE.md, docs/x.md |\n"
+            "`.claude/commands/{pr,ship}.md`, CLAUDE.md, docs/x.md, "
+            "docs/file?.md |\n"
         )
         files = "\n".join((
             "src/Services/Ordering/Ordering.Domain/Order.cs",
@@ -2732,6 +2733,8 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
             "docs/x.md",
             "docs/x.md.bak",
             "notdocs/x.md",
+            "docs/file1.md",
+            "docs/file/1.md",
         )) + "\n"
         r = self._run_locality_with_gh(self._gh_printing(body, files))
         self.assertEqual(0, r.returncode, r.stderr)
@@ -2749,6 +2752,8 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
                 "inside docs/x.md",
                 "outside docs/x.md.bak",
                 "outside notdocs/x.md",
+                "inside docs/file1.md",
+                "outside docs/file/1.md",
             ],
             r.stdout.splitlines(),
         )

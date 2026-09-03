@@ -1,26 +1,28 @@
 ---
 description: Triage an external review of the blueprint into a resolution record
-argument-hint: "[path to the review — defaults to suggestions.md] [path to the locality verdict — omit when there is no PR]"
+argument-hint: "[path to the review — defaults to suggestions.md] [path to the locality verdict — omit when there is no PR] [path to the branch diff — omit when the caller cannot write one]"
 allowed-tools: Read, Grep, Glob, Edit, Write, Agent(review-adjudicator)
 disallowed-tools: Bash, Edit(.claude/**), Edit(./.claude/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Agent(general-purpose), Agent(claude), Agent(Explore), Agent(Plan), Agent(claude-code-guide), Agent(statusline-setup), Agent(security-auditor), Agent(bug-auditor)
 ---
 
-Work through the review at $1 — a file path. **With no argument, the
-review is `suggestions.md` at the repository root.** $2, when given, is the
-**locality verdict**: the output of `bash .claude/scripts/pr-locality.sh <n>`
-saved to a file by the caller — `/ship` writes it beside the review before
-dispatching here — one `class` line and one `inside <path>` or
-`outside <path>` line per changed file. This invocation holds no `Bash`
-and cannot produce it; it reads it, and step 4 applies an accepted site
-only at a path the verdict marks `inside`. With no second argument the
-bound is unknown, every accepted site is applied as before, and the report
-says the bound was not available. That is where an external
-review lands by default, and it is untracked working state rather than repo
-content — do not commit it, and do not treat its absence as an error worth
-guessing around. If there is no argument and no `suggestions.md`, stop and ask
-for the review rather than reviewing the diff from scratch: this command
-triages someone else's findings, and inventing them is a different job with a
-different bar.
+Work through the review at $1 — a file path. **With no argument, the review is
+`suggestions.md` at the repository root.** $2, when given, is the **locality
+verdict**: the output of `bash .claude/scripts/pr-locality.sh <n>` saved to a
+file by the caller — `/ship` writes it beside the review before dispatching
+here — one `class` line and one `inside <path>` or `outside <path>` line per
+changed file. This invocation holds no `Bash` and cannot produce it; it reads
+it, and step 4 applies an accepted site only at a path the verdict marks
+`inside`. With no second argument the bound is unknown, every accepted site is
+applied as before, and the report says the bound was not available. $3, when
+given, is the **branch diff** against `main`, written by the caller the same
+way; the adjudicator reads it to tell a restatement the branch wrote — a
+finding — from one it left alone, and without it says so in each row that
+needed it. That is where an external review lands by default, and it is
+untracked working state rather than repo content — do not commit it, and do not
+treat its absence as an error worth guessing around. If there is no argument
+and no `suggestions.md`, stop and ask for the review rather than reviewing the
+diff from scratch: this command triages someone else's findings, and inventing
+them is a different job with a different bar.
 
 **The review is no longer pasted after the command, and the reason is the
 boundary below.** A pasted review is already inside the invocation that
@@ -104,7 +106,8 @@ pointer becomes a third copy of it.
 
 1. **Dispatch.** Spawn **one**
    `review-adjudicator` with two absolute paths — the review and the
-   repository root — and two pointers: `docs/style-guide.md`'s settled
+   repository root — the diff's path when $3 was given, and two pointers:
+   `docs/style-guide.md`'s settled
    choices, and `docs/change-locality.md` §2. The second is what makes a
    finding that asks for a restated count, a "since PR-NN" sentence, or a
    value quoted a second time where the owner site is already correct a
@@ -213,10 +216,11 @@ Then a block per fixed finding:
 
 Statuses are `Fixed`, `Rejected — <rule>`, `Rejected — not true`,
 `Unlocatable`, `Needs a decision`, `Outside touch set`. A second table holds
-anything **found while fixing** — the adjudicator's `found-while-adjudicating` rows, each parsed
-under the site contract in step 2, its `was` confirmed at its line, and the
-machinery-tree rule applied to it before it is touched — plus the defects
-the re-grep turned up, verified the same way. That
+anything **found while fixing** — the adjudicator's
+`found-while-adjudicating` rows, each parsed under the site contract in
+step 2, its `was` confirmed at its line, and the machinery-tree rule
+applied to it before it is touched — plus the defects the re-grep turned
+up, verified the same way. That
 table has historically been the more valuable of the two; do not fold it into
 the first.
 
