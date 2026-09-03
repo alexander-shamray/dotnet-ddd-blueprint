@@ -87,7 +87,14 @@ for item in "${items[@]}"; do
   grep -Eq '^[A-Za-z0-9_./*{},()-]+$' <<<"$t" ||
     refuse "the Touch set row is not a path list"
   case "$t" in *[/.]*) ;; *) refuse "the Touch set row is not a path list" ;; esac
-  case "$t" in /*|./*) refuse "the Touch set row names a path outside the repository" ;; esac
-  case "/$t/" in */../*) refuse "the Touch set row names a path outside the repository" ;; esac
+  # A brace alternative is a segment start too: `{../outside,docs/x.md}`
+  # expands to a path that leaves the checkout, so the boundary is judged
+  # over the token with its braces dropped and its alternatives joined as
+  # segments, where a leading `/`, a `./` and a `..` all show as segments.
+  n="${t//[\{\}]/}"
+  n="${n//,//}"
+  case "/$n/" in
+    *//*|*/./*|*/../*) refuse "the Touch set row names a path outside the repository" ;;
+  esac
 done
 printf '%s\n' "$class_row" "$touch_row"

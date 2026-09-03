@@ -53,12 +53,12 @@ change quoted from the review is a risk with no benefit.
   statements, file-scoped namespaces, explicit types, British prose beside
   real identifier spellings, the unpinned Aspire rows. Read that table before
   adjudicating a style finding, and reject those by naming the row.
-- **The locality contract**, by pointer: `docs/change-locality.md` §2 says
-  every fact has one owner and every other mention cites it, and forbids
-  writing a count, a version outside `Directory.Packages.props`, a raw value
-  in a second place, or a "since PR-NN" sentence anywhere. Read it before
-  adjudicating a finding about a number or a phrase that appears more than
-  once.
+- **The locality contract**, by pointer: `docs/change-locality.md` §2 is
+  the owner of what a document may and may not restate, and this profile
+  does not copy its list — a copy here had already dropped one of its
+  exceptions. Read that section before adjudicating a finding about a
+  number, a version, or a phrase that appears more than once, and cite it
+  by section in the `reason`.
 
 ## Method
 

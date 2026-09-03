@@ -2666,6 +2666,9 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
         for path in (
             "/etc/passwd", "../x", "docs/../../x", "./docs/x.md", "docs/..",
             "`docs/x.md", "docs/x.md`", "``",
+            # Round seven: a brace alternative is a segment start too.
+            "{../outside,docs/x.md}", "docs/{a,../b}", "{/etc,docs}/x",
+            "docs/{./x,y}", "src/{a,b}/../../x",
         ):
             with self.subTest(path=path):
                 body = f"| Class | D |\n| Touch set | docs/a.md, {path} |\n"

@@ -11,8 +11,12 @@ that makes the contract true.
 
 ## 1. What was measured
 
-Over the last 25 merged PRs (`#135` to `#182`), files ranked by how many PRs
-edited them:
+**Measured on 2026-09-03 against `main` at 371b99e, the merge of #185.**
+Every figure in this section and the next is a record of that day, per the
+contract's §2, and nothing here is kept current.
+
+Over the 25 merged PRs before that merge (`#135` to `#182`), files ranked by
+how many PRs edited them:
 
 | File | PRs of 25 |
 |---|---|
@@ -28,8 +32,8 @@ edited them:
 | `docs/roadmap.md`, `docs/lessons.md`, `15-cicd-deployment.md` | 8 each |
 
 The median PR changed about 25 files, roughly half of them Markdown. The
-branch open right now (#185, a fix to one hook script and one helper) edits
-nine files, and four are shared documents: `CLAUDE.md`,
+branch open on that day (#185, a fix to one hook script and one helper)
+edited nine files, and four were shared documents: `CLAUDE.md`,
 `docs/harness-boundaries.md`, `docs/lessons.md`, `docs/testing.md`.
 
 Inside the code tree the same pattern shows at a smaller scale. Ordering's
@@ -40,7 +44,7 @@ one service will meet at.
 ## 2. Why it happens
 
 1. **`CLAUDE.md` carries state that moves with every PR.** Its phase section
-   is a paragraph per landed PR (PR-30 through PR-37 today), plus counts
+   is a paragraph per landed PR (PR-30 through PR-37 on that day), plus counts
    (thirty-three projects, 1,119 tests, 874 and 245 by category) that are
    restated and nothing recomputes. It is loaded into every session and edited
    by every PR.
@@ -308,7 +312,7 @@ partitions, the mutex list, and "never write a count". Three departures:
 
 ## 6. What is deliberately not touched
 
-- `docs/superpowers/` stays frozen, as today.
+- `docs/superpowers/` stays frozen.
 - No ADR is edited; step 3 moves text verbatim.
 - `.claude/settings.json` is the harness's own boundary and its deny list
   is lifted and restored by the repository owner, never by a step; no step

@@ -50,7 +50,8 @@ touch set for no gain.
 Never write, in any document:
 
 - a number of tests, projects, ADRs, chapters, or lines;
-- a package version outside `Directory.Packages.props`;
+- a package version outside `Directory.Packages.props`, except in Appendix
+  B where the version itself is the decision, as Class E says;
 - a timeout, retry count, port, TTL or window as a raw integer in a second
   place;
 - "since PR-NN", "this used to say", or the history of how a rule was
