@@ -150,13 +150,15 @@ in `test_edit_target_guard.py` beside the others and picked up by the same
 `discover`; it is the one suite that needs a real link on disk, and runs every
 case against **each** primitive the platform grants — a symbolic link, a
 junction, or both — never a skip, which would report a pass for a property it
-never tested. It is also the one module CI runs **twice**: `review-helpers` on
-Linux and `edit-target-guard-windows` on Windows, because the junction
-fallback, `..` after a link and the case-insensitive comparison are Windows'
-own semantics and no Linux runner can reach them. That job runs the module
-alone rather than the directory, because this module needs nothing but Python
-and a filesystem where the suite beside it needs `bash`, `grep`, `git`, `jq`
-and a `gh` stub;
+never tested. It is also the one module CI runs on **three** platforms:
+`review-helpers` on Linux, and `edit-target-guard` as a matrix over Windows and
+macOS — because the junction fallback, `..` after a link and the on-disk case
+`realpath` answers with are Windows' own, and a case-insensitive mount is
+macOS' default, and no Linux runner reaches any of them. That job runs the
+module alone rather than the directory, because this module needs nothing but
+Python and a filesystem where the suite beside it needs `bash`, `grep`, `git`,
+`jq` and a `gh` stub; it runs verbose, because the module prints which link
+primitives it exercised and a green run does not say;
 **#150**, that what suppresses a
 sweep finding is decided by a helper rather than by a reader; **#75**
 again, that the issue helper leaves `gh issue create` no free parameter and

@@ -752,9 +752,17 @@ spelled as itself is **admitted** here.
 running it rather than by reasoning about it.** The anchor is resolved as
 well as the target, because a checkout reached through a link — `/tmp` on
 macOS, an 8.3 or `subst` path on Windows — would otherwise make every edit
-under it look like the thing the guard refuses; and the comparison is
-case-insensitive where the platform is, because Windows' `realpath` answers
-with the on-disk case and `DOCS/x` is not a link. The two platforms also
+under it look like the thing the guard refuses; and the comparison folds case
+where the **filesystem** does, because Windows' `realpath` answers with the
+on-disk case and `DOCS/x` is not a link. **Filesystem, not platform, and the
+distinction is the second bypass this guard shipped with**:
+`os.path.normcase` folds on Windows and nowhere else, while macOS mounts APFS
+case-insensitively by default — so `/Users/x/Repo` and `/users/x/repo` are one
+directory there, a target spelled in the other case was under no anchor at
+all, and the fall-through admits. It is asked of the filesystem now, by
+`stat`ing a case-flipped spelling and comparing device and inode. Raised by
+Copilot; the platform default stands in only where the probe cannot run. The
+two platforms also
 disagree about `..` after a link — POSIX resolves it against the link's
 target, Windows collapses it before the filesystem sees it — and the guard
 follows each rather than picking one, measured both ways in

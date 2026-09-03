@@ -186,6 +186,13 @@ class GuardCase(unittest.TestCase):
         reason = self.judge(file_path, **kwargs)
         self.assertIsNone(reason, f"refused: {file_path} — {reason}")
 
+    def guard_module(self):
+        """The hook imported directly, for the predicates a verdict hides."""
+        spec = importlib.util.spec_from_file_location("guard_edit_target", HOOK)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
 
 class ALinkIsNotTheFileItIsSpelledAs(GuardCase):
 
@@ -342,6 +349,54 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
                     JUNCTIONS(self.root, alias)
                 self.assertAdmitted(
                     os.path.join(alias, "docs", "chapter.md"), cwd=alias)
+
+    def test_case_folding_is_asked_of_the_filesystem_not_the_platform(self):
+        # `os.path.normcase` folds on Windows and nowhere else, which is a
+        # statement about the platform where what matters is the filesystem:
+        # macOS mounts APFS case-insensitively by default. The hook probes
+        # instead, and this case checks the probe against the same measurement
+        # taken here — one file, one device and inode, under two spellings.
+        guard = self.guard_module()
+        directory, name = os.path.split(self.root)
+        flipped = os.path.join(directory, name.swapcase())
+        try:
+            measured = (os.stat(self.root).st_dev == os.stat(flipped).st_dev
+                        and os.stat(self.root).st_ino == os.stat(flipped).st_ino)
+        except OSError:
+            measured = False
+        self.assertEqual(measured, guard.case_insensitive(self.root))
+
+    def test_a_differently_cased_checkout_prefix_is_still_judged(self):
+        # **The branch that admits is the one a case difference reaches.** On a
+        # folding filesystem `/Users/x/Repo` and `/users/x/repo` are one
+        # directory, so a target spelled with the other case is inside the
+        # checkout — and a comparison that folds only on Windows finds it under
+        # no anchor at all and falls through to `None`. A link edit spelled
+        # that way would have bypassed the guard on a default macOS checkout.
+        # Raised by Copilot.
+        #
+        # Where the filesystem does NOT fold, the same spelling names a path
+        # that does not exist and is not this guard's subject, so the assertion
+        # is the filesystem's answer rather than one platform's.
+        guard = self.guard_module()
+        directory, name = os.path.split(self.root)
+        other_case = os.path.join(directory, name.swapcase())
+        folds = guard.case_insensitive(self.root)
+
+        plain = os.path.join(other_case, "docs", "chapter.md")
+        target = os.path.join(self.root, ".claude", "scripts", "helper.sh")
+        for linker in linkers():
+            with self.subTest(link=linker, folds=folds):
+                link = self.link_to("cased", target, linker)
+                through = os.path.join(
+                    other_case, os.path.relpath(link, self.root))
+                if folds:
+                    self.assertAdmitted(plain)
+                    self.assertIn("resolves elsewhere in it",
+                                  self.assertRefused(through))
+                else:
+                    self.assertAdmitted(plain)
+                    self.assertAdmitted(through)
 
     def test_the_case_of_a_windows_spelling_is_not_a_difference(self):
         # Windows' `realpath` answers with the on-disk case, so `DOCS` comes

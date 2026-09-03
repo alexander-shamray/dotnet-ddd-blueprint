@@ -73,16 +73,50 @@ EDITING_TOOLS = ("Edit", "Write", "NotebookEdit", "MultiEdit")
 PATH_KEYS = ("file_path", "notebook_path")
 
 
-def same(left, right):
-    """Whether two absolute paths name the same place on this platform."""
-    return os.path.normcase(os.path.normpath(left)) == os.path.normcase(
-        os.path.normpath(right))
+def case_insensitive(path):
+    """Whether `path`'s filesystem resolves a differently-cased spelling to it.
+
+    **`os.path.normcase` folds case on Windows and nowhere else**, and that is
+    a statement about the PLATFORM where what matters is the FILESYSTEM. macOS
+    mounts APFS case-insensitively by default, so `/Users/x/Repo` and
+    `/users/x/repo` are one directory there while `normcase` leaves them
+    different strings — and a comparison built on it decides the target is
+    under no anchor at all, which is the branch that admits. Raised by Copilot;
+    the same is true of a case-insensitive mount on Linux.
+
+    Asked of the filesystem rather than read off `sys.platform`: the basename
+    is case-flipped and both spellings are `stat`ed, and one file with one
+    device and inode under two spellings is the answer. Where the flip is not a
+    different string, or the probe cannot run, the platform default stands in —
+    it is the best available guess and it is the one that was there before.
+    """
+    directory, name = os.path.split(os.path.normpath(path))
+    flipped = name.swapcase()
+    if not directory or flipped == name:
+        return os.name == "nt"
+    try:
+        here = os.stat(path)
+        other = os.stat(os.path.join(directory, flipped))
+    except OSError:
+        return os.name == "nt" if not os.path.exists(path) else False
+    return (here.st_dev, here.st_ino) == (other.st_dev, other.st_ino)
 
 
-def under(child, parent):
+def key(path, folded):
+    """One comparable spelling of `path`, folded where the filesystem folds."""
+    spelling = os.path.normcase(os.path.normpath(path))
+    return spelling.lower() if folded else spelling
+
+
+def same(left, right, folded):
+    """Whether two absolute paths name the same place."""
+    return key(left, folded) == key(right, folded)
+
+
+def under(child, parent, folded):
     """Whether `child` is `parent` or sits beneath it, lexically."""
-    child = os.path.normcase(os.path.normpath(child))
-    parent = os.path.normcase(os.path.normpath(parent))
+    child = key(child, folded)
+    parent = key(parent, folded)
     if child == parent:
         return True
     if not parent.endswith(os.sep):
@@ -158,9 +192,10 @@ def anchors(event):
         if not path or not isinstance(path, str):
             continue
         spelled = os.path.abspath(path)
-        if any(same(spelled, seen) for seen, _ in found):
+        folded = case_insensitive(spelled)
+        if any(same(spelled, seen, folded) for seen, _, _ in found):
             continue
-        found.append((spelled, os.path.realpath(path)))
+        found.append((spelled, os.path.realpath(path), folded))
     return found
 
 
@@ -212,18 +247,18 @@ def offence(event):
     # exists to refuse. Requiring agreement is what makes an extra anchor
     # incapable of widening the guard, which is the property `anchors` rests
     # its trust in `CLAUDE_PROJECT_DIR` on. Raised by Copilot.
-    for spelled_root, real_root in anchors(event):
-        if under(lexical, spelled_root):
+    for spelled_root, real_root, folded in anchors(event):
+        if under(lexical, spelled_root, folded):
             base = spelled_root
-        elif under(lexical, real_root):
+        elif under(lexical, real_root, folded):
             base = real_root
         else:
             continue
 
         expected = os.path.normpath(
             os.path.join(real_root, os.path.relpath(lexical, base)))
-        if not same(resolved, expected):
-            escaped = not under(resolved, real_root)
+        if not same(resolved, expected, folded):
+            escaped = not under(resolved, real_root, folded)
             where = "outside the checkout" if escaped else "elsewhere in it"
             return (
                 f"guard-edit-target: {spelled} resolves {where} — to "
