@@ -201,5 +201,6 @@ the same PR. It waives nothing else. In particular:
     no "since PR-NN"
 [ ] Appendix D, decision log, lessons, repo map, style guide, testing.md,
     roadmap and CLAUDE.md untouched unless the class names one
-[ ] Mutex surfaces this PR needs are named in the issue
+[ ] Mutex surfaces this PR needs are named in the issue, or in the touch-set
+    row when there is none
 ```

@@ -678,8 +678,9 @@ a retry count in `Program.cs` and nowhere else. From then on:
   states in full, which is that shape charged for on purpose rather than
   arrived at by accident.
 
-Run `/validate-blueprint` after a Class C change or any chapter edit, and
-not after a Class A change.
+Run `/validate-blueprint` after a Class C change, or after an edit to a file
+in its scope — a chapter or appendix, `docs/roadmap.md`, `docs/testing.md` —
+and not after a Class A change.
 
 ## Style
 

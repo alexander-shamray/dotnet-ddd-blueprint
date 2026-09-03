@@ -38,10 +38,12 @@ taste. Prefer:
 1. **Blueprint ↔ code drift** once `src/` exists (samples, pins, type names,
    registration order, endpoints, credentials).
 2. **Cross-chapter / CLAUDE.md contradictions** — two rules that cannot both
-   be true, or a planned tree stated as present. **Not** a phase marker, a
-   test count, a project count or a value quoted a second time: those are
-   restatements `docs/change-locality.md` §2 forbids writing, so a stale one
-   is awaiting removal by the plan, not a finding against this branch.
+   be true, or a planned tree stated as present. **Not** a pre-existing
+   phase marker, test count, project count or second copy of a value that
+   this branch left untouched: those are restatements
+   `docs/change-locality.md` §2 forbids writing, so a stale one is awaiting
+   removal by the plan, not a finding against this branch. One this branch
+   **introduces or edits** is a finding under the same section.
 3. **Register drift** — `Directory.Packages.props` vs Appendix B vs §4.4 sample;
    licence gate failing.
 4. **Deploy drift** — Compose / Helm / CI vs §14 / §15 claims (ports, secrets,
@@ -51,7 +53,9 @@ taste. Prefer:
 6. **A file outside the declared touch set.** The PR body's `| Class |` and
    `| Touch set |` rows say what this branch may edit; a path in
    `git diff --name-only` that neither row covers is a finding, and its
-   resolution is a narrower diff or a different class, never a wider row.
+   resolution is a narrower diff, a row widened with its reason beside it
+   when the path is inside the class's tree set, or a different class when
+   it is not — never a row widened silently (`docs/change-locality.md` §3).
    The rows come from `bash .claude/scripts/pr-locality.sh <n>`, with `<n>`
    from `bash .claude/scripts/pr-for-branch.sh` — a fixed-field helper,
    because `gh pr view` reaches the review feeds. Where they cannot be read
@@ -65,8 +69,8 @@ purpose (braceless single statements, file-scoped namespaces, explicit
 types, British prose beside real identifier spellings, unpinned Aspire with
 §4.4 carve-outs, spread-over-`.ToArray()` when the corpus is already
 clean), and the stale restatements `docs/change-locality.md` §2 leaves in
-place — a count, a "since PR-NN", a value quoted where the owner site is
-already correct.
+place — a pre-existing count, "since PR-NN" or second copy of a value that
+this branch did not touch, where the owner site is already correct.
 
 ---
 

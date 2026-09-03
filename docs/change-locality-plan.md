@@ -139,8 +139,9 @@ tour.
   verification step.
 - `.claude/commands/validate-blueprint.md`: numeric drift is chapter against
   the code symbol, never chapter against chapter; counts of tests, projects
-  and chapters are out of scope; the command runs after Class C and chapter
-  edits, not after Class A.
+  and chapters are out of scope; the command runs after Class C or an edit
+  to a file in its scope — a chapter or appendix, `docs/roadmap.md`,
+  `docs/testing.md` — and not after Class A.
 
 Touch set: `docs/change-locality.md` (new), this plan, `CLAUDE.md`, six
 files under `.claude/commands/` — the five above and `ship.md`, whose checks
@@ -234,6 +235,8 @@ when no command or chapter tells an agent to update Appendix D.
   the author declared. A Catalog Class A change that also edits Ordering is
   inside the class map and outside its own declared set, and it is the
   second check that catches it;
+- reads a `+`-joined class as the union of its members' maps, so `C+E` is
+  one lookup per member and no duplicate map entry;
 - fails the PR on a file outside either, naming it;
 - its own test's subject is what it looks at: a PR with a class row and a
   file outside the set must be observed red before the gate is trusted.
