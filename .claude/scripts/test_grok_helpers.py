@@ -5371,13 +5371,56 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertRefused(
             "git commit -F - <<$'EOF'\nEOF\ngit push origin +HEAD:main\n$EOF")
 
-        # And the direction an UNDECODABLE delimiter errs in, which is the
-        # asymmetry that makes it a decision: `$'…'` decodes escapes, this file
-        # does not, and a delimiter guessed too long swallows commands. So one
-        # carrying a backslash opens no body at all and the lines after it stay
-        # commands — a false positive rather than a force push.
+        # **An UNDECODABLE delimiter is refused outright, and the fail-safe it
+        # replaces was wrong.** `$'…'` decodes escapes and this file does not.
+        # The first answer was to open no body, on the reasoning that lines
+        # left unstripped are read as commands and so refuse — true only while
+        # the command still TOKENISES. A body carrying an unmatched quote sends
+        # the guard down its `ValueError` path, and that fallback scans for
+        # forbidden flags and `ext::` alone: it does not enforce the push
+        # allow-list. Raised in review with exactly that body; measured, the
+        # force push was admitted.
+        #
+        # So both spellings refuse now, and the second is the one the old
+        # fail-safe let through.
         self.assertRefused(
             "git commit -F - <<$'E\\x4fF'\nEOF\ngit push origin +HEAD:main\nEOF")
+        self.assertRefused(
+            "git commit -F - <<$'E\\x4fF'\n"
+            "a line with an unmatched '\n"
+            "EOF\n"
+            "git push origin +HEAD:main")
+
+        # The control: a delimiter this file CAN decode is not refused for
+        # being quoted in the same form.
+        self.assertAdmitted("git commit -F - <<$'EOF'\na message\nEOF")
+
+    def test_an_apostrophe_inside_double_quotes_opens_nothing(self):
+        # **A quote character is only a quote where quoting can start.**
+        # `git log "don't $(git push origin +HEAD:main)"` runs the push; the
+        # substitution scanner entered single-quote state at `don't`, never saw
+        # the `$(`, and `shlex` then handed back the whole double-quoted value
+        # as data. Raised in review; verified allowed, on `main` as well.
+        #
+        # The state this needed had been added a few commits earlier for the
+        # process-substitution branch and simply was not read here — one model
+        # of the shell, consulted in one of the two places that needed it.
+        self.assertRefused('git log "don\'t $(git push origin +HEAD:main)"')
+        self.assertRefused('git commit -m "it\'s `git push origin --mirror`"')
+
+        # And the control, because the fix must not stop `'` quoting where it
+        # really does: an apostrophe OUTSIDE double quotes still opens a
+        # single-quoted string, so the substitution inside one is inert.
+        self.assertAdmitted("git commit -m 'a $(literal) mention'")
+
+    def test_a_continuation_cannot_smuggle_a_substitution_past_the_scan(self):
+        # The continuation join was in the tokenising pipeline only, so it ran
+        # after `expandable_regions` had already looked for substitutions.
+        # Bash removes `\<newline>` inside double quotes too, so
+        # `git log "$\<newline>(git push origin +HEAD:main)"` is a live `$(`
+        # that the scan never saw. Raised in review; verified allowed.
+        self.assertRefused('git log "$\\\n(git push origin +HEAD:main)"')
+        self.assertRefused("git log \"`git push \\\norigin +HEAD:main`\"")
 
     def test_a_heredoc_body_performs_no_process_substitution(self):
         # **The over-refusal the previous round introduced, and it is the

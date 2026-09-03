@@ -462,6 +462,45 @@ def strip_comments(command):
     )
 
 
+def undecodable_heredoc(command):
+    """Whether a heredoc names a delimiter this file cannot read.
+
+    **"Open no body and let the lines be judged" was the wrong fail-safe, and
+    review took it apart.** The reasoning was that a body left unstripped is
+    read as commands, which refuses rather than admits — true only while the
+    command still tokenises. A body carrying an unmatched quote sends `offence`
+    down its `ValueError` path, and that fallback scans for forbidden flags and
+    `ext::` alone: it does not enforce the push allow-list, so
+    `git commit -F - <<$'E\\x4fF'` with such a body admitted a force push.
+    Measured.
+
+    So an undecodable delimiter is refused outright rather than worked around.
+    The alternative is decoding every ANSI-C escape bash supports, which is a
+    list that trails bash's — the shape this file refuses elsewhere — and each
+    gap in it would reopen exactly this hole.
+
+    The scan asks `shell_positions` where the `<<` is, so a delimiter quoted
+    inside an argument is not one of these; the two guards below are
+    `heredoc_spans`', for the same reasons it states.
+    """
+    quoted = set()
+    for index, in_quotes, in_comment in shell_positions(command):
+        if in_quotes or in_comment:
+            quoted.add(index)
+    for match in HEREDOC.finditer(command):
+        index = match.start()
+        if index in quoted:
+            continue
+        if index > 0 and command[index - 1] == "<":
+            continue
+        if command.startswith("<<<", index):
+            continue
+        delimiter, _expands = _heredoc_delimiter(match.group("word"))
+        if delimiter is None:
+            return True
+    return False
+
+
 def join_continuations(command):
     """`command` with every line continuation removed, as bash removes them.
 
@@ -874,7 +913,15 @@ def substitutions(command, quotes=True):
                 in_single = False
             index += 1
             continue
-        if char == "'" and quotes:
+        if char == "'" and quotes and not in_double:
+            # **An apostrophe inside double quotes opens nothing**, and reading
+            # one as a quote suppressed every substitution after it:
+            # `git log "don't $(git push origin +HEAD:main)"` runs the push, and
+            # the scanner entered single-quote state at `don't`, never saw the
+            # `$(`, and handed `shlex` an opaque quoted argument. Raised in
+            # review; verified allowed, on `main` as well. The double-quote
+            # state this needs was added a few commits earlier for the process
+            # substitution branch and simply was not read here.
             in_single = True
             index += 1
             continue
@@ -1370,7 +1417,24 @@ def offence(command, depth=0):
             "guard will follow; refusing rather than reading part of it."
         )
 
+    if undecodable_heredoc(command):
+        return (
+            "a heredoc names a delimiter this guard cannot decode, so it "
+            "cannot tell where the body ends or which lines after it are "
+            "commands; refusing rather than reading part of it."
+        )
+
     for text, quotes in expandable_regions(command):
+        # **The continuation join has to happen before anything looks for a
+        # substitution, not only before the tokeniser.** Bash removes
+        # `\<newline>` inside double quotes too, so
+        # `git log "$\<newline>(git push origin +HEAD:main)"` becomes a live
+        # `$(` — and this scan, running on the raw text, saw no opener while
+        # `shlex` later returned the whole quoted value as data. Raised in
+        # review; verified allowed. Only for a command-line region: a heredoc
+        # body arrives with `quotes` false and is not a command line.
+        if quotes:
+            text = join_continuations(text)
         for inner in substitutions(text, quotes=quotes):
             refusal = offence(inner, depth + 1)
             if refusal is not None:
