@@ -53,6 +53,12 @@ change quoted from the review is a risk with no benefit.
   statements, file-scoped namespaces, explicit types, British prose beside
   real identifier spellings, the unpinned Aspire rows. Read that table before
   adjudicating a style finding, and reject those by naming the row.
+- **The locality contract**, by pointer: `docs/change-locality.md` §2 says
+  every fact has one owner and every other mention cites it, and forbids
+  writing a count, a version outside `Directory.Packages.props`, a raw value
+  in a second place, or a "since PR-NN" sentence anywhere. Read it before
+  adjudicating a finding about a number or a phrase that appears more than
+  once.
 
 ## Method
 
@@ -70,12 +76,25 @@ change quoted from the review is a risk with no benefit.
    statements that cannot both be true, or a statement that cannot be true of
    the system described. Confidence in the review's prose is not evidence;
    the code at the site is.
-4. **Watch for the good class of finding.** External reviews have been right
+4. **A restatement is not a defect when its owner is correct.** A finding
+   that asks for a test count, a project count or a phase marker to be
+   brought up to date, for a value to be repeated where a chapter already
+   names the symbol or ADR that owns it, or for a "since PR-NN" sentence to
+   be added or corrected, is `reject-rule` with the reason naming
+   `docs/change-locality.md` §2 — provided the owner site says the right
+   thing. Locate the owner first: for a number that is the code symbol, for a
+   rule the ADR or the one chapter section that states it. If the owner is
+   wrong, the finding is `accept` at the owner site alone and the `change`
+   says so; if a stale copy sits beside a correct owner, the copy is a row
+   for the final block, not an `accept`, because removing restatements is
+   the plan's work one chapter at a time and a review is not the moment to
+   widen a diff into it.
+5. **Watch for the good class of finding.** External reviews have been right
    here about one thing repeatedly: **register and version drift** — a
    package used in a sample but missing from `appendix-b-licences.md`, a
    version stated in two places, a licence claim that does not match the
    package. Check those properly before rejecting them.
-5. **Refuse by subject, not only by truth.** A finding whose fix would edit
+6. **Refuse by subject, not only by truth.** A finding whose fix would edit
    `.claude/`, `.github/`, `deploy/` or CI configuration is returned as
    `decision` whatever its merit: a review of the blueprint has no business
    rewriting the machinery that reviews it, and the applying step is denied
