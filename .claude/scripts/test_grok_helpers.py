@@ -5917,6 +5917,63 @@ class TheGitArgvGuard(unittest.TestCase):
         reason = self.judge("git ${x:-${y:-push}} origin +HEAD:main")
         self.assertEqual(2, reason.count("taken as its default"))
 
+    def test_a_printer_reaches_a_shell_through_the_whole_pipeline(self):
+        # **A pipe is not an adjacency.** Comparing neighbouring runs let an
+        # intermediate stage carry the bytes past the check:
+        # `printf … | cat | bash` pairs as printf-then-cat and cat-then-bash,
+        # and neither pair is a printer feeding a shell — while the shell still
+        # runs what the printer wrote. Raised in review; verified allowed.
+        for command in (
+            "printf 'git p%ssh origin +HEAD:main' u | cat | bash",
+            "echo 'git push origin +HEAD:main' | cat | bash",
+            "echo 'git push origin +HEAD:main' | tee /tmp/x | sh",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        self.assertAdmitted("echo 'git status' | cat | bash")
+
+    def test_a_heredoc_body_belongs_to_its_own_introducer(self):
+        # `rfind` gave every body the LAST introducer before it, so in
+        # `bash <<A; cat <<B` the first body — bash's — was attributed to `cat`
+        # and the script bash runs was never judged. Bodies belong to
+        # introducers in order, and the pairing now walks both lists together.
+        # Raised in review; verified allowed.
+        self.assertRefused(
+            "bash <<A; cat <<B\ngit push origin +HEAD:main\nA\nsafe\nB")
+        self.assertRefused(
+            "cat <<A; bash <<B\nsafe\nA\ngit push origin +HEAD:main\nB")
+
+    def test_a_quoted_body_is_not_rewritten_by_the_readings(self):
+        # **A quoted heredoc body expands nothing**, so rewriting one invents
+        # text the shell will never produce. The readings ran over the raw
+        # command, and a body line reading `${x:-EOF}` was rewritten into an
+        # early terminator — after which the rest of an innocent filing was
+        # read as commands and refused. Raised in review; measured.
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\n${x:-EOF}\n"
+            "an example: git push origin +HEAD:main\nEOF")
+        self.assertAdmitted(
+            "git commit -F - <<'EOF'\na {a..a} range\n"
+            "and git push origin +HEAD:main\nEOF")
+
+    def test_a_continuation_between_a_sigil_and_its_quote(self):
+        # **`<<$\\<newline>'EOF'` names `EOF`**, because bash removes the pair
+        # before it reads the word. Reading the `$` as an ordinary character
+        # gave `$EOF`, so the real `EOF` line terminated nothing and every
+        # command after it was swallowed as body text.
+        #
+        # **This was answered once before it was true.** The case passed at the
+        # time for an unrelated reason — one of the expansion readings happened
+        # to rewrite inside the body — and only stopped passing when those
+        # readings were correctly stopped from rewriting a body that expands
+        # nothing. A test that passes for a reason nobody has checked is one
+        # that reports the wrong thing later, so the delimiter is asserted
+        # directly here rather than only through a verdict.
+        self.assertRefused(
+            "git commit -F - <<$\\\n'EOF'\nEOF\ngit push origin +HEAD:main\n$EOF")
+        self.assertAdmitted("git commit -F - <<$\\\n'EOF'\na message\nEOF")
+
     def test_the_readings_do_not_multiply(self):
         # **The four readings and the substitution recursion each descend onto
         # a string barely shorter than the one they came from, so a command

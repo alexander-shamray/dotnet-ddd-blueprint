@@ -203,6 +203,18 @@ HEREDOC = re.compile(
 )
 
 
+def _sigil_quote(word, index):
+    """Where the quote of a `$'…'`/`$"…"` at `index` starts, or None.
+
+    Line continuations between the two are skipped, because bash removes them
+    before it reads the word.
+    """
+    peek = index + 1
+    while word[peek:peek + 2] == "\\\n":
+        peek += 2
+    return peek if word[peek:peek + 1] in ("'", '"') else None
+
+
 def _heredoc_delimiter(word):
     """The literal delimiter `word` names, and whether its body expands.
 
@@ -228,10 +240,23 @@ def _heredoc_delimiter(word):
     out, index, quoted = [], 0, False
     while index < len(word):
         char = word[index]
-        if char == "$" and word[index + 1:index + 2] in ("'", '"'):
-            quote = word[index + 1]
-            close = word.index(quote, index + 2)
-            body = word[index + 2:close]
+        if char == "$" and _sigil_quote(word, index) is not None:
+            # **A continuation between the sigil and its quote does not break
+            # the pairing**, because bash removes the pair before it reads the
+            # word: `<<$\<newline>'EOF'` names `EOF`. Reading the `$` as an
+            # ordinary character gave `$EOF`, so the real `EOF` line terminated
+            # nothing and every command after it was swallowed as body text.
+            #
+            # Raised in review, and answered once before it was true: the case
+            # passed at the time for an unrelated reason — one of the expansion
+            # readings happened to rewrite inside the body — and only stopped
+            # passing when those readings were correctly stopped from rewriting
+            # a body that expands nothing. A test that passes for a reason
+            # nobody has checked is one that reports the wrong thing later.
+            peek = _sigil_quote(word, index)
+            quote = word[peek]
+            close = word.index(quote, peek + 1)
+            body = word[peek + 1:close]
             if quote == "'" and "\\" in body:
                 return None, False
             out.append(body)
@@ -660,6 +685,30 @@ def without_substitutions(command):
         out.append(char)
         index += 1
     return "".join(out) + command[index:] if index < len(command) else "".join(out)
+
+
+def outside_verbatim(command, reading):
+    """`reading` applied to `command` except inside a NON-expanding body.
+
+    **A quoted heredoc body expands nothing**, so rewriting one is inventing
+    text the shell will never produce. The readings were run over the raw
+    command, and a body line reading `${x:-EOF}` was rewritten into an early
+    terminator — after which the rest of an innocent filing was read as
+    commands and refused. Raised in review; measured.
+
+    An expanding body is left to the reading, because bash does expand there.
+    """
+    spans = [(start, end) for start, end, expands in heredoc_spans(command)
+             if not expands]
+    if not spans:
+        return reading(command)
+    out, cursor = [], 0
+    for start, end in spans:
+        out.append(reading(command[cursor:start]))
+        out.append(command[start:end])
+        cursor = end
+    out.append(reading(command[cursor:]))
+    return "".join(out)
 
 
 def rewriting_expansions(command, replace):
@@ -1738,6 +1787,40 @@ def _run_leader(command, position, ordinary):
     return ""
 
 
+def pipeline_groups(tokens):
+    """`tokens` split into pipelines, each a list of the runs it joins.
+
+    **A pipe is not an adjacency**, and comparing neighbouring runs let an
+    intermediate stage carry the bytes past the check:
+    `printf 'git p%ssh origin +HEAD:main' u | cat | bash` pairs as
+    printf-then-cat and cat-then-bash, and neither pair is a printer feeding a
+    shell — while the shell still runs what the printer wrote. Raised in
+    review; verified allowed.
+
+    `command_runs` drops the boundary that separated two runs, which is what
+    made the distinction unavailable; this keeps it just long enough to say
+    whether the runs are in the same pipeline.
+    """
+    groups, current, run = [], [], []
+    for token in tokens:
+        if not is_boundary(token):
+            run.append(token)
+            continue
+        if run:
+            current.append(run)
+            run = []
+        if token in ("|", "|&"):
+            continue
+        if current:
+            groups.append(current)
+            current = []
+    if run:
+        current.append(run)
+    if current:
+        groups.append(current)
+    return groups
+
+
 def unmodelled_printer(tokens):
     """Whether a printer whose OUTPUT this file cannot reproduce feeds a shell.
 
@@ -1753,20 +1836,20 @@ def unmodelled_printer(tokens):
     `evaluated_scripts`, which judges the literal text, so `echo 'git status'
     | bash` is unaffected.
     """
-    runs = list(command_runs(tokens))
-    for before, after in zip(runs, runs[1:]):
-        if not before or not after:
+    for group in pipeline_groups(tokens):
+        shells = [position for position, run in enumerate(group)
+                  if program_name(leading_command(run)) in EVALUATORS
+                  and not any(SCRIPT_FLAG.match(element) for element in run[1:])]
+        if not shells:
             continue
-        if program_name(leading_command(after)) not in EVALUATORS:
-            continue
-        if any(SCRIPT_FLAG.match(element) for element in after[1:]):
-            continue
-        name = program_name(leading_command(before))
-        if name == "printf" and any("%" in element for element in before[1:]):
-            return True
-        if name == "echo" and any(element.startswith("-") and "e" in element
-                                  for element in before[1:]):
-            return True
+        for run in group[:max(shells)]:
+            name = program_name(leading_command(run))
+            arguments = run[run.index(leading_command(run)) + 1:]
+            if name == "printf" and any("%" in element for element in arguments):
+                return True
+            if name == "echo" and any(element.startswith("-") and "e" in element
+                                      for element in arguments):
+                return True
     return False
 
 
@@ -1821,11 +1904,32 @@ def stdin_scripts(command):
         return (ordinary[position] and not literal[position]
                 and command[position] in METACHARACTERS)
 
-    for start, end, _expands in heredoc_spans(command):
-        introducer = command.rfind("<<", 0, start)
-        if introducer == -1:
-            continue
-        leader = _run_leader(command, introducer, ordinary)
+    # **Bodies belong to introducers in ORDER, and `rfind` gave every body the
+    # last introducer before it.** In `bash <<A; cat <<B` the first body is
+    # `bash`'s, and `rfind` found `<<B`, decided the reader was `cat`, and
+    # never judged the script bash runs. Raised in review; verified allowed.
+    #
+    # `heredoc_spans` yields its spans in opener order and skips an opener that
+    # sits inside an earlier body, so the pairing walks both lists together
+    # rather than searching backwards from each body.
+    openers = [
+        match.start() for match in HEREDOC.finditer(command)
+        if ordinary[match.start()]
+        and not (match.start() > 0 and command[match.start() - 1] == "<")
+        and not command.startswith("<<<", match.start())
+    ]
+    spans = heredoc_spans(command)
+    cursor = 0
+    for start, end, _expands in spans:
+        while cursor < len(openers) and (
+                openers[cursor] >= start
+                or any(body <= openers[cursor] < close
+                       for body, close, _ in spans if close <= start)):
+            cursor += 1
+        if cursor >= len(openers):
+            break
+        leader = _run_leader(command, openers[cursor], ordinary)
+        cursor += 1
         if program_name(leader) in EVALUATORS:
             yield command[start:end]
 
@@ -1899,25 +2003,25 @@ def evaluated_scripts(tokens):
     # from the scan by `DATA_ONLY_COMMANDS` — correctly, its arguments are text
     # — but they stop being text the moment a shell is on the other end of the
     # pipe. Found by an adversarial audit.
-    runs = list(command_runs(tokens))
-    for before, after in zip(runs, runs[1:]):
-        if not before or not after:
+    for group in pipeline_groups(tokens):
+        shells = [position for position, run in enumerate(group)
+                  if program_name(leading_command(run)) in EVALUATORS
+                  and not any(SCRIPT_FLAG.match(element) for element in run[1:])]
+        if not shells:
             continue
-        if program_name(leading_command(before)) not in DATA_ONLY_COMMANDS:
-            continue
-        if program_name(leading_command(after)) not in EVALUATORS:
-            continue
-        if any(SCRIPT_FLAG.match(element) for element in after[1:]):
-            continue
-        # Sliced past the command word rather than past the first token: with
-        # an assignment prefix the two differ, and taking `before[1:]` handed
-        # the judgement a string beginning `echo`, which the data-only
-        # exemption then waved through.
-        spoken = before[before.index(leading_command(before)) + 1:]
-        written = [element for element in spoken
-                   if not element.startswith("-")]
-        if written:
-            yield " ".join(written)
+        for before in group[:max(shells)]:
+            command_word = leading_command(before)
+            if program_name(command_word) not in DATA_ONLY_COMMANDS:
+                continue
+            # Sliced past the command WORD rather than past the first token:
+            # with an assignment prefix the two differ, and taking `before[1:]`
+            # handed the judgement a string beginning `echo`, which the
+            # data-only exemption then waved through.
+            spoken = before[before.index(command_word) + 1:]
+            written = [element for element in spoken
+                       if not element.startswith("-")]
+            if written:
+                yield " ".join(written)
 
 
 # Commands whose arguments are text and never a command line.
@@ -2179,7 +2283,7 @@ def _offence(command, depth, judged):
         ("an expansion taken as its default", defaulted_expansions),
         ("a brace expansion taken as one word", brace_expanded),
     ):
-        variant = reading(command)
+        variant = outside_verbatim(command, reading)
         if variant != command:
             refusal = offence(variant, depth + 1, judged)
             if refusal is not None:
