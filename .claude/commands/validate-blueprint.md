@@ -33,9 +33,10 @@ code is in scope and check 9 below applies. If not, this is a docs-only audit
 and check 9 is skipped — say which you ran.
 
 **When this runs is decided by the change's class**, per
-`docs/change-locality.md`: after a Class C change — a rule moved and an ADR
-was appended — and after any edit to a chapter. Not after a Class A change,
-whose touch set holds no chapter for this audit to read.
+`docs/change-locality.md` §5: after a Class C change — a rule moved and an
+ADR was appended — and after an edit to any file in this command's scope, a
+chapter or appendix, `docs/roadmap.md` or `docs/testing.md`. Not after a
+Class A change, whose touch set holds nothing this audit reads.
 
 ## What counts as a finding
 
@@ -151,8 +152,11 @@ sweep cannot see.
 
 For each candidate:
 
-- Grep for **every** occurrence of the identifier, number or phrase before
-  deciding which side is wrong. Report the count and the sites.
+- For a value, grep for the **symbol** that owns it, then for the value
+  inside the three paths this command audits; for a rule or a name, grep the
+  identifier inside the same three paths. Report the sites. The corpus
+  outside that scope is not toured — a restatement there is the plan's, per
+  `docs/change-locality.md` §2.
 - For a value, the owner wins — the code symbol, or where no symbol holds
   it yet, the one chapter section that states it — and every other site
   cites the owner. For a rule, decide which statement the rest of the

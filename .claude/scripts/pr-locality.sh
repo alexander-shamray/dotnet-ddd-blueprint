@@ -18,5 +18,10 @@
 set -euo pipefail
 pr="${1:?usage: pr-locality.sh <pr-number>}"
 [[ "$pr" =~ ^[0-9]+$ ]] || { echo "pr must be a number" >&2; exit 2; }
-gh pr view "$pr" --json body --jq .body |
-  grep -E '^\| *(Class|Touch set) *\|' || true
+# The body is captured before it is filtered, so a `gh` failure — no
+# authentication, no network, no such pull request — is fatal under `set -e`
+# rather than indistinguishable from a body with no rows. Only grep's own
+# no-match status, which is exactly 1, is masked; any other status is a
+# fault and propagates.
+body=$(gh pr view "$pr" --json body --jq .body)
+grep -E '^\| *(Class|Touch set) *\|' <<<"$body" || [ $? -eq 1 ]

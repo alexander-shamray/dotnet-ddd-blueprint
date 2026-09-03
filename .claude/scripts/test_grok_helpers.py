@@ -2547,6 +2547,47 @@ class CopilotFeedHelpersAreTheOnlyIntake(unittest.TestCase):
                 )
                 self.assertEqual(out.returncode, 2, out.stderr)
 
+    def _run_locality_with_gh(self, script):
+        # A `gh` shim on PATH, the shape every stubbed helper test here uses.
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        gh = Path(d) / "gh"
+        gh.write_text("#!/usr/bin/env bash\n" + script, encoding="utf-8")
+        gh.chmod(0o755)
+        env = dict(os.environ)
+        env["PATH"] = d + os.pathsep + env["PATH"]
+        return subprocess.run(
+            [BASH, str(SCRIPTS / "pr-locality.sh"), "187"],
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_a_failing_gh_is_not_an_empty_body(self):
+        # Review round two on #187: `gh … | grep … || true` masked the whole
+        # pipeline, so an authentication or network failure produced the same
+        # empty success as a body with no rows, and a caller would skip the
+        # touch-set check believing the body had none. The body is captured
+        # first now, and only grep's no-match status is masked.
+        r = self._run_locality_with_gh("echo 'gh: not logged in' >&2; exit 1\n")
+        self.assertNotEqual(0, r.returncode)
+        self.assertEqual("", r.stdout)
+
+    def test_the_two_rows_come_back_and_nothing_else(self):
+        body = (
+            "Intro line\n| | |\n|---|---|\n| Class | D |\n"
+            "| Touch set | docs/x.md, tests/X.* |\n| Closes | nothing |\n"
+        )
+        r = self._run_locality_with_gh(f"printf '%s' \"{body}\"\n")
+        self.assertEqual(0, r.returncode, r.stderr)
+        self.assertEqual(
+            ["| Class | D |", "| Touch set | docs/x.md, tests/X.* |"],
+            r.stdout.splitlines(),
+        )
+
+    def test_a_body_without_rows_is_empty_success(self):
+        r = self._run_locality_with_gh("printf 'no rows here\\n'\n")
+        self.assertEqual(0, r.returncode, r.stderr)
+        self.assertEqual("", r.stdout)
+
 
 # The one bounded read of the reviewer transcript, spelled out so the
 # allow-list can require it exactly. grok-review.sh writes it across two

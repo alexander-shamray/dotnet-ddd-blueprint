@@ -638,22 +638,16 @@ the flake, where the assembly-wide attribute leaves nothing to forget.
 
 ## The one rule that matters
 
-**The blueprint must not contradict itself, and the way that is kept true has
-changed.** It used to be kept by touring the corpus: change a load-bearing
-claim — a timeout, a retry count, a type name, an endpoint path — and grep
-the whole blueprint for every other mention of it, reconciling them all in the
-same change. That made every small fix a multi-file edit, and it put two
-agents in the same file whenever they touched the same fact.
-
-[`docs/change-locality.md`](docs/change-locality.md) is the operating contract
-now, and an agent reads it before editing. Its rule is that **every fact has
-exactly one owner and every other mention cites the owner** — by symbol,
-section or ADR, never by value — so a change to a fact is one edit plus a
-search for the symbol. It names the change classes, the touch set each may
-edit, the surfaces that are still repo-wide mutexes, and what to do with a
-stale restatement met in passing: leave it, because removing restatements is
-[the plan](docs/change-locality-plan.md)'s job, one chapter per PR. What it
-withdraws is the tour. Nothing else in this file is waived, and its §6 says so.
+**The blueprint must not contradict itself**, and
+[`docs/change-locality.md`](docs/change-locality.md) is how that is kept
+true: **every fact has exactly one owner and every other mention cites the
+owner** — by symbol, section or ADR, never by value — so a change to a fact
+is one edit plus a search for the symbol, not a search of the corpus for the
+value. Read it before editing. It names the change classes, the touch set
+each may edit, the surfaces that are still repo-wide mutexes, and what to do
+with a stale restatement met in passing: leave it, because removing
+restatements is [the plan](docs/change-locality-plan.md)'s job, one chapter
+per PR. Nothing else in this file is waived, and its §6 says so.
 
 **Once code lands, this rule spans both.** The blueprint and the solution are
 one artefact with two representations, and they drift the moment someone changes

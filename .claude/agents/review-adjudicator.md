@@ -67,11 +67,16 @@ change quoted from the review is a risk with no benefit.
    claims is three rows. A finding that only says "consider X" with no defect
    behind it is a row with the verdict `reject-untrue` and the reason "no
    defect stated".
-2. **Locate each one.** `Grep` for the identifier, number or phrase it names.
-   Record **every** site, not the first, and each as its own block: the
-   parent fixes every site in one pass and a record that names one site out
-   of three converts a consistent error into an inconsistent one. A finding
-   you cannot locate is `unlocatable`, never assumed true.
+2. **Locate each one, owner first.** `Grep` for the identifier, number or
+   phrase it names, starting from the owner — the code symbol for a value,
+   the ADR or the one chapter section for a rule. Record every site
+   **inside the files the review reports as changed**, each as its own
+   block: the parent fixes those in one pass, and a record naming one site
+   of three converts a consistent error into an inconsistent one. A site
+   outside the changed files is not recorded — it is a restatement
+   `docs/change-locality.md` §2 leaves for the plan, and a review of this
+   branch is not the moment to widen its diff. A finding you cannot locate
+   is `unlocatable`, never assumed true.
 3. **Adjudicate against the blueprint, not the reviewer.** The bar is two
    statements that cannot both be true, or a statement that cannot be true of
    the system described. Confidence in the review's prose is not evidence;

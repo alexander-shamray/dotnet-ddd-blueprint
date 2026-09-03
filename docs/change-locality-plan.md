@@ -92,9 +92,9 @@ the same file whatever slice each was given. With one owner and citations
 there is no second site to tour, so the obligation is withdrawn rather than
 relaxed.
 
-**Why Class A holds no Markdown.** Class A is the target for most bugfixes,
-and its touch set contains no Markdown at all. That is the whole point of the
-plan.
+**Why Class A holds no shared Markdown.** Class A is the target for most
+bugfixes, and the one document it may edit is the alert-owned runbook whose
+operator action the change alters. That is the whole point of the plan.
 
 **Why two agents fit inside one service.** Handlers, queries, validators and
 their tests are scanned in by `PluggableInterfaces`, so a new slice needs
@@ -110,9 +110,11 @@ marks both.
 
 ## 4. The work, in order
 
-Each step is its own PR and is itself a Class D change, except step 8 which is
-Class B per chapter. Steps marked ∥ can run in parallel with each other once
-their prerequisite has merged. Nothing here is done inside a feature PR.
+Each step is its own PR and is itself a Class D change — whose tree set is
+`docs/`, `.claude/`, `.github/` and `deploy/`, so steps 5 and 9 are inside
+it — except step 8, which is Class B per chapter. Steps marked ∥ can run in
+parallel with each other once their prerequisite has merged. Nothing here is
+done inside a feature PR.
 
 ### Step 0 — land the contract and stop the bleeding
 

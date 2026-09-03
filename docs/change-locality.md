@@ -65,16 +65,21 @@ present tense in a second place.
 
 ## 3. Change classes
 
-Name the class in the PR body before editing. Do not grow the set "just in
-case". A file outside the set is outside the PR; if the work genuinely needs
-it, the class is wrong, so change the class, not the set.
+Name the class and the touch set before editing. Do not grow the set "just
+in case". A file the work turns out to need is one of two things: inside the
+class's tree set, in which case it is **added to the row with its reason
+beside it** — a review found it, a test needed it — and the widening is on
+the record rather than rewritten out; or outside the class's tree set, in
+which case the class is wrong, so change the class, not the set. A change
+that genuinely needs two classes names both — `C+E` for a rule that brings
+a package — and its touch set is the union.
 
 | Class | Examples | May touch | Never touches |
 |---|---|---|---|
 | **A — local** | fix a handler, tighten a test, add a validator rule, add a command field the aggregate already has | the owning slice `src/Services/<Svc>/**` and `tests/<Svc>.*`; **or** one project under `src/BuildingBlocks/` and its `tests/Common.<That>.Tests`; a migration if that service's schema moved; `docs/runbooks/<alert>.md` if the change alters what an operator does for that alert | any other `docs/**`; `CLAUDE.md`; a second service "to keep the sample in sync"; `.claude/**` |
 | **B — shared mechanism** | change `IdempotencyBehavior`, outbox retention, a `Common.Web` middleware, a MassTransit registration helper | the building block and its tests; the *one* service test that proves the wiring; `tools/new-service` if a Catalog file was added or removed; the one chapter paragraph that states the rule; a runbook as in A | every chapter that *mentions* the mechanism; Appendix D; both services' copies unless the scaffold template is the subject; the decision log, lessons, repo map, style guide |
-| **C — a rule moved** | a floor changes meaning; a host must refuse a token above a bound; a prohibition gains an exception | code and tests; one new ADR; the single chapter section the ADR amends; Appendix B if a package was added | every historical paragraph describing the old rule (the ADR is the correction, and chapters point at it); `docs/pr-decision-log.md`; `CLAUDE.md` |
-| **D — docs or harness** | a new `/command`, a style pass, a chapter split, a runbook for an alert that already fires, this contract | only the docs or `.claude/` tree the issue names — or, when no issue was filed, the paths the PR body's touch-set row declares before the first edit | inventories "while we are here"; `src/**` |
+| **C — a rule moved** | a floor changes meaning; a host must refuse a token above a bound; a prohibition gains an exception | code and tests; one new ADR; the single chapter section the ADR amends; Class E's set beside it, as `C+E`, when the rule brings a package | every historical paragraph describing the old rule (the ADR is the correction, and chapters point at it); `docs/pr-decision-log.md`; `CLAUDE.md` |
+| **D — docs or harness** | a new `/command`, a style pass, a chapter split, a runbook for an alert that already fires, this contract | only the `docs/`, `.claude/`, `.github/` or `deploy/` tree the issue names — or, when no issue was filed, the paths the touch-set row declares | inventories "while we are here"; `src/**` |
 | **E — dependency graph** | add a package, raise a pin, add a project | `Directory.Packages.props` (exact pin, no `Version=` on the reference); the `.csproj`; `appendix-b-licences.md` — identity and licence, not the version unless the version is the decision; `global.json` or `.config/dotnet-tools.json`; `Platform.slnx` | the chapters that use the package |
 
 Notes that decide the edge cases:
@@ -117,11 +122,13 @@ Safe when neither needs the same per-service mutex. The mutexes are:
 
 Handlers, queries, validators and their tests are scanned in through
 `PluggableInterfaces`, so a new slice needs none of those four. Say in the
-issue which mutex a task needs. Do not start a second agent on the same one.
+issue — or in the touch-set row, when there is no issue — which mutex a task
+needs. Do not start a second agent on the same one.
 
 ### Repo-wide mutex surfaces
 
-Edited by one agent at a time, and named in the issue when a task needs one:
+Edited by one agent at a time, and named in the issue — or in the touch-set
+row, when there is no issue — when a task needs one:
 
 ```
 Directory.Packages.props        Directory.Build.props        Platform.slnx
@@ -137,8 +144,10 @@ CLAUDE.md                       (until the primer rewrite lands)
 
 What an agent does instead of touring the corpus:
 
-1. Read the issue. Name the class. Write the touch set into the PR body's
-   `| Class |` and `| Touch set |` rows before the first edit.
+1. Read the issue. Name the class and the touch set before the first edit
+   — in the issue, or in the first commit's body when there is none — and
+   copy them into the PR body's `| Class |` and `| Touch set |` rows when
+   `/pr` opens it, with any file added mid-work and its reason (§3).
 2. Search **code** for the symbol: `rg` over `src/` and `tests/`.
 3. Open the owning chapter section only for Class B or C, and only the
    paragraph that states the rule. Open an ADR only to cite it or, in Class
@@ -149,10 +158,11 @@ What an agent does instead of touring the corpus:
    --filter "Category!=Integration"` needs no daemon.
 6. If a Catalog file was added or removed, run the scaffold's unit tests
    with `py -3.12` and the four-command dogfood in `docs/repo-map.md`.
-7. `/validate-blueprint` after Class C or any chapter edit. Not after
-   Class A. `/ship` selects its checks by the same class.
-8. Commit with `/commit`; the body argues the change and carries the bare
-   `Closes #n` line. Open the PR with `/pr`.
+7. `/validate-blueprint` after Class C, or after an edit to a file in its
+   scope — a chapter or appendix, `docs/roadmap.md`, `docs/testing.md`. Not
+   after Class A. `/ship` selects its checks by the same class.
+8. Commit with `/commit`; the body argues the change and, when the change
+   closes an issue, carries a bare `Closes #n` line. Open the PR with `/pr`.
 9. In the review loops, a finding that asks for a restated count, a
    "since PR-NN" sentence, or a corpus-wide rename of something whose owner
    site is already correct is answered by citing this file, not by editing.
@@ -170,7 +180,8 @@ the same PR. It waives nothing else. In particular:
   identifiers keep their real spelling, 80-column prose, 120-column code;
 - ADRs appended, never rewritten;
 - `main` stays green;
-- `Closes #n` as a bare line, not only inside a table cell;
+- when a change closes an issue, `Closes #n` as a bare line, not only
+  inside a table cell;
 - a kind label and a severity label on every issue;
 - no `#pragma`, no real credentials;
 - the harness boundaries in [`docs/harness-boundaries.md`](harness-boundaries.md)
@@ -186,7 +197,8 @@ the same PR. It waives nothing else. In particular:
 [ ] Test written first; smallest suite that can fail is green
 [ ] Scaffold tests and dogfood run if a Catalog file was added or removed
 [ ] ADR appended only if a rule moved; nothing in it rewritten
-[ ] No count, version, raw integer or "since PR-NN" written anywhere
+[ ] No present-tense count, version or raw value written outside its owner;
+    no "since PR-NN"
 [ ] Appendix D, decision log, lessons, repo map, style guide, testing.md,
     roadmap and CLAUDE.md untouched unless the class names one
 [ ] Mutex surfaces this PR needs are named in the issue

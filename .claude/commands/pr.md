@@ -79,9 +79,10 @@ Wrapped at 80 columns, British spelling, no emoji. Structure:
 
 ### The class and the touch set
 
-The metadata table opens with two rows, and they are the first thing written
-— before the first edit, per `docs/change-locality.md` — and copied here
-unchanged:
+The metadata table opens with two rows. The class and the touch set are
+decided before the first edit — in the issue, or in the first commit's body
+when there is none, per `docs/change-locality.md` §5 — and copied here when
+the PR opens, with any file added mid-work and the reason it was:
 
 ```markdown
 | | |
@@ -94,8 +95,8 @@ unchanged:
 C a rule moved, D docs or harness, E the dependency graph. `Touch set` is the
 paths that class allows and this branch actually edited, as globs or files on
 one line. A file in the diff outside the set is a finding for
-`/review-branch`, and the answer is a narrower diff or a different class —
-never a wider row written after the fact.
+`/review-branch`, and the answer is a narrower diff, a row widened with its
+reason beside it, or a different class — never a row widened silently.
 
 ### What the branch closes
 
