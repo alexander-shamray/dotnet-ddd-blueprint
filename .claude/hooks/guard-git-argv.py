@@ -867,11 +867,17 @@ def decode_ansi_c(body):
             index += 2
             continue
         if escape in "01234567":
-            digits = body[index + 1:index + 4]
+            # **`\\0nnn` counts its three digits AFTER the zero**, and reading
+            # the zero as one of them made `$\'\\0165\'` the two characters
+            # `\x0e5` where bash gives `u` — so `git p$\'\\0165\'sh origin
+            # +HEAD:main` was a push the guard could not see. Raised in review;
+            # verified allowed. The bare `\\nnn` form keeps its own count.
+            first = index + 2 if escape == "0" else index + 1
+            digits = body[first:first + 3]
             while digits and not all(d in "01234567" for d in digits):
                 digits = digits[:-1]
-            out.append(chr(int(digits, 8) & 0xFF))
-            index += 1 + len(digits)
+            out.append(chr(int(digits, 8) & 0xFF) if digits else "\0")
+            index += (first - index) + len(digits)
             continue
         if escape in "xuU":
             width = {"x": 2, "u": 4, "U": 8}[escape]
@@ -1704,6 +1710,38 @@ def _run_leader(command, position, ordinary):
     return command[start:end]
 
 
+def unmodelled_printer(tokens):
+    """Whether a printer whose OUTPUT this file cannot reproduce feeds a shell.
+
+    **Joining a printer's argv is not the bytes it writes**, and where the two
+    differ the join is the safe-looking one. `printf 'git p%ssh origin
+    +HEAD:main' u | bash` runs the push; the join is `git p%ssh origin
+    +HEAD:main u`, which every check reads as harmless. `echo -e` does the same
+    through its escapes. Raised in review; both verified allowed.
+
+    Reproducing `printf` is a specification this file will not carry — the same
+    reason it refuses to enumerate git's executing config keys — so the
+    unmodellable case refuses instead. The plain forms still go through
+    `evaluated_scripts`, which judges the literal text, so `echo 'git status'
+    | bash` is unaffected.
+    """
+    runs = list(command_runs(tokens))
+    for before, after in zip(runs, runs[1:]):
+        if not before or not after:
+            continue
+        if program_name(after[0]) not in EVALUATORS:
+            continue
+        if any(SCRIPT_FLAG.match(element) for element in after[1:]):
+            continue
+        name = program_name(before[0])
+        if name == "printf" and any("%" in element for element in before[1:]):
+            return True
+        if name == "echo" and any(element.startswith("-") and "e" in element
+                                  for element in before[1:]):
+            return True
+    return False
+
+
 def stdin_scripts(command):
     """Every script a shell in `command` is handed on its STDIN.
 
@@ -1734,8 +1772,26 @@ def stdin_scripts(command):
     the run has to be a shell.
     """
     ordinary = [False] * len(command)
+    literal = [False] * len(command)
+    escaped = None
     for index, in_quotes, in_comment in shell_positions(command):
         ordinary[index] = not in_quotes and not in_comment
+        if index == escaped:
+            # **An escaped metacharacter is part of the word**, and treating
+            # one as a boundary cut the script short: the here-string of
+            # `bash <<<git\\ push\\ origin\\ +HEAD:main` yielded `git\\`
+            # alone, while the redirection strip removed the whole thing, so
+            # nothing downstream saw the push. Raised in review.
+            literal[index] = True
+            escaped = None
+            continue
+        if ordinary[index] and command[index] == "\\":
+            literal[index] = True
+            escaped = index + 1
+
+    def boundary(position):
+        return (ordinary[position] and not literal[position]
+                and command[position] in METACHARACTERS)
 
     for start, end, _expands in heredoc_spans(command):
         introducer = command.rfind("<<", 0, start)
@@ -1755,8 +1811,7 @@ def stdin_scripts(command):
         while cursor < len(command) and command[cursor] in " \t":
             cursor += 1
         word = cursor
-        while word < len(command) and not (
-                ordinary[word] and command[word] in METACHARACTERS):
+        while word < len(command) and not boundary(word):
             word += 1
         if program_name(leader) in EVALUATORS:
             try:
@@ -2193,6 +2248,13 @@ def _offence(command, depth, judged):
                 "rather than admitting a push nothing checked."
             )
         return None
+
+    if unmodelled_printer(tokens):
+        return (
+            "a printer whose output this guard cannot reproduce writes into a "
+            "shell, so what that shell runs cannot be read; refusing rather "
+            "than judging the arguments instead of the bytes."
+        )
 
     for script in evaluated_scripts(tokens):
         refusal = offence(script, depth + 1, judged)

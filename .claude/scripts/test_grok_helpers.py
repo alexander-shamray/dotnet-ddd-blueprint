@@ -5833,6 +5833,46 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("echo 'git push origin +HEAD:main'")
         self.assertAdmitted("bash <<<'git log --oneline -5'")
 
+    def test_a_printer_that_formats_is_not_read_as_its_arguments(self):
+        # **Joining a printer's argv is not the bytes it writes**, and where
+        # the two differ the join is the safe-looking one:
+        # `printf 'git p%ssh origin +HEAD:main' u | bash` runs the push while
+        # the join reads as harmless. `echo -e` does it through escapes.
+        # Raised in review; both verified allowed.
+        #
+        # Reproducing `printf` is a specification this file will not carry —
+        # the same reason it refuses to enumerate git's executing config keys —
+        # so the unmodellable case refuses instead of being guessed at.
+        self.assertRefused("printf 'git p%ssh origin +HEAD:main' u | bash")
+        self.assertRefused("echo -e 'git\\x20push origin +HEAD:main' | bash")
+
+        # The plain forms still go through the reading that judges the literal
+        # text, so the narrowing costs nothing it did not have to.
+        self.assertRefused("echo 'git push origin +HEAD:main' | bash")
+        self.assertAdmitted("echo 'git status' | bash")
+        self.assertAdmitted("printf '%s\\n' hello")
+
+    def test_an_escaped_metacharacter_is_part_of_the_word(self):
+        # The here-string scan stopped at the first escaped space, so
+        # `bash <<<git\\ push\\ origin\\ +HEAD:main` yielded `git\\` alone —
+        # and the redirection strip then removed the whole here-string, so
+        # nothing downstream saw the push either. Raised in review; verified
+        # allowed.
+        self.assertRefused("bash <<<git\\ push\\ origin\\ +HEAD:main")
+        self.assertRefused("sh <<<git\\ log\\ --output=/tmp/x")
+
+    def test_the_octal_escape_counts_from_the_right_place(self):
+        # `\\0nnn` takes its three digits AFTER the zero. Reading the zero as
+        # one of them made `$'\\0165'` two characters where bash gives `u`, so
+        # `git p$'\\0165'sh origin +HEAD:main` was a push nothing could see.
+        # Raised in review; verified allowed.
+        self.assertRefused("git p$'\\0165'sh origin +HEAD:main")
+
+        # And the bare form keeps its own count, which is the control that the
+        # fix did not simply shift the error one place along.
+        self.assertRefused("git p$'\\165'sh origin +HEAD:main")
+        self.assertAdmitted("echo $'\\0101'")
+
     def test_the_readings_do_not_multiply(self):
         # **The four readings and the substitution recursion each descend onto
         # a string barely shorter than the one they came from, so a command
