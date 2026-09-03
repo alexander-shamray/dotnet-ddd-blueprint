@@ -485,6 +485,38 @@ class TheOrdinaryWriteIsNotDisturbed(GuardCase):
             measured = False
         self.assertEqual(measured, guard.case_insensitive(self.root))
 
+    def test_a_spelling_no_anchor_recognises_is_refused_if_it_lands_inside(self):
+        # **The general form of three separate findings**, and the case that
+        # went red on CI having passed locally: a Windows runner's
+        # `GetShortPathNameW` shortens the whole prefix, so
+        # `C:\Users\RUNNER~1\...\GUARD-~1\DOCUME~1\a.md` matched no anchor and
+        # fell through to the residual while resolving squarely inside a
+        # checkout. Case folding and Unicode composition each closed one
+        # spelling by teaching the comparison an equivalence; this closes the
+        # class, because the residual is for a file genuinely outside every
+        # checkout and not for one inside under a name the anchors cannot
+        # place.
+        #
+        # Measured against the commit that shipped it: admitted there, refused
+        # here. The alias below stands in for the short prefix, which cannot be
+        # produced on a volume with 8.3 creation disabled.
+        for linker in linkers():
+            with self.subTest(link=linker):
+                alias = os.path.join(self.outside, f"alias-{linker}")
+                if linker == "symlink":
+                    os.symlink(self.root, alias, target_is_directory=True)
+                else:
+                    JUNCTIONS(self.root, alias)
+                through = os.path.join(alias, "docs", "chapter.md")
+                self.assertIn("not a spelling any checkout here recognises",
+                              self.assertRefused(through))
+
+                # The control, and it is the worktree case rather than a
+                # loophole: a session STANDING in that alias makes it a
+                # checkout root of its own, and then the spelling is one the
+                # anchors recognise.
+                self.assertAdmitted(through, cwd=alias)
+
     def test_a_composed_and_a_decomposed_spelling_are_one_key(self):
         # **A case-insensitive APFS volume is also insensitive to Unicode
         # normalisation**, so `é` composed and `e` followed by a combining

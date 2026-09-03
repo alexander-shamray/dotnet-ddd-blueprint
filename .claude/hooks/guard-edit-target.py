@@ -338,6 +338,7 @@ def offence(event):
     # exists to refuse. Requiring agreement is what makes an extra anchor
     # incapable of widening the guard, which is the property `anchors` rests
     # its trust in `CLAUDE_PROJECT_DIR` on. Raised by Copilot.
+    judged = False
     for spelled_root, real_root, folded in checkouts:
         if under(lexical, spelled_root, folded):
             base = spelled_root
@@ -345,6 +346,7 @@ def offence(event):
             base = real_root
         else:
             continue
+        judged = True
 
         expected = os.path.normpath(
             os.path.join(real_root, os.path.relpath(lexical, base)))
@@ -359,10 +361,39 @@ def offence(event):
                 "there (#181, docs/harness-boundaries.md)."
             )
 
-    # Reached when every anchor containing the target agreed, or when none
-    # contained it at all — a target under no anchor is not this guard's
-    # subject, and the module docstring argues why. A test pins that residual
-    # so the next reader does not have to take the paragraph's word for it.
+    # **A spelling no anchor recognises, naming a file inside one, is the
+    # general form of three separate findings and it is refused here.** The
+    # loop above judges a target it can place; everything else fell through to
+    # the residual, and the residual is meant for a file that is genuinely
+    # outside every checkout — not for one inside a checkout under a name the
+    # anchors do not match. That difference is measurable: on a Windows runner
+    # `GetShortPathNameW` shortens the whole prefix, so
+    # `C:\Users\RUNNER~1\...\GUARD-~1\DOCUME~1\a.md` matched no anchor while
+    # resolving squarely inside one, and the case written to pin the 8.3 alias
+    # went red on CI having passed locally, where only the leaf was aliased.
+    #
+    # The same shape produced the case-folding finding and the Unicode one, and
+    # both were closed by teaching the comparison a new equivalence. This
+    # closes the class instead: whatever the spelling, if it RESOLVES into a
+    # checkout that did not recognise it, the matcher judged a string that is
+    # not this file and the write is refused. The residual is untouched — a
+    # target resolving outside every anchor still falls through, which is what
+    # keeps the session's own memory and scratch writes working.
+    if not judged:
+        for _, real_root, folded in checkouts:
+            if under(resolved, real_root, folded):
+                return (
+                    f"guard-edit-target: {spelled} is not a spelling any "
+                    f"checkout here recognises, yet it resolves to {resolved}, "
+                    "inside one. A permission rule matches the string it is "
+                    "given, so a name the rules cannot place is a write "
+                    "nothing has judged (#181, docs/harness-boundaries.md)."
+                )
+
+    # Reached when every anchor containing the target agreed, or when the
+    # target is outside every one of them — which is not this guard's subject,
+    # and the module docstring argues why. A test pins that residual so the
+    # next reader does not have to take the paragraph's word for it.
     return None
 
 
