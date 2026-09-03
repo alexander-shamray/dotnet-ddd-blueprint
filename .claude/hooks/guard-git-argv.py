@@ -516,6 +516,33 @@ def undecodable_heredoc(command):
     return False
 
 
+def expansion_end(command, start):
+    """The end of the parameter expansion at `start`, or None if there is none.
+
+    **The special parameters are expansions too**, and a scan that accepted
+    only `[A-Za-z0-9_]` never saw them: `$@`, `$*` and `$!` are empty in the
+    shell Claude Code runs commands in — no positional parameters, no
+    background job — so `git $@push origin +HEAD:main` closes up into a force
+    push, and `--out$@put=` and `ext$@::` reopen the other two checks the same
+    way. Found by an adversarial audit; live on `main`.
+
+    `$#`, `$?`, `$$`, `$-` and `$0` are deliberately absent: each expands to
+    something non-empty, so none of them can join two words.
+    """
+    if not command.startswith("$", start):
+        return None
+    if command.startswith("${", start):
+        close = _closing_brace(command, start + 2)
+        return None if close is None else close + 1
+    if command[start + 1:start + 2] in ("@", "*", "!"):
+        return start + 2
+    scan = start + 1
+    while scan < len(command) and (command[scan].isalnum()
+                                   or command[scan] == "_"):
+        scan += 1
+    return scan if scan > start + 1 else None
+
+
 def glued(command, start, end):
     """Whether `command[start:end]` touches other characters of its own word.
 
@@ -605,18 +632,15 @@ def without_substitutions(command):
             index = close + 1
             continue
         if char == "$" and command[index + 1:index + 2] not in ("'", '"'):
-            end = None
-            if command.startswith("${", index):
-                close = _closing_brace(command, index + 2)
-                if close is not None:
-                    end = close + 1
-            else:
-                scan = index + 1
-                while scan < len(command) and (command[scan].isalnum()
-                                               or command[scan] == "_"):
-                    scan += 1
-                if scan > index + 1:
-                    end = scan
+            end = expansion_end(command, index)
+            if end is None and command.startswith("${", index):
+                # **An unbalanced `${` must END the scan, the way `$(` and a
+                # backtick already do.** Advancing one character and rescanning
+                # from the next `${` is quadratic: `"${" * 20000` took the hook
+                # past its 60-second timeout, and a hook that produces no
+                # output in time is non-blocking — fail-open by exhaustion
+                # rather than by misreading. Found by an adversarial audit.
+                break
             if end is not None and glued(command, index, end):
                 index = end
                 continue
@@ -627,6 +651,105 @@ def without_substitutions(command):
         out.append(char)
         index += 1
     return "".join(out) + command[index:] if index < len(command) else "".join(out)
+
+
+def rewriting_expansions(command, replace):
+    """`command` with each parameter expansion put through `replace`.
+
+    `replace(text)` is given the expansion as written and returns what to put
+    in its place, or None to leave it alone. Single-quoted regions are left
+    untouched, because a `$` is literal there.
+    """
+    out, index = [], 0
+    in_single = in_double = False
+    while index < len(command):
+        char = command[index]
+        if in_single:
+            if char == "'":
+                in_single = False
+            out.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(command):
+            out.append(char)
+            out.append(command[index + 1])
+            index += 2
+            continue
+        if char == "$" and command[index + 1:index + 2] not in ("'", '"'):
+            end = expansion_end(command, index)
+            if end is None and command.startswith("${", index):
+                break
+            if end is not None:
+                written = replace(command[index:end])
+                out.append(command[index:end] if written is None else written)
+                index = end
+                continue
+        if char == "'" and not in_double:
+            in_single = True
+        elif char == '"':
+            in_double = not in_double
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def splitting_expansions(command):
+    """`command` with every parameter expansion read as WHITESPACE.
+
+    **An expansion can split one word into several, and nothing here modelled
+    that.** The whole expansion model was "an empty one joins its neighbours";
+    the converse is `${IFS}`, which holds a space by default, so
+    `git push${IFS}origin +HEAD:main` is the entire force push written as one
+    `shlex` token. Found by an adversarial audit; live on `main`.
+
+    Read beside the other readings rather than instead of them: an expansion is
+    empty, or whitespace, or its own default text, and the command is only safe
+    if it is safe under all of them.
+    """
+    return rewriting_expansions(command, lambda _text: " ")
+
+
+# `${name:-word}` and its family. The operator decides when the default is
+# used; every one of them can put `word` on the command line.
+DEFAULTED = re.compile(r"^\$\{[^{}:=?+-]*(?::?[-=?+])(?P<word>.*)\}$", re.DOTALL)
+
+
+def defaulted_expansions(command):
+    """`command` with every `${name:-word}` read as its `word`.
+
+    **This is not the residual the documentation already names.** That one is a
+    value assembled at run time — `F=--output=x; git log $F` — which no hook is
+    given. Here the dangerous text is literally in the source and an unset
+    variable is the default state of the shell, so `git ${x:-push} origin
+    +HEAD:main` is a force push written in plain sight. Found by an adversarial
+    audit; live on `main`.
+    """
+    def written(text):
+        match = DEFAULTED.match(text)
+        return None if match is None else match.group("word")
+
+    return rewriting_expansions(command, written)
+
+
+# A brace expansion that yields exactly one word is pure obfuscation of the
+# text inside it, and `{`/`}` are in neither `METACHARACTERS` nor
+# `PUNCTUATION`, so `p{u..u}sh` survived as one opaque token.
+BRACE = re.compile(r"\{(?P<from>[^{}.,\s]+)(?:\.\.(?P<to>[^{}.,\s]+)|,(?P<rest>[^{}]*))\}")
+
+
+def brace_expanded(command):
+    """`command` with each brace expansion read as its first alternative.
+
+    A single-element range — `p{u..u}sh` — is exactly `push` to bash, and a
+    list takes its first word, which is the reading that hides a literal.
+    Found by an adversarial audit; live on `main`.
+    """
+    def written(match):
+        if match.group("to") is not None:
+            return match.group("from") if match.group("to") == match.group("from") else match.group(0)
+        return match.group("from")
+
+    return BRACE.sub(written, command)
 
 
 def dollar_quotes(command):
@@ -764,7 +887,19 @@ def decode_ansi_c(body):
         if escape == "c":
             if index + 2 >= len(body):
                 return None
-            out.append(chr(ord(body[index + 2].upper()) ^ 0x40))
+            # **`str.upper()` is not length-preserving in Unicode, and `ord`
+            # raises on what it returns.** `ß` upper-cases to `SS`, and
+            # `$'\cß'` took the hook down with a `TypeError` — exit 1, empty
+            # stdout, which `PreToolUse` treats as non-blocking, so the command
+            # ran. `ﬁ`, `ŉ`, `ǰ`, `ΐ`, `ẖ` and `ẚ` do the same. Found by an
+            # adversarial audit; a regression against `main`, introduced with
+            # the decoder, and the second crash this file has had from
+            # assuming a character-wise operation stays one character.
+            control = body[index + 2]
+            folded = control.upper()
+            if len(folded) != 1:
+                return None
+            out.append(chr(ord(folded) ^ 0x40))
             index += 3
             continue
         return None
@@ -1787,11 +1922,25 @@ def offence(command, depth=0):
     # substitution join, so `git $( )push origin +HEAD:main` is a push — and
     # the tokeniser saw `(` and `)` as run boundaries instead. Both readings
     # have to be safe, and only one of them is the string that was typed.
-    skeleton = without_substitutions(command)
-    if skeleton != command:
-        refusal = offence(skeleton, depth + 1)
-        if refusal is not None:
-            return f"with a command substitution taken as empty: {refusal}"
+    # **An expansion has more than one reading, and the command is safe only if
+    # it is safe under all of them.** Empty joins the words around it,
+    # whitespace splits one into several, a default puts its own text on the
+    # line, and a single-element brace range is the text inside it. Each is
+    # what bash does in the shell these commands run in — no positional
+    # parameters, no variables set — so none of these is the run-time residual
+    # `docs/harness-boundaries.md` names; the dangerous string is in the source
+    # in every case.
+    for description, reading in (
+        ("a command substitution taken as empty", without_substitutions),
+        ("an expansion taken as whitespace", splitting_expansions),
+        ("an expansion taken as its default", defaulted_expansions),
+        ("a brace expansion taken as one word", brace_expanded),
+    ):
+        variant = reading(command)
+        if variant != command:
+            refusal = offence(variant, depth + 1)
+            if refusal is not None:
+                return f"with {description}: {refusal}"
 
     for text, quotes in expandable_regions(command):
         # **The continuation join has to happen before anything looks for a

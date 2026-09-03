@@ -5197,17 +5197,24 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted(
             'sh -c "$(echo \'git push origin +HEAD:main\')"')
 
-        # **And the direction that residual fails in depends on where the
-        # unresolved word lands**, which the paragraph in
-        # `docs/harness-boundaries.md` claimed uniformly and wrongly until this
-        # was measured. A computed descriptor mid-command costs a positional
-        # and refuses; the same one in front of the subcommand is admitted,
-        # because `push_offence` stops at the first non-flag it does not
-        # recognise. Both are written here so the claim and the code cannot
-        # drift apart — if the second starts being refused, that paragraph is
-        # what needs rewriting.
+        # **Both of these refuse now, and the second one used to be the
+        # example of the residual.** It was admitted because `push_offence`
+        # stops at the first non-flag it does not recognise, and the paragraph
+        # in `docs/harness-boundaries.md` said so. Then the guard grew a
+        # reading where an expansion is WHITESPACE — `${IFS}` — and under that
+        # reading `${N}` splits the word, leaving `git >&1 push origin
+        # +HEAD:main` for the strip to resolve into the push it is.
+        #
+        # This pair is kept as the pin it was built to be: it fired the moment
+        # the residual narrowed, which is exactly what it was written for, and
+        # the paragraph moved in the same change rather than a release later.
         self.assertRefused("git push origin ${N}>&1 main")
-        self.assertAdmitted("git ${N}>&1 push origin +HEAD:main")
+        self.assertRefused("git ${N}>&1 push origin +HEAD:main")
+
+        # What actually remains is the run-time half, which no reading here can
+        # reach: a value the shell is TOLD at run time rather than one written
+        # in the source.
+        self.assertAdmitted("N=2; git log -${N}")
 
     def test_a_redirection_is_not_an_argument_to_the_program(self):
         # **#183, and the file descriptor is the whole of it.**
@@ -5726,6 +5733,81 @@ class TheGitArgvGuard(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.judge(command)
+
+    def test_an_expansion_has_more_than_one_reading(self):
+        # **The whole expansion model was "an empty one joins its
+        # neighbours", and bash has three more.** Each of these is what the
+        # shell these commands run in actually does — no positional
+        # parameters, no variables set — so none is the run-time residual
+        # `docs/harness-boundaries.md` names: the dangerous string is in the
+        # source every time. All found by an adversarial audit, all live on
+        # `main`.
+        #
+        # The special parameters are expansions the bare-name scan could not
+        # see, because it accepted only `[A-Za-z0-9_]`.
+        for command in (
+            "git $@push origin +HEAD:main",
+            "git $*push origin +HEAD:main",
+            "git $!push origin +HEAD:main",
+            'git p"$@"ush origin +HEAD:main',
+            "$@git push origin +HEAD:main",
+            "git log --out$@put=/tmp/probe",
+            "git fetch ext$@::sh -c id",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # An expansion can SPLIT one word into several — `${IFS}` holds a
+        # space — which is the converse of the reading that was there.
+        self.assertRefused("git push${IFS}origin +HEAD:main")
+        self.assertRefused("git${IFS}push${IFS}origin${IFS}+HEAD:main")
+
+        # And it can supply its own default text, in plain sight.
+        for command in (
+            "git ${x:-push} origin +HEAD:main",
+            "git ${x-push} ${y-origin} ${z-+HEAD:main}",
+            "git ${x:=push} origin +HEAD:main",
+            "git log ${x:---output=/tmp/probe}",
+            "git log --${x:-output}=/tmp/probe",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # A single-element brace range is pure obfuscation: `{`/`}` are in
+        # neither METACHARACTERS nor PUNCTUATION, so `p{u..u}sh` survived as
+        # one opaque token past every check.
+        self.assertRefused("git p{u..u}sh origin +HEAD:main")
+        self.assertRefused("git {p..p}ush origin +HEAD:main")
+        self.assertRefused("git log --out{p..p}ut=/tmp/probe")
+
+        # The controls that decide whether the readings are worth their cost:
+        # ordinary traffic passes every one of them.
+        for command in (
+            'git commit -m "$MSG"',
+            'git tag -a v"$V" -m "rel $V"',
+            'git log --author="$USER"',
+            "git checkout $BRANCH",
+            "git log --format=$(cat /tmp/fmt) -5",
+            "git commit -F - <<'EOF'\nUse ${x} and $(y)\nEOF",
+        ):
+            with self.subTest(command=command):
+                self.assertAdmitted(command)
+
+    def test_an_unbalanced_brace_ends_the_scan(self):
+        # **A hook that runs out of time is non-blocking, which is fail-open by
+        # exhaustion rather than by misreading.** The `${` branch advanced one
+        # character and rescanned to the end of the string from the next `${`,
+        # which is quadratic: `"${" * 20000` took the hook past its 60-second
+        # timeout and produced no verdict at all. `$(` and the backtick already
+        # ended the scan on a missing closer; this now does too. Found by an
+        # adversarial audit.
+        #
+        # Asserted as a verdict rather than as a duration, because a timing
+        # assertion on CI is a flake — `judge` fails the test if the hook exits
+        # non-zero, and the case cannot return at all if the scan is quadratic.
+        self.judge("${" * 20000)
+        self.judge('git commit -m "' + "${" * 5000)
+        self.assertRefused("${" * 500 + "; git push origin +HEAD:main")
 
     def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
         # The boundary of the exemption, and it is bash's own rule: digits are

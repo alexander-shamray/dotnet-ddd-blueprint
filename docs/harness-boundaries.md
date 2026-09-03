@@ -630,18 +630,27 @@ no rule is consulted for. The deny stays as defence in depth and the three read
 grants stay with it, because removing them still buys nothing against a
 built-in. What survives as residual is one line rather than a grant: a flag the
 shell *computes* — `F=--output=x; git log $F` — is not visible to a hook that
-resolves quoting but not expansion. **#183's redirection strip inherits that
-same bound and adds none**, and the direction it fails in depends on where the
-unresolved word lands. `git push origin ${N}>&1 main` costs a positional and
-refuses; `git ${N}>&1 push origin +HEAD:main` is **admitted**, because the word
-sits where the subcommand goes and `push_offence` stops at the first non-flag
-it does not recognise. Both measured. That is the expansion residual above
-rather than a second one — the strip reads `2>&1` and `{fd}>&1`, which are
-syntax, and cannot read a word the shell has yet to build — and an earlier
-revision of this paragraph claimed every unresolved shape fails closed, which
-the second command disproves. **A guard's stated failure direction is a claim
-to measure in both positions**, not one to reason to from the case in front of
-you.
+resolves quoting but not expansion. **#183's redirection strip inherits that same
+bound**, and the residual is now narrower than the sentence above implies. An
+expansion written in the source is read four ways — empty, whitespace, its own
+default, and a single-element brace range — because each is what bash does in a
+shell with nothing set, and a command is admitted only if it is safe under all
+of them. So `git ${x:-push} origin +HEAD:main`, `git push${IFS}origin
++HEAD:main`, `git $@push …` and `git p{u..u}sh …` are refused, and so is
+`git ${N}>&1 push origin +HEAD:main`, which an earlier revision of this
+paragraph named as the admitted case.
+
+**What survives is the run-time half alone**: a value the shell is *told*
+rather than one written where the guard can read it — `F=--output=x; git log
+$F`, or `N=2; git log -${N}`. Closing that needs the argv after expansion,
+which no hook is given.
+
+**Each of those readings was found by measurement, not by reasoning**, and the
+paragraph that stood here reasoned. It claimed every unresolved shape fails
+closed; the second command disproved that, and then four more readings
+disproved the narrower claim that replaced it. **A guard's stated failure
+direction is a claim to measure in every position**, not one to derive from the
+case in front of you.
 
 **A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because
