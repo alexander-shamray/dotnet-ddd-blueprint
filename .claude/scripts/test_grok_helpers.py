@@ -3343,9 +3343,14 @@ class CommandsEnforceTheEditingBoundariesTheyState(unittest.TestCase):
         # premise that no such link is tracked and that an invocation whose
         # only writers are `Write` and `Edit` cannot add one; this case is what
         # makes the first half a gate on every push rather than a sentence
-        # about one checkout. The edit-time guard that would close a branch
-        # adding one is a hook behind the self-lock, filed rather than folded
-        # (review round ten).
+        # about one checkout. **It is defence in depth now rather than the
+        # closure**: #181 put the check at edit time —
+        # `.claude/hooks/guard-edit-target.py`, whose own suite is
+        # `test_edit_target_guard.py` — because this case is a statement about
+        # `main` and the exposure was always the branch under review. Keeping
+        # it costs nothing and the two fail in different directions: this one
+        # goes red when a link is committed, the guard when one is written
+        # through.
         out = subprocess.run(
             [GIT, "ls-files", "-s"], cwd=str(SCRIPTS.parent.parent),
             capture_output=True, text=True,
@@ -5168,7 +5173,9 @@ class TheGitArgvGuard(unittest.TestCase):
         # It grants nothing, but it RUNS on every Bash call, so a session able
         # to rewrite it could delete its own guard and then act. `CLAUDE.md`
         # excluded `.claude/hooks/**` from the deny list on the stated grounds
-        # that no hook was configured; one is now.
+        # that no hook was configured; two are now, and the second runs on
+        # every write rather than every Bash call — so this directory is the
+        # control surface for both halves of what a session can do.
         deny = json.loads(SETTINGS.read_text(encoding="utf-8"))["permissions"]["deny"]
         for prefix in ("", "./"):
             with self.subTest(prefix=prefix):

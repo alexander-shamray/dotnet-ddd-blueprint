@@ -113,15 +113,20 @@ pointer becomes a third copy of it.
    test below is applied to that spelling — `docs/../.github/x` is not a
    `docs/` path that happens to resolve elsewhere, it is malformed. A link
    inside the repository could still point out of it, and an edit through
-   one lands wherever it points; that is closed by a gated premise rather
-   than a check here, since a check would need a shell. **This repository
-   tracks no symbolic link** — the helper suite fails on any mode `120000`
-   in `git ls-files -s`, on every push — and this invocation cannot create
-   one, because `Write` and `Edit` make regular files and `Bash` is denied.
-   **What that leaves is the branch under review itself**: a branch that
-   adds a tracked link is red in CI, but this command runs over it locally
-   before CI does, and the edit-time guard that would refuse a link's real
-   target is a hook behind the self-lock — #181, filed rather than folded.
+   one lands wherever it points; that is closed at edit time rather than
+   here, since a check here would need a shell.
+   `.claude/hooks/guard-edit-target.py` resolves the target of every `Edit`
+   and `Write` and refuses one that does not land where its path spells, so
+   a link into a denied tree — or out of the checkout altogether — is
+   refused by the harness rather than by this paragraph (#181).
+   **The premise it replaced is still true and still gated**: this
+   repository tracks no symbolic link, the helper suite fails on any mode
+   `120000` in `git ls-files -s` on every push, and this invocation cannot
+   create one because `Write` and `Edit` make regular files and `Bash` is
+   denied. What that premise never covered is **the branch under review
+   itself** — the branch is what introduces files, and this command runs
+   over it locally before CI has said anything about it. The guard is what
+   covers it; the premise stays beside it as defence in depth.
    Blocks sharing a `finding` number are one finding at several sites, and
    they must agree on every field but `site` and `was`; a set that does not
    is dropped whole. The final block is the other schema — one

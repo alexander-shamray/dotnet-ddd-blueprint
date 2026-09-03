@@ -725,13 +725,50 @@ it. The size check moved into the adjudicator, which has no `Bash` and
 returns `oversized-review`; the link check became a gated premise — the
 helper suite fails on any tracked mode `120000`, so `main` carries no
 symbolic link on any push, and an invocation without `Bash` cannot add one.
-**The premise is `main`'s and not the reviewed branch's, and that is a
-residual with a number**: the branch is what introduces files, the command
-runs over it locally before CI goes red on it, and the edit-time guard that
-would canonicalise a target and refuse a link is a hook behind the
-self-lock (#181). The bare tool name is the documented form of a
+**The premise was `main`'s and not the reviewed branch's, and #181 closed
+the difference**: the branch is what introduces files, the command runs over
+it locally before CI goes red on it, so a statement about what `main` tracks
+was never a statement about what this command is about to edit.
+`.claude/hooks/guard-edit-target.py` is the check that premise stood in for
+— the second hook in this repository, and the argument for it is one
+sentence: **an edit target must be the file its path spells.** It resolves
+the target of every `Edit`, `Write` and `NotebookEdit`, re-anchors it on the
+resolved checkout root, and refuses the call when the two disagree — into a
+denied tree, or out of the checkout. The premise stays as defence in depth
+and its gate stays green. The bare tool name is the documented form of a
 `disallowed-tools` entry; the pattern form is the one the fifth entry
 measured.
+
+**That guard holds no copy of any deny list, and refusing to write one is
+the whole of why it is safe to run on every write this repository makes.**
+A path deny is *correct* when the spelling is true of the file, so the hook
+judges only the disagreement and leaves every list — `.claude/settings.json`'s
+and both commands' frontmatter — to say what may be edited. Nothing here goes
+stale as those change, and the PR that lifts a deny to edit a helper is not
+refused by the guard on its way past. A test pins that control: a denied tree
+spelled as itself is **admitted** here.
+
+**Two properties of the resolution are load-bearing and were each found by
+running it rather than by reasoning about it.** The anchor is resolved as
+well as the target, because a checkout reached through a link — `/tmp` on
+macOS, an 8.3 or `subst` path on Windows — would otherwise make every edit
+under it look like the thing the guard refuses; and the comparison is
+case-insensitive where the platform is, because Windows' `realpath` answers
+with the on-disk case and `DOCS/x` is not a link. The two platforms also
+disagree about `..` after a link — POSIX resolves it against the link's
+target, Windows collapses it before the filesystem sees it — and the guard
+follows each rather than picking one, measured both ways in
+`.claude/scripts/test_edit_target_guard.py`.
+
+**Its residual is the half the harness itself needs, stated rather than
+rounded up.** The subject is a target spelled *inside* a checkout the session
+is standing in; a path spelled entirely outside one is not judged, because
+the session's memory and scratch state are written that way by absolute path
+and refusing them would take both with it. Nothing in the exposure this
+closes can spell one — a review row is one plain repository-relative path and
+the adjudicator drops a row that is not — so what is owed is a rule about
+which out-of-tree paths are legitimate, which is a different argument from
+this one. The residual is a passing test, not a paragraph alone.
 **The sweeps' item 5 (#75) closed by the same shape** — a second read-only
 dispatch returns a verdict, the parent opens nothing in `$work`, and
 `gh-issue-create.sh` leaves `gh issue create` with no free parameter — so

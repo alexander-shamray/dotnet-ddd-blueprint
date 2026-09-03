@@ -91,6 +91,16 @@ own line rather than sending a reader to a file that does not hold it.
 - **A premise about who calls a method is falsified by the next PR that calls
   it.** Both `EfUnitOfWork`'s tracker and the `No_client_secret_is_committed`
   rule were correct until a second caller existed.
+- **A premise is a statement about one revision; the operation runs over
+  another.** `/review-grok`'s defence against an edit through a symbolic link
+  was a gate on `main` — the helper suite fails on any tracked mode `120000`,
+  on every push — while the command it protected reads the *branch* under
+  review, locally, before CI has said anything about it. Both halves of the
+  premise were true and neither covered the exposure, because a branch is what
+  introduces files. When a control reads "this repository never contains X",
+  ask which revision that is true of and which one the operation opens; where
+  the two differ, the premise is defence in depth and the check is still owed
+  (#181).
 - **"A test that would pass" is a claim about a run nobody performed.** Measure
   the counterfactual — three such claims in one PR were all the opposite of
   what happens. **And a counterfactual that does not rebuild is the same

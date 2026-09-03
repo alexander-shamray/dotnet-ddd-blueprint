@@ -142,7 +142,15 @@ path-scope `Edit` away from every tracked tree while each keeps its own subject
 editable; **#30** and **#23**, the argv guard — the `--output` write primitive
 in every spelling including the quoted one, `ext::`, command substitution, and
 a push allow-list that refuses anything but one remote, one refspec naming a
-destination, and options from a fixed set; **#150**, that what suppresses a
+destination, and options from a fixed set; **#181**, the edit-target guard —
+that a link inside an allowed tree is refused whatever it points at, that a
+denied tree spelled as *itself* is admitted here rather than judged twice, and
+that a checkout reached through a link is not refused wholesale, with its cases
+in `test_edit_target_guard.py` beside the others and picked up by the same
+`discover`; it is the one suite that needs a real link on disk, and takes a
+symbolic one where the platform grants it and a junction where Windows does
+not — never a skip, which would report a pass for a property it never tested;
+**#150**, that what suppresses a
 sweep finding is decided by a helper rather than by a reader; **#75**
 again, that the issue helper leaves `gh issue create` no free parameter and
 that the conversion exclusion reaches its own child rather than only its
