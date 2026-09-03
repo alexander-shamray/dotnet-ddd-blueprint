@@ -474,6 +474,55 @@ def redirection_spans(command):
     def plain(position):
         return position < len(command) and ordinary[position]
 
+    def word_end(position):
+        """The end of the redirect target WORD beginning at `position`.
+
+        **A substitution is part of the word, and stopping at its `(` was a
+        fail-open.** A word ends at an unquoted metacharacter — but the `(` of
+        `$(…)` is not one to bash, it opens a nested command list. Stopping
+        there left the parentheses standing, `is_boundary` read them as run
+        boundaries, and `git >/tmp/$(echo x) push origin +HEAD:main` had its
+        `git` severed from its own subcommand: the force push ran and the guard
+        admitted it. Raised in review; verified allowed, with `$((…))`, a bare
+        `$(…)` target and a backtick spelling beside it.
+
+        An UNBALANCED opener stops the word instead of swallowing the rest of
+        the line, because consuming to the end would hide whatever followed —
+        the same fail-open one layer along.
+
+        **And a word may not BEGIN with `(`, which is the difference between a
+        substitution inside a target and a process substitution being one.**
+        `echo <(git push origin +HEAD:main)` is not a redirect with `(…)` for a
+        target: `<(` is one construct, the inner command runs, and consuming it
+        as a word deleted that push from the judged string outright. Caught by
+        `test_a_process_substitution_is_not_the_printers_argument`, which is
+        why it exists — the same reading applies to `> >(tee f)`, whose target
+        is a process substitution that also runs. Left alone, the parentheses
+        stay the run boundaries they already were and the inner command is
+        judged in its own right.
+        """
+        first = position
+        while position < len(command):
+            char = command[position]
+            if ordinary[position] and char == "`":
+                close = command.find("`", position + 1)
+                if close == -1:
+                    return position
+                position = close + 1
+                continue
+            if ordinary[position] and char == "(":
+                if position == first:
+                    return position
+                close = _closing_paren(command, position + 1)
+                if close is None:
+                    return position
+                position = close + 1
+                continue
+            if ordinary[position] and char in METACHARACTERS:
+                return position
+            position += 1
+        return position
+
     spans, index = [], 0
     while index < len(command):
         if not ordinary[index]:
@@ -517,9 +566,7 @@ def redirection_spans(command):
             end = digits + 3
             while plain(end) and command[end] in " \t":
                 end += 1
-            while end < len(command) and not (
-                    ordinary[end] and command[end] in METACHARACTERS):
-                end += 1
+            end = word_end(end)
             spans.append((start, end))
             index = end
             continue
@@ -561,9 +608,7 @@ def redirection_spans(command):
         end = digits + len(operator)
         while plain(end) and command[end] in " \t":
             end += 1
-        while end < len(command) and not (
-                ordinary[end] and command[end] in METACHARACTERS):
-            end += 1
+        end = word_end(end)
         spans.append((start, end))
         index = end
     return spans

@@ -1856,6 +1856,17 @@ class IssueHelperHasNoFreeParameter(unittest.TestCase):
         # `documentation` is a real label on this tracker and is refused on
         # purpose: neither sweep files one, so the helper's vocabulary is the
         # sweeps' and not the tracker's.
+        #
+        # **The `hand` route does not change that, and review asked whether it
+        # should.** `CLAUDE.md` says in the same sentence that names three
+        # kinds that the vocabulary is wider than the helper, because
+        # `gh-label-ensure.sh` creates six labels and `documentation` is one of
+        # GitHub's own defaults that this repository must not re-create.
+        # Admitting it here would mean widening that helper for a label it is
+        # deliberately not the owner of, and nothing denies a session's raw
+        # `gh issue create` — measured, there is no `gh` rule in
+        # `.claude/settings.json` at all — so a documentation issue is filed
+        # the way the eleven carrying that label already were.
         for kind in ("documentation", "Security", "security --force", "-R other/repo", ""):
             with self.subTest(kind=kind):
                 self.assert_refused_before_gh(self.run_helper(kind, "high", "sweep", body=self.STDIN))
@@ -5254,6 +5265,38 @@ class TheGitArgvGuard(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertRefused(command)
+
+    def test_a_substitution_is_part_of_the_target_word(self):
+        # **A word ends at a metacharacter, and the `(` of `$(…)` is not one to
+        # bash.** Stopping the target there left the parentheses standing,
+        # `is_boundary` read them as run boundaries, and
+        # `git >/tmp/$(echo x) push origin +HEAD:main` had its `git` severed
+        # from its own subcommand — the force push ran and the guard admitted
+        # it. Raised in review on the change that closed the descriptor half;
+        # all four verified allowed before the fix.
+        for command in (
+            "git >/tmp/$(echo x) push origin +HEAD:main",
+            "git >/tmp/$(echo x) log --output=/tmp/probe",
+            "git 2>/tmp/$((1+1)) push origin +HEAD:main",
+            "git >$(echo /tmp/x) push origin --mirror",
+            "git >/tmp/`echo x` push origin +HEAD:main",
+            "git <<<$(echo x) push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # A substitution swallowed into the span is still judged, because the
+        # recursion over `expandable_regions` runs on the raw command before
+        # anything is stripped. Without this the fix would trade one hole for
+        # another.
+        self.assertRefused("git log >/tmp/$(git push origin +HEAD:main)")
+        self.assertRefused("git log >/tmp/`git push origin +HEAD:main`")
+
+        # And an UNBALANCED opener stops the word rather than swallowing the
+        # rest of the line, which would hide whatever followed it.
+        self.assertRefused("git log >/tmp/$( ; git push origin +HEAD:main")
+        self.assertAdmitted("git log >/tmp/x")
+        self.assertAdmitted("git log >(cat) -1")
 
     def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
         # The boundary of the exemption, and it is bash's own rule: digits are

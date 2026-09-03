@@ -59,11 +59,30 @@
 # be the SAME line for everybody. What stood here was one sentence asserting
 # provenance — that a sweep filed the issue, and that a second read-only
 # auditor confirmed it before filing — required of every body this helper
-# takes. The helper is the only sanctioned route, both sweeps deny raw
-# `gh issue create` by name, and `CLAUDE.md` sends every route through here, so
-# an issue filed by hand out of a review triage or a measurement taken mid-PR
-# was made to claim a provenance it did not have. Measured: #183 was filed that
-# way and carried the sentence until it was edited afterwards.
+# takes. Both sweeps deny raw `gh issue create` by name, so for them this is
+# the only route, and an issue filed by hand out of a review triage or a
+# measurement taken mid-PR was made to claim a provenance it did not have the
+# moment it came through here. Measured: #183 was filed that way and carried
+# the sentence until it was edited afterwards.
+#
+# THE HELPER IS THE SWEEPS' ONLY ROUTE, NOT THE ONLY ROUTE THERE IS, and the
+# distinction decides what the `hand` spelling is for. Nothing denies a
+# session's raw `gh issue create` — measured, `.claude/settings.json` carries
+# no `gh` rule of any kind — so `hand` is what a filer gets by CHOOSING this
+# helper: label creation, the resolved repository, the MSYS title fix and the
+# truncation detector. It is not a claim that hand filings must come through
+# here.
+#
+# That is also the answer to `documentation`, which the kind case below
+# refuses. `CLAUDE.md` names three kinds and says in the same breath that
+# **the vocabulary is wider than the helper** — `gh-label-ensure.sh` creates
+# six labels and `documentation` is not among them, because it is one of
+# GitHub's own defaults and was already in use. A documentation issue is
+# therefore filed the way the eleven that carry that label already were, and
+# widening this vocabulary would mean widening the label helper's six for a
+# label it must not create. Raised in review on the pull request that added
+# the `hand` route, on the reading that this helper had become the only hand
+# route; the sentence that said so was this file's, and it is corrected above.
 #
 # A claim every issue makes is a claim that distinguishes nothing, which is the
 # one thing this sentence was for: a sweep's issue says the finding was
