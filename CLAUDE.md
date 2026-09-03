@@ -131,6 +131,8 @@ docs/harness-boundaries.md   what the harness grants these commands, and refuses
 docs/repo-map.md             what every entry below is, and why
 docs/style-guide.md          the prose, C# and SQL dialect
 docs/testing.md              how to run every suite and every gate
+docs/change-locality.md      the contract: classes, touch sets and mutexes
+docs/change-locality-plan.md the PRs that make the contract fully true
 docs/secrets.md              how a secret reaches a pod, and how each is rotated
 docs/runbooks/               NOT one per alert — the one sharer is declared
 docs/superpowers/            one frozen spec + plan per PR, written before it
@@ -636,16 +638,22 @@ the flake, where the assembly-wide attribute leaves nothing to forget.
 
 ## The one rule that matters
 
-**The blueprint must not contradict itself.** It is ~24,600 lines that describe
-one coherent system; the failure mode is a statement in §9 that quietly
-disagrees with §6, or an appendix that lists a package no chapter uses. Most of
-the work done in this repo has been finding and closing those gaps.
+**The blueprint must not contradict itself, and the way that is kept true has
+changed.** It used to be kept by touring the corpus: change a load-bearing
+claim — a timeout, a retry count, a type name, an endpoint path — and grep
+the whole blueprint for every other mention of it, reconciling them all in the
+same change. That made every small fix a multi-file edit, and it put two
+agents in the same file whenever they touched the same fact.
 
-So: when you change any load-bearing claim — a timeout, a retry count, a type
-name, a registration order, an endpoint path, a package version — **grep the
-whole blueprint for every other mention of it** and reconcile them all in the
-same change. Fixing one site and leaving three is worse than not touching it,
-because it converts a consistent error into an inconsistent one.
+[`docs/change-locality.md`](docs/change-locality.md) is the operating contract
+now, and an agent reads it before editing. Its rule is that **every fact has
+exactly one owner and every other mention cites the owner** — by symbol,
+section or ADR, never by value — so a change to a fact is one edit plus a
+search for the symbol. It names the change classes, the touch set each may
+edit, the surfaces that are still repo-wide mutexes, and what to do with a
+stale restatement met in passing: leave it, because removing restatements is
+[the plan](docs/change-locality-plan.md)'s job, one chapter per PR. What it
+withdraws is the tour. Nothing else in this file is waived, and its §6 says so.
 
 **Once code lands, this rule spans both.** The blueprint and the solution are
 one artefact with two representations, and they drift the moment someone changes
@@ -656,9 +664,11 @@ a retry count in `Program.cs` and nowhere else. From then on:
   never leave the disagreement for later.
 - A blueprint change that the code already implements differently is a bug
   report against one of them. Say which, and say why.
-- `appendix-d-type-inventory.md` and `appendix-b-licences.md` are the two that
-  rot fastest: a type renamed in code or a package added to
-  `Directory.Packages.props` has to reach the appendix in the same change.
+- `appendix-b-licences.md` is load-bearing because the licence gate reads it:
+  a package added to `Directory.Packages.props` reaches it in the same change,
+  which is the contract's Class E. `appendix-d-type-inventory.md` is not
+  edited by a code change any more — it is a restatement of the code, and
+  the plan retires it as a write surface rather than keeping it current.
 - Where the blueprint is genuinely wrong, fix the blueprint. It is a
   specification, not a historical record — but ADRs are the exception and are
   superseded, never rewritten.
@@ -674,7 +684,8 @@ a retry count in `Program.cs` and nowhere else. From then on:
   states in full, which is that shape charged for on purpose rather than
   arrived at by accident.
 
-Run `/validate-blueprint` after any substantive edit.
+Run `/validate-blueprint` after a Class C change or any chapter edit, and
+not after a Class A change.
 
 ## Style
 

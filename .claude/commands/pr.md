@@ -77,6 +77,26 @@ Wrapped at 80 columns, British spelling, no emoji. Structure:
    established shape for metadata.
 5. The `🤖 Generated with [Claude Code]` footer and session link.
 
+### The class and the touch set
+
+The metadata table opens with two rows, and they are the first thing written
+— before the first edit, per `docs/change-locality.md` — and copied here
+unchanged:
+
+```markdown
+| | |
+|---|---|
+| Class | A |
+| Touch set | `src/Services/Ordering/**`, `tests/Ordering.*` |
+```
+
+`Class` is one letter from that file's table: A local, B shared mechanism,
+C a rule moved, D docs or harness, E the dependency graph. `Touch set` is the
+paths that class allows and this branch actually edited, as globs or files on
+one line. A file in the diff outside the set is a finding for
+`/review-branch`, and the answer is a narrower diff or a different class —
+never a wider row written after the fact.
+
 ### What the branch closes
 
 **A closing keyword inside a table cell links nothing.** The metadata row —

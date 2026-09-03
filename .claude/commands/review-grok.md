@@ -96,8 +96,12 @@ pointer becomes a third copy of it.
 
 1. **Dispatch.** Spawn **one**
    `review-adjudicator` with two absolute paths — the review and the
-   repository root — and the pointer to `docs/style-guide.md`'s settled
-   choices. It enumerates, locates every site, adjudicates against the
+   repository root — and two pointers: `docs/style-guide.md`'s settled
+   choices, and `docs/change-locality.md` §2. The second is what makes a
+   finding that asks for a restated count, a "since PR-NN" sentence, or a
+   value quoted a second time where the owner site is already correct a
+   `reject-rule` naming that section rather than an `accept` that widens the
+   diff. It enumerates, locates every site, adjudicates against the
    blueprint and returns the record; this step does none of that itself.
    **Spawn nothing else**: the frontmatter denies every other registered type
    by name, because the harness has no "only this type" allow, and a new

@@ -203,17 +203,20 @@ So for each finding, before changing anything:
 - **Check the claim, not the confidence.** If it asserts how a tool or library
   behaves, verify that behaviour before agreeing. A bot's certainty is not
   evidence.
-- **Grep the corpus.** If the finding is real, it is usually real in more than
-  one place; the fix is every site, in one pass (`CLAUDE.md`, *the one rule
-  that matters*).
+- **Search for the symbol, inside the touch set.** If the finding is real it
+  is real at the owner site; fix it there and at the sites the PR body's
+  `| Touch set |` row covers. A comment asking for a restated count, a
+  "since PR-NN" sentence, or a value quoted a second time where the owner
+  site is already correct is asking for the tour `docs/change-locality.md`
+  §2 withdraws — reject it, citing that section.
 
 ## Classify each finding
 
 | | |
 |---|---|
-| **Accept** | Real defect. Fix every site, not just the flagged one. |
-| **Accept, wider** | Real, and the same shape exists elsewhere. Say how many. |
-| **Reject — house rule** | Contradicts a settled choice. Name the rule. |
+| **Accept** | Real defect. Fix it at the owner site and every site inside the touch set. |
+| **Accept, wider** | Real, and the same shape exists elsewhere inside the touch set. Say how many; outside it, file an issue rather than widening the diff. |
+| **Reject — house rule** | Contradicts a settled choice, or asks for a restatement `docs/change-locality.md` §2 forbids. Name the rule. |
 | **Reject — wrong** | The claim does not hold. Say what you checked. |
 | **Ask** | Genuine design ambiguity. Surface it; do not pick silently. |
 

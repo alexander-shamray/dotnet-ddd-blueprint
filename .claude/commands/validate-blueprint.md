@@ -2,7 +2,7 @@
 description: Multi-pass self-consistency audit of the blueprint, its roadmap and docs/testing.md, and of the code against them
 argument-hint: "[chapter file or topic to focus on — omit for a full sweep]"
 allowed-tools: Read, Grep, Glob, Edit, Bash(git diff:*), Bash(git log:*), Bash(wc:*), Bash(ls:*)
-disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(docs/superpowers/**), Edit(./docs/superpowers/**), Edit(docs/runbooks/**), Edit(./docs/runbooks/**), Edit(docs/pr-decision-log.md), Edit(./docs/pr-decision-log.md), Edit(docs/secrets.md), Edit(./docs/secrets.md), Edit(docs/lessons.md), Edit(./docs/lessons.md), Edit(docs/harness-boundaries.md), Edit(./docs/harness-boundaries.md), Edit(docs/repo-map.md), Edit(./docs/repo-map.md), Edit(docs/style-guide.md), Edit(./docs/style-guide.md), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
+disallowed-tools: Edit(.git/**), Edit(./.git/**), Edit(.git), Edit(./.git), Edit(docs/superpowers/**), Edit(./docs/superpowers/**), Edit(docs/runbooks/**), Edit(./docs/runbooks/**), Edit(docs/pr-decision-log.md), Edit(./docs/pr-decision-log.md), Edit(docs/secrets.md), Edit(./docs/secrets.md), Edit(docs/lessons.md), Edit(./docs/lessons.md), Edit(docs/harness-boundaries.md), Edit(./docs/harness-boundaries.md), Edit(docs/repo-map.md), Edit(./docs/repo-map.md), Edit(docs/style-guide.md), Edit(./docs/style-guide.md), Edit(docs/change-locality.md), Edit(./docs/change-locality.md), Edit(docs/change-locality-plan.md), Edit(./docs/change-locality-plan.md), Edit(.claude/**), Edit(./.claude/**), Edit(.config/**), Edit(./.config/**), Edit(.github/**), Edit(./.github/**), Edit(deploy/**), Edit(./deploy/**), Edit(src/**), Edit(./src/**), Edit(tests/**), Edit(./tests/**), Edit(tools/**), Edit(./tools/**), Edit(.dockerignore), Edit(./.dockerignore), Edit(.editorconfig), Edit(./.editorconfig), Edit(.gitattributes), Edit(./.gitattributes), Edit(.gitignore), Edit(./.gitignore), Edit(CLAUDE.md), Edit(./CLAUDE.md), Edit(Directory.Build.props), Edit(./Directory.Build.props), Edit(Directory.Build.targets), Edit(./Directory.Build.targets), Edit(Directory.Build.rsp), Edit(./Directory.Build.rsp), Edit(Directory.Solution.props), Edit(./Directory.Solution.props), Edit(Directory.Solution.targets), Edit(./Directory.Solution.targets), Edit(MSBuild.rsp), Edit(./MSBuild.rsp), Edit(nuget.config), Edit(./nuget.config), Edit(NuGet.config), Edit(./NuGet.config), Edit(NuGet.Config), Edit(./NuGet.Config), Edit(**/*.targets), Edit(**/*.props), Edit(**/*.rsp), Edit(**/*.csproj), Edit(**/*.sln), Edit(**/*.slnx), Edit(Directory.Packages.props), Edit(./Directory.Packages.props), Edit(Platform.slnx), Edit(./Platform.slnx), Edit(README.md), Edit(./README.md), Edit(coverage.runsettings), Edit(./coverage.runsettings), Edit(global.json), Edit(./global.json)
 ---
 
 Audit `docs/backend-architecture/` for internal contradictions — and, once the
@@ -32,6 +32,11 @@ chapter; if a topic, trace that topic everywhere it appears.
 code is in scope and check 9 below applies. If not, this is a docs-only audit
 and check 9 is skipped — say which you ran.
 
+**When this runs is decided by the change's class**, per
+`docs/change-locality.md`: after a Class C change — a rule moved and an ADR
+was appended — and after any edit to a chapter. Not after a Class A change,
+whose touch set holds no chapter for this audit to read.
+
 ## What counts as a finding
 
 A finding is **two statements in the blueprint that cannot both be true**, or a
@@ -39,9 +44,14 @@ statement that cannot be true of the system the blueprint describes. Not style,
 not tone, not "this could be clearer". Specifically hunt for:
 
 1. **Numeric drift** — a timeout, retry count, TTL, page-size clamp, batch size
-   or SLO stated as one value in a chapter and another in an appendix or a code
-   sample. Reconcile to the value the surrounding argument requires, not to
-   whichever appeared first.
+   or SLO stated in a chapter that differs from the **code symbol that owns
+   it** (check 9's second bullet is this check across the boundary). Two
+   chapters quoting different values is resolved by making the one that is
+   not the owner cite the symbol, not by picking a value for both. **Counts
+   are out of scope** — the number of tests, projects, chapters, ADRs,
+   callouts or lines is a restatement `docs/change-locality.md` §2 forbids
+   writing, so a stale one in a file this command may edit is removed, and
+   never reconciled to a fresh count.
 2. **Type and member drift** — a type, interface, method or property named one
    way in a sample and another in prose, Appendix D, or a registration list.
 3. **Contract drift** — a route, event name, queue name, header, claim, health
@@ -141,7 +151,9 @@ For each candidate:
 - Decide which statement the rest of the blueprint depends on. That one wins;
   amend the others.
 - Apply the fix to **all** sites in one edit pass. A half-applied
-  reconciliation is worse than none.
+  reconciliation is worse than none. For a value, the fix at every site but
+  the owner is a citation of the owner — the symbol, the section or the ADR
+  — so the second copy stops existing rather than being refreshed.
 - If both statements are defensible and the conflict is genuine design
   ambiguity, do not silently pick one — surface it and ask.
 
@@ -175,6 +187,7 @@ clean. If you did not reach a clean pass, say so — do not round up.
 ## Do not
 
 - Do not rewrite prose you merely dislike.
+- Do not refresh a count. Remove it, or leave it for the plan.
 - Do not "fix" the settled choices `docs/style-guide.md` tabulates —
   file-scoped namespaces, expression-bodied members and braceless single
   statements are deliberate in both docs and source. Note that `var` is

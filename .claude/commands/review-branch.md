@@ -37,20 +37,31 @@ taste. Prefer:
 
 1. **Blueprint ↔ code drift** once `src/` exists (samples, pins, type names,
    registration order, endpoints, credentials).
-2. **Cross-chapter / CLAUDE.md contradictions** (phase markers, test counts,
-   planned vs present trees, counts of classes/packages).
+2. **Cross-chapter / CLAUDE.md contradictions** — two rules that cannot both
+   be true, or a planned tree stated as present. **Not** a phase marker, a
+   test count, a project count or a value quoted a second time: those are
+   restatements `docs/change-locality.md` §2 forbids writing, so a stale one
+   is awaiting removal by the plan, not a finding against this branch.
 3. **Register drift** — `Directory.Packages.props` vs Appendix B vs §4.4 sample;
    licence gate failing.
 4. **Deploy drift** — Compose / Helm / CI vs §14 / §15 claims (ports, secrets,
    service names, healthchecks).
 5. **Incomplete reconciliation** — a rule this change states (or a fix it claims)
    that the corpus still violates in the same change set.
+6. **A file outside the declared touch set.** The PR body's `| Class |` and
+   `| Touch set |` rows say what this branch may edit; a path in
+   `git diff --name-only` that neither row covers is a finding, and its
+   resolution is a narrower diff or a different class, never a wider row. A
+   `--local` review of uncommitted work has no body to read the rows from —
+   say so and skip this check rather than inferring a class.
 
 Reject as non-findings the house styles `docs/style-guide.md` tabulates on
 purpose (braceless single statements, file-scoped namespaces, explicit
 types, British prose beside real identifier spellings, unpinned Aspire with
 §4.4 carve-outs, spread-over-`.ToArray()` when the corpus is already
-clean).
+clean), and the stale restatements `docs/change-locality.md` §2 leaves in
+place — a count, a "since PR-NN", a value quoted where the owner site is
+already correct.
 
 ---
 
@@ -103,21 +114,23 @@ clean).
    - `--local`: `git status --short` and `git diff HEAD` (include untracked
      that matter; skip bulk tooling noise).
 2. **Read the change.** Prefer full source of load-bearing files over the
-   diff alone. Grep the rest of `docs/backend-architecture/`, `CLAUDE.md`,
-   `docs/style-guide.md`, `docs/repo-map.md`, and `src/` / `tests/` /
-   `deploy/` for every claim the change touches.
+   diff alone. Grep `src/`, `tests/` and `deploy/` for every **symbol** the
+   change touches, and the one chapter section that owns a rule the change
+   moved. Do not tour the corpus for the value: a restatement outside the
+   touch set that the change left stale is not this branch's to fix
+   (`docs/change-locality.md` §2).
 3. **Run cheap gates when the range touches them.**
    - Packages / Appendix B: `python .github/licence-gate/licence_gate.py`
-   - Tests / counts CLAUDE asserts:
-     `bash .claude/scripts/dotnet-test.sh [all|fast]` when useful
+   - Tests, when the range touches `src/` or `tests/`:
+     `bash .claude/scripts/dotnet-test.sh [all|fast]`
 
    **In the sandbox the second one is not available**, and that is deliberate
    rather than an oversight: `dotnet test` has needed a Docker daemon since
    PR-08's Testcontainers suite, so running it inside a container built to take
    capability away would mean Docker-in-Docker. The licence gate is stdlib
-   Python and does run there. So a test-count claim is the **host's** to verify
-   — report it as unverified rather than asserting it, and never report
-   `command not found` as a finding about the branch.
+   Python and does run there. So whether the suite is green is the **host's**
+   to verify — report it as unverified rather than asserting it, and never
+   report `command not found` as a finding about the branch.
 4. **Author findings only when verified.** Quote the conflicting sites.
    Severity: **bug** | **suggestion** | **nit**.
 5. **Write `suggestions.md` at the repo root** when any issue is open. Shape:
