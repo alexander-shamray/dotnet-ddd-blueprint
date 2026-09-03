@@ -630,8 +630,8 @@ no rule is consulted for. The deny stays as defence in depth and the three read
 grants stay with it, because removing them still buys nothing against a
 built-in. What survives as residual is one line rather than a grant: a flag the
 shell *computes* — `F=--output=x; git log $F` — is not visible to a hook that
-resolves quoting but not expansion. **#183's redirection strip inherits that same
-bound**, and the residual is now narrower than the sentence above implies. An
+resolves quoting but not expansion. **#183's redirection strip inherits that
+same bound**, and the residual is now narrower than the sentence above says. An
 expansion written in the source is read four ways — empty, whitespace, its own
 default, and a single-element brace range — because each is what bash does in a
 shell with nothing set, and a command is admitted only if it is safe under all
