@@ -504,13 +504,38 @@ def redirection_spans(command):
         first = position
         while position < len(command):
             char = command[position]
-            if ordinary[position] and char == "`":
-                close = command.find("`", position + 1)
-                if close == -1:
+            if not ordinary[position]:
+                position += 1
+                continue
+            if char == "`":
+                # **Escape-aware, because `\`` is how the legacy form nests.**
+                # A plain `find` ended the word at the inner delimiter of
+                # `` >/tmp/`echo \`echo x\`` `` and left the outer backtick
+                # sitting where the subcommand goes. `substitutions` already
+                # scans this way; the two agree on purpose.
+                scan = position + 1
+                while scan < len(command):
+                    if command[scan] == "\\" and scan + 1 < len(command):
+                        scan += 2
+                        continue
+                    if command[scan] == "`":
+                        break
+                    scan += 1
+                if scan >= len(command):
+                    return position
+                position = scan + 1
+                continue
+            if command.startswith("${", position):
+                # **A parameter expansion is part of the word, metacharacters
+                # and all.** `>${PATH:+/tmp/x;y}` redirects to `/tmp/x;y`, and
+                # returning at that `;` left a separator standing between `git`
+                # and its subcommand.
+                close = _closing_brace(command, position + 2)
+                if close is None:
                     return position
                 position = close + 1
                 continue
-            if ordinary[position] and char == "(":
+            if char == "(":
                 if position == first:
                     return position
                 close = _closing_paren(command, position + 1)
@@ -518,7 +543,7 @@ def redirection_spans(command):
                     return position
                 position = close + 1
                 continue
-            if ordinary[position] and char in METACHARACTERS:
+            if char in METACHARACTERS:
                 return position
             position += 1
         return position
@@ -608,6 +633,25 @@ def redirection_spans(command):
         end = digits + len(operator)
         while plain(end) and command[end] in " \t":
             end += 1
+        # **A process substitution can BE the target, and leaving it to the run
+        # splitter hides the outer command.** In
+        # `git > >(tee /tmp/log) push origin +HEAD:main` both `>` characters
+        # were removed separately and `(tee /tmp/log)` stayed as a boundary
+        # between `git` and `push` — bash runs the force push and the guard
+        # admitted it. Raised in review, twice: the round before this one
+        # asserted in a comment that the run splitter covered this case, which
+        # was true of the INNER command and false of the outer one.
+        #
+        # So it is consumed as the word it is, and `substitutions` grew the
+        # same construct in the same change — a target nothing judged would be
+        # the hole this one closes, one layer along.
+        if (command[end:end + 2] in (">(", "<(")
+                and plain(end) and plain(end + 1)):
+            close = _closing_paren(command, end + 2)
+            if close is not None:
+                spans.append((start, close + 1))
+                index = close + 1
+                continue
         end = word_end(end)
         spans.append((start, end))
         index = end
@@ -697,6 +741,12 @@ def substitutions(command, quotes=True):
     # Single-quote state only: `$(` is live inside DOUBLE quotes, which is the
     # whole shape of the bypass — `git log "$(git push …)"`.
     in_single = False
+    # **And double-quote state for ONE branch.** A process substitution is not
+    # performed inside double quotes — `echo "<(x)"` prints the text — so the
+    # branch added for it is gated on this, where `$(` deliberately is not.
+    # Reading it anywhere else would resurrect the bypass the comment above
+    # names.
+    in_double = False
     while index < len(command):
         char = command[index]
         if in_single:
@@ -708,6 +758,10 @@ def substitutions(command, quotes=True):
             in_single = True
             index += 1
             continue
+        if char == '"' and quotes:
+            in_double = not in_double
+            index += 1
+            continue
         if char == "\\":
             # `\$(x)` is a literal `$(` to bash, on the command line and in an
             # unquoted heredoc body alike. Skipping the escaped character keeps
@@ -715,6 +769,19 @@ def substitutions(command, quotes=True):
             index += 2
             continue
         if command.startswith("$(", index):
+            end = _closing_paren(command, index + 2)
+            if end is None:
+                break
+            found.append(command[index + 2:end])
+            index = end + 1
+            continue
+        if not in_double and (command.startswith("<(", index)
+                              or command.startswith(">(", index)):
+            # **A process substitution is a command the shell runs**, and until
+            # the redirection strip could consume one it was reached only by
+            # the run splitter — which sees it while it stands as its own run
+            # and not once it is part of a redirect target. Both halves of that
+            # are now true in one place.
             end = _closing_paren(command, index + 2)
             if end is None:
                 break

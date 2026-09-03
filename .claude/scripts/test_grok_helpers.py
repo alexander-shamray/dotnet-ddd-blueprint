@@ -5298,6 +5298,47 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("git log >/tmp/x")
         self.assertAdmitted("git log >(cat) -1")
 
+    def test_a_process_substitution_can_be_the_target(self):
+        # **The round before this one asserted in a comment that the run
+        # splitter covered this, which was true of the INNER command and false
+        # of the outer one.** In `git > >(tee /tmp/log) push origin +HEAD:main`
+        # both `>` were removed separately and `(tee /tmp/log)` stayed as a
+        # boundary between `git` and its subcommand — bash runs the force push,
+        # and the guard admitted it. Raised in review; verified allowed.
+        self.assertRefused("git > >(tee /tmp/log) push origin +HEAD:main")
+        self.assertRefused("git 2> >(cat) push origin --mirror")
+
+        # Consuming it obliges the guard to judge it somewhere, so
+        # `substitutions` grew the same construct in the same change. Without
+        # this pair the fix would trade the outer hole for an inner one.
+        self.assertRefused("git log > >(git push origin +HEAD:main)")
+        self.assertRefused("git log 2> >(git push origin --mirror) -1")
+
+        # And the bound on that: bash does not perform a process substitution
+        # inside double quotes, so neither does the extractor. A commit body
+        # quoting one is prose, not a command.
+        self.assertAdmitted('git commit -m "see <(foo) in the notes"')
+        self.assertAdmitted(
+            'git commit -m "a <(git push origin +HEAD:main) quoted"')
+
+    def test_a_target_word_carries_its_expansions_whole(self):
+        # Two more shapes of one thing: what counts as part of the redirect
+        # WORD. Both verified allowed, both raised in review.
+        #
+        # The backtick scan was not escape-aware, so it ended the word at the
+        # inner delimiter of a NESTED backtick and left the outer one where the
+        # subcommand goes — `substitutions` already scanned this way, and the
+        # two now agree. And a parameter expansion is part of the word
+        # metacharacters and all: `>${PATH:+/tmp/x;y}` redirects to `/tmp/x;y`,
+        # where returning at the `;` left a separator standing.
+        for command in (
+            "git >/tmp/`echo \\`echo x\\`` push origin +HEAD:main",
+            "git >${PATH:+/tmp/x;y} push origin +HEAD:main",
+            "git >${HOME}/x push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
     def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
         # The boundary of the exemption, and it is bash's own rule: digits are
         # a descriptor only where they are a WHOLE token glued to the operator.
