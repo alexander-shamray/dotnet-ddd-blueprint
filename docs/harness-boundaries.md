@@ -847,6 +847,21 @@ is the one worth carrying: an equivalence asserted about "filesystems" rather
 than measured on the mount is a bypass in whichever direction the assertion is
 wrong.**
 
+**The traits are the root's, and a child directory may disagree — which is true,
+and turns out not to be a bypass in the shape it was raised.** Windows sets case
+sensitivity **per directory** (`fsutil file setCaseSensitiveInfo`, no privilege
+needed, and only on an empty one), so a case-sensitive `docs/` keeps `BETA` and
+`beta` apart while the root's traits fold them. For folding to hide anything,
+though, a link's resolution would have to differ from its own path only in case
+— and a link's resolution *is* its target, so the write lands on exactly the
+file the path names. The guard carries an identity check for the shape that
+argument does not cover — a sub-mount whose equivalences differ from the root's:
+where two paths agree **only** because an equivalence was applied, `samefile` is
+asked. That is safe in this position and not in the anchor test, because it
+compares two concrete paths rather than deciding what counts as a root. Where
+either path does not exist yet — the ordinary `Write` — there is nothing to
+compare and the folded verdict stands. Raised by Copilot.
+
 **A `..` that traverses no link is admitted, and the reason is a measurement
 of the harness rather than a judgement about paths.** The case for refusing it
 is that `docs/../.claude/hooks/x` carries no `.claude/**` spelling, so a
