@@ -103,7 +103,13 @@ jobs:
   # credential-bearing `docker run` in the reviewer joins the internal
   # network and only the proxy reaches the bridge, and — in a second module
   # the same discover picks up — that the proxy itself answers a socket the
-  # way its file says, on loopback and with no network.
+  # way its file says, on loopback and with no network. A THIRD module the
+  # same discover picks up carries #181, the edit-target guard: that a link
+  # inside an allowed tree is refused whatever it points at, that a denied
+  # tree spelled as ITSELF is admitted there rather than judged twice, and
+  # that a checkout reached through a link is not refused wholesale. It needs
+  # a real link on disk, and takes a junction where Windows refuses a
+  # symbolic one rather than skipping a property it never tested.
   #
   # Two of those take their counterfactual somewhere other than the previous
   # commit: #140's read-side cases are green against main and have to be, since
@@ -141,6 +147,50 @@ jobs:
 
       - name: Test the review helpers
         run: python -m unittest discover -s .claude/scripts
+
+  # **The edit-target guard has branches no Linux runner can reach**, and the
+  # job above is `ubuntu-latest`, so every one of them could regress with every
+  # required check green. Three are Windows' own: the junction fallback, which
+  # is the only link primitive an unprivileged Windows session gets; `..` after
+  # a link, which Windows collapses before the filesystem sees it where POSIX
+  # resolves it against the link's target; and the on-disk case `realpath`
+  # answers with. The fourth is macOS': APFS mounts case-insensitively by
+  # default, so a checkout prefix spelled in another case is the SAME directory
+  # there and is a different string on Linux — the guard asks the filesystem
+  # rather than the platform, and this is the only runner where that question
+  # has the interesting answer on a POSIX path.
+  #
+  # Both platforms were raised by Copilot, one round apart, and each fix found
+  # a defect the review had not: the suite read the `..` semantics off which
+  # link primitive existed, which is right only while symbolic links and POSIX
+  # coincide, and the case comparison folded on `os.name` where the filesystem
+  # is what decides.
+  #
+  # **One module rather than the whole `discover`**, and that is a property of
+  # the module rather than a preference: `test_edit_target_guard.py` needs
+  # nothing but Python and a filesystem, where the suite beside it needs
+  # `bash`, `grep`, `git` and `jq` and a `gh` stub on PATH. Widening this job
+  # to the directory would be adopting that whole toolchain on two more
+  # platforms to reach four branches.
+  edit-target-guard:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # `-v` for the link-primitive line the module prints: a green run does
+      # not say whether the junction fallback was reached or whether symbolic
+      # links were available, and which of the two happened is why this job
+      # exists.
+      - name: Test the edit-target guard
+        run: python -m unittest discover -s .claude/scripts -p "test_edit_target_guard.py" -v
 
   # PR-25's inventory gates, and they sit beside the licence gate rather than
   # inside `build` for the same reason it does: stdlib Python over text, so

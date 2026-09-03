@@ -725,13 +725,182 @@ it. The size check moved into the adjudicator, which has no `Bash` and
 returns `oversized-review`; the link check became a gated premise — the
 helper suite fails on any tracked mode `120000`, so `main` carries no
 symbolic link on any push, and an invocation without `Bash` cannot add one.
-**The premise is `main`'s and not the reviewed branch's, and that is a
-residual with a number**: the branch is what introduces files, the command
-runs over it locally before CI goes red on it, and the edit-time guard that
-would canonicalise a target and refuse a link is a hook behind the
-self-lock (#181). The bare tool name is the documented form of a
+**The premise was `main`'s and not the reviewed branch's, and #181 closed
+the difference**: the branch is what introduces files, the command runs over
+it locally before CI goes red on it, so a statement about what `main` tracks
+was never a statement about what this command is about to edit.
+`.claude/hooks/guard-edit-target.py` is the check that premise stood in for
+— the second hook in this repository, and the argument for it is one
+sentence: **an edit target must be the file its path spells.** It resolves
+the target of every `Edit`, `Write`, `NotebookEdit` and `MultiEdit` — the
+matcher, the hook's own `EDITING_TOOLS` and the registration case all name
+those four, and a boundary documented narrower than the one configured is the
+drift this file exists to refuse — re-anchors it on the
+resolved checkout root, and refuses the call when the two disagree — into a
+denied tree, or out of the checkout. The premise stays as defence in depth
+and its gate stays green. The bare tool name is the documented form of a
 `disallowed-tools` entry; the pattern form is the one the fifth entry
 measured.
+
+**That guard holds no copy of any deny list, and refusing to write one is
+the whole of why it is safe to run on every write this repository makes.**
+A path deny is *correct* when the spelling is true of the file, so the hook
+judges only the disagreement and leaves every list — `.claude/settings.json`'s
+and both commands' frontmatter — to say what may be edited. Nothing here goes
+stale as those change, and the PR that lifts a deny to edit a helper is not
+refused by the guard on its way past. A test pins that control: a denied tree
+spelled as itself is **admitted** here.
+
+**Two properties of the resolution are load-bearing and were each found by
+running it rather than by reasoning about it.** The anchor is resolved as
+well as the target, because a checkout reached through a link — `/tmp` on
+macOS, an 8.3 or `subst` path on Windows — would otherwise make every edit
+under it look like the thing the guard refuses; and the comparison folds case
+where the **filesystem** does, because Windows' `realpath` answers with the
+on-disk case and `DOCS/x` is not a link. **Filesystem, not platform, and the
+distinction is the second bypass this guard shipped with**:
+`os.path.normcase` folds on Windows and nowhere else, while macOS mounts APFS
+case-insensitively by default — so `/Users/x/Repo` and `/users/x/repo` are one
+directory there, a target spelled in the other case was under no anchor at
+all, and the fall-through admits. It is asked of the filesystem now, by
+`stat`ing a case-flipped spelling and comparing device and inode. Raised by
+Copilot; the platform default stands in only where the probe cannot run. The
+two platforms also
+disagree about `..` after a link — POSIX resolves it against the link's
+target, Windows collapses it before the filesystem sees it — and the guard
+follows each rather than picking one, measured both ways in
+`.claude/scripts/test_edit_target_guard.py`.
+
+**What an anchor is, and why it is two rules rather than one, is the part
+that shipped wrong.** An anchor excuses exactly one link traversal: the one
+on its own root prefix. So an anchor is a checkout **root** — the event's
+`cwd` is walked up to the directory holding a `.git` and dropped if it has
+none — and **every** anchor containing the target must agree, where the first
+form admitted on the first that did. Either rule alone leaves the bypass: a
+session standing in `docs/tree`, where `tree` links into `.claude/scripts`,
+took that directory as an anchor, and re-anchoring `docs/tree/helper.sh` on
+it makes the spelling and the resolution agree — so the guard admitted
+precisely the write it exists to refuse. Raised by Copilot, and **measured
+both ways** against the shipped commit: it admits, and the fix refuses.
+Requiring agreement is also what makes an environment-supplied
+`CLAUDE_PROJECT_DIR` safe to take as given, since an added anchor can then
+only narrow the guard and never widen it.
+
+**A spelling can also evade the matcher through the path grammar rather than
+through a link, and two of those were measured here — both admitted before the
+guard refused them.** Windows names one file in more than one alphabet: the
+extended-length prefix `\\?\` and the device prefix `\\.\`, which exist
+precisely to skip the normalisation a matcher depends on, and the UNC form
+`\\server\share\…`, which reaches the local disk through the administrative
+shares. With `.claude/sandbox/**` denied, a `Write` to
+`\\?\C:\dev\ashamray\.claude\sandbox\probe-unc.txt` **was created**, and so was
+one to `\\localhost\C$\dev\ashamray\.claude\sandbox\probe-share.txt`; the plain
+spelling of either file is refused. Both probe files were deleted.
+
+**So the guard refuses the family rather than the prefixes** — every spelling
+beginning `\\`, unless an anchor that is itself named that way **contains the
+target**. The exemption was session-wide for one round, which reopened the
+bypass it was carved for: once any checkout was `\\`-spelled, an alias of that
+same checkout — `\\?\UNC\localhost\C$\…`, not lexically under
+`\\localhost\C$\…` — skipped the anchor loop and was admitted. Measured with
+the administrative share as the project directory, and raised by Copilot. The
+legitimate case it protects is a repository genuinely on a network share,
+editing its own files. Enumerating the
+prefixes is the deny-list shape this repository has rejected twice, and the UNC
+form is exactly what such a list missed. Refused rather than resolved because a
+hook can only allow or deny: it cannot hand the matcher the plain spelling it
+would have judged. **The 8.3 alias is the same class again and needs no special
+case**: `.claude` has the alias `CLAUDE~1` on this volume, `realpath` answers
+with the long name, and the spelling therefore disagrees with the file.
+Whether the matcher alone would have refused that one is untested — the hook
+runs first — so it stands as defence in depth rather than as a measured gap.
+
+**Then CI found the general form, and it replaced the list those spellings
+were becoming.** A Windows runner's `GetShortPathNameW` shortens the whole
+prefix rather than the leaf, so `C:\Users\RUNNER~1\…\GUARD-~1\DOCUME~1\a.md`
+matched no anchor at all and fell through to the residual while resolving
+squarely inside a checkout — the 8.3 case went red there having passed on a
+volume where only the leaf is aliased. Case folding and Unicode composition
+had each closed one spelling by teaching the comparison an equivalence, which
+is a deny-list in slower clothing. **The rule now is that the residual belongs
+to a file genuinely outside every checkout, and not to one inside under a name
+the anchors cannot place**: a target resolving into a checkout that did not
+recognise its spelling is refused, whatever alphabet the spelling is in.
+Measured against the commit that shipped it — admitted there, refused after —
+and the control is the worktree case, where a session standing in the aliased
+directory makes it a root of its own and the spelling is recognised again.
+
+**Unicode normalisation is the same shape on a different platform, and it took
+two rounds because the first fix argued its way past the probe.** A
+case-insensitive APFS volume is also insensitive to normalisation, so `é`
+composed and `e` plus a combining accent name one directory there and two
+strings in a comparison — a checkout prefix spelled in the other form matched
+no anchor and reached the branch that admits. The fix composed to NFC
+**unconditionally**, on the reasoning that composing "can never make two paths
+look like one" — which is false wherever the mount is normalisation-sensitive:
+NTFS and ext4 keep both names, so a link resolving to the same relative path
+under the coexisting sibling compared equal to a path inside the checkout, and
+the escape was admitted. Measured on NTFS against the commit that shipped it.
+So normalisation is probed exactly as case is and the two answers travel
+together as the anchor's traits. **Both were raised by Copilot, and the second
+is the one worth carrying: an equivalence asserted about "filesystems" rather
+than measured on the mount is a bypass in whichever direction the assertion is
+wrong.**
+
+**The traits are the root's, and a child directory may disagree — which is true,
+and turns out not to be a bypass in the shape it was raised.** Windows sets case
+sensitivity **per directory** (`fsutil file setCaseSensitiveInfo`, no privilege
+needed, and only on an empty one), so a case-sensitive `docs/` keeps `BETA` and
+`beta` apart while the root's traits fold them. For folding to hide anything,
+though, a link's resolution would have to differ from its own path only in case
+— and a link's resolution *is* its target, so the write lands on exactly the
+file the path names. The guard carries an identity check for the shape that
+argument does not cover — a sub-mount whose equivalences differ from the root's:
+where two paths agree **only** because an equivalence was applied, `samefile` is
+asked. That is safe in this position and not in the anchor test, because it
+compares two concrete paths rather than deciding what counts as a root. Where
+either path does not exist yet — the ordinary `Write` — there is nothing to
+compare and the folded verdict stands. Raised by Copilot.
+
+**The final review round argued that this check *admits* an alias, and it has
+the direction backwards — recorded rather than acted on.** The block runs only
+where `same(...)` is already true, which is the branch that **admits**; the
+refusal beneath it is guarded by `not same(...)`. It can therefore only turn an
+admission into a refusal, and deleting it would admit strictly more. The
+narrower half of the remark is true: the *folded comparison* it sits inside can
+equate two spellings a case-sensitive child keeps apart. For a deny to be
+evaded that way, `resolved` and `expected` must differ **purely** by case or
+normalisation — which puts them at the same position under the same parents —
+and a deny pattern must then name one of those spellings and not the other.
+That is the residual, stated rather than closed. **Failing closed on the
+missing-leaf case was the other suggestion, and it is refused on this guard's
+own rule**: `expected` rarely exists when a `Write` creates a file, so refusing
+there would fire on the commonest innocent call the hook sees, and a guard that
+fires on innocent traffic is one somebody turns off.
+
+**A `..` that traverses no link is admitted, and the reason is a measurement
+of the harness rather than a judgement about paths.** The case for refusing it
+is that `docs/../.claude/hooks/x` carries no `.claude/**` spelling, so a
+matcher reading the string would not deny it. **The matcher does not read the
+string.** Measured in this checkout with `.claude/sandbox/**` denied: a `Write`
+to `docs/../.claude/sandbox/probe-tmp.txt` was refused with the harness's own
+*"denied by your permission settings"*, while `docs/../docs/probe-tmp.txt` was
+created — so a path is normalised and then matched, and `..` is not what was
+rejected. Refusing every `..` in the guard would buy nothing against the deny
+list and would refuse the second of those two spellings, which is innocent
+traffic. Raised by Copilot, and the premise is the half that failed; a passing
+case pins the verdict and names what to invert if the harness ever stops
+normalising.
+
+**Its residual is the half the harness itself needs, stated rather than
+rounded up.** The subject is a target spelled *inside* a checkout the session
+is standing in; a path spelled entirely outside one is not judged, because
+the session's memory and scratch state are written that way by absolute path
+and refusing them would take both with it. Nothing in the exposure this
+closes can spell one — a review row is one plain repository-relative path and
+the adjudicator drops a row that is not — so what is owed is a rule about
+which out-of-tree paths are legitimate, which is a different argument from
+this one. The residual is a passing test, not a paragraph alone.
 **The sweeps' item 5 (#75) closed by the same shape** — a second read-only
 dispatch returns a verdict, the parent opens nothing in `$work`, and
 `gh-issue-create.sh` leaves `gh issue create` with no free parameter — so

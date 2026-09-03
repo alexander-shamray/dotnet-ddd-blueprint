@@ -142,7 +142,30 @@ path-scope `Edit` away from every tracked tree while each keeps its own subject
 editable; **#30** and **#23**, the argv guard — the `--output` write primitive
 in every spelling including the quoted one, `ext::`, command substitution, and
 a push allow-list that refuses anything but one remote, one refspec naming a
-destination, and options from a fixed set; **#150**, that what suppresses a
+destination, and options from a fixed set; **#181**, the edit-target guard —
+that a link inside an allowed tree is refused whatever it points at, that a
+denied tree spelled as *itself* is admitted here rather than judged twice, and
+that a checkout reached through a link is not refused wholesale, with its cases
+in `test_edit_target_guard.py` beside the others and picked up by the same
+`discover`; it is the one suite that needs a real link on disk, and runs every
+**link** case against **each** primitive the platform grants — a symbolic link,
+a junction, or both — where the ordinary-write, malformed-event and
+registration cases have no link in them and run once. Never a skip either way,
+since a skip reports a pass for a property it never tested. It is also the one
+module CI runs on **three** platforms:
+`review-helpers` on Linux, and `edit-target-guard` as a matrix over Windows and
+macOS — because the junction fallback, `..` after a link and the on-disk case
+`realpath` answers with are Windows' own, and a case-insensitive mount is
+macOS' default, and no Linux runner reaches any of them. That job runs the
+module alone rather than the directory, because this module needs nothing but
+Python and a filesystem where the suite beside it needs `bash`, `grep`, `git`,
+`jq` and a `gh` stub; it runs verbose, because the module prints which link
+primitives it exercised and a green run does not say — **measured on the
+runners rather than assumed**: `windows-latest` reports `symlink, junction`,
+so that account holds `SeCreateSymbolicLinkPrivilege` and only the
+run-against-every-primitive rule reaches the junction fallback there, and
+`macos-latest` reports `symlink`;
+**#150**, that what suppresses a
 sweep finding is decided by a helper rather than by a reader; **#75**
 again, that the issue helper leaves `gh issue create` no free parameter and
 that the conversion exclusion reaches its own child rather than only its
