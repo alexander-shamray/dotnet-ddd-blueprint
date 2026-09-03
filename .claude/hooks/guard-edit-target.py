@@ -177,11 +177,11 @@ def anchors(event):
 
     **Three sources, because no one of them is right in every session.**
     `CLAUDE_PROJECT_DIR` is what the harness sets and what
-    `.claude/settings.json` interpolates into this hook's own command line;
-    the event's `cwd` is where
-    the session actually is, which differs the moment `/branch` moves it into a
-    sibling worktree; and this file's own location is the checkout that owns
-    the guard, which is true even if the other two are absent or wrong.
+    `.claude/settings.json` interpolates into this hook's own command line; the
+    event's `cwd` is where the session actually is, which differs the moment
+    `/branch` moves it into a sibling worktree; and this file's own location is
+    the checkout that owns the guard, which is true even if the other two are
+    absent or wrong.
 
     The first and the last are roots by construction — the harness sets one to
     a project root and the other is this file's own tree — so they are taken as
@@ -232,11 +232,14 @@ def offence(event):
     # statement about the same call, which is that this file cannot see where
     # the write lands, and only one of the two answers is the one that fails
     # closed.
+    # `name` rather than `key`, which is a function in this module: nothing
+    # here calls it after the loop, so the shadow was harmless and the next
+    # edit is what it would have cost.
     tool_input = event.get("tool_input")
     spelled = None
     if isinstance(tool_input, dict):
-        for key in PATH_KEYS:
-            value = tool_input.get(key)
+        for name in PATH_KEYS:
+            value = tool_input.get(name)
             if isinstance(value, str) and value:
                 spelled = value
                 break
