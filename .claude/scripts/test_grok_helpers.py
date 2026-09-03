@@ -6167,8 +6167,18 @@ class TheGitArgvGuard(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertRefused(command)
 
-        # The sigil forms without an escape still name their delimiter.
-        self.assertEqual(("EOF", False), guard._heredoc_delimiter('$"EOF"'))
+        # **The locale sigil names no delimiter at all, and the assertion
+        # that used to stand here pinned the opposite.** `$"EOF"` is a
+        # TRANSLATED word like any other, so a catalogue decides where the body
+        # ends — while `undecodable_dollar_quote` was refusing the same
+        # construct three functions along. Raised in review, which caught the
+        # defect and the assertion together: the test had been written in the
+        # same commit that refused every other locale quote.
+        self.assertEqual((None, False), guard._heredoc_delimiter('$"EOF"'))
+        self.assertRefused("git commit -F - <<$\"EOF\"\na message\nEOF")
+
+        # The ANSI-C sigil still names one: its escapes are decoded, and one
+        # outside the decoded set is refused rather than read.
         self.assertEqual(("EOF", False), guard._heredoc_delimiter("$'EOF'"))
         self.assertAdmitted("git commit -F - <<$'EOF'\na message\nEOF")
 
@@ -6248,6 +6258,109 @@ class TheGitArgvGuard(unittest.TestCase):
         elapsed = time.monotonic() - started
         self.assertEqual(1000, len(found), "every body, not one per pass")
         self.assertLess(elapsed, 5, "and linearly, not quadratically")
+
+    def test_the_whole_judgement_stays_linear_in_the_heredocs(self):
+        # **The timing test above measures `heredoc_spans` and the hook runs
+        # `offence`**, which was the gap: the containment scan that had just
+        # been removed from `heredoc_spans` was still standing in
+        # `stdin_scripts` AND in `undecodable_heredoc`, each re-reading every
+        # earlier body for every opener. Raised in review for the first; the
+        # second was found by profiling the fix, at ten million comparisons for
+        # 3,200 heredocs. **A guard that runs past its timeout produces no
+        # verdict, and `PreToolUse` reads that as non-blocking.**
+        #
+        # Measured per heredoc rather than in total, because a total is the
+        # figure that goes stale on a faster runner while the shape it is
+        # standing in for does not.
+        guard = self.guard_module()
+        body = "cat > f.md <<'EOF'\nplain\nEOF\n"
+        cost = {}
+        for count in (400, 3200):
+            started = time.monotonic()
+            guard.offence(body * count)
+            cost[count] = (time.monotonic() - started) / count
+        self.assertLess(cost[3200], cost[400] * 1.8,
+                        "eight times the input is not sixteen times the work")
+
+    def test_a_wrappers_own_option_is_not_the_shells_script_flag(self):
+        # `ionice -c 2 bash` runs bash on its stdin — `-c` there is the
+        # scheduling class — and reading the whole run for a script flag
+        # dismissed it as a shell that brought its own. Raised in review;
+        # verified allowed. The flag only counts after the shell token.
+        guard = self.guard_module()
+        self.assertTrue(guard.reads_stdin_as_script(["ionice", "-c", "2", "bash"]))
+        self.assertTrue(guard.reads_stdin_as_script(["nice", "-n", "5", "sh"]))
+        self.assertFalse(guard.reads_stdin_as_script(["bash", "-c", "x"]))
+        self.assertFalse(guard.reads_stdin_as_script(["ionice", "-c", "2",
+                                                      "bash", "-c", "x"]),
+                         "and a real script flag after the shell still counts")
+        self.assertRefused("echo 'git push origin +HEAD:main' | ionice -c 2 bash")
+
+    def test_a_process_substitution_may_not_feed_a_shell_its_script(self):
+        # **`bash < <(printf …)` runs the push and every pass judged the halves
+        # apart**: the inner `printf` is data, the redirection strip removes
+        # `< <(…)` whole because a process substitution IS the target, and what
+        # is left is a `bash` with no script. Raised in review; verified
+        # allowed, and `bash <(echo …)` runs it too — the substitution being a
+        # filename the shell is told to execute.
+        #
+        # Refused rather than read, on `unmodelled_printer`'s argument: what
+        # runs is the substitution's OUTPUT, and reading the inner command
+        # instead would be right for `<(echo '…')` and wrong for every spelling
+        # that computes.
+        for command in (
+            "bash < <(printf '%s' 'git push origin +HEAD:main')",
+            "bash < <(echo 'git push origin +HEAD:main')",
+            "bash <(echo 'git push origin +HEAD:main')",
+            "sh < <(cat script.sh)",
+            "command bash < <(echo hi)",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # A run led by a printer is left alone exactly as the pipeline pass
+        # leaves one, and an ordinary reader of a substitution is not a shell.
+        self.assertAdmitted("echo <(git log --oneline -5)")
+        self.assertAdmitted("diff <(git show a:f) <(git show b:f)")
+        self.assertAdmitted("cat <(git log --oneline -5)")
+
+    def test_one_parse_of_a_word_reaches_the_here_string(self):
+        # `stdin_scripts` had a word parse of its own, ending at the first
+        # unquoted metacharacter — so `bash <<<$(printf 'git push …')` yielded
+        # `$` as the script, the inner `printf` was judged as data, and the
+        # redirection strip removed the rest. **That is `word_end`'s OWN
+        # recorded fail-open arriving a second time**, in the function that did
+        # not share it, which is why the parse is now one function both call.
+        # Raised in review; verified allowed, with the backtick spelling.
+        for command in (
+            "bash <<<$(printf 'git push origin +HEAD:main')",
+            "bash <<<`printf 'git push origin +HEAD:main'`",
+            "bash <<<${x:-git push origin +HEAD:main}",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # An escaped metacharacter is still part of the word, which is what the
+        # parse this replaced was carrying `literal` for.
+        self.assertRefused("bash <<<git\\ push\\ origin\\ +HEAD:main")
+        self.assertAdmitted("bash <<<'git log --oneline -5'")
+
+    def test_the_undecodable_heredoc_scan_knows_where_a_body_is(self):
+        # The scan had its own `shell_positions` call with no body spans, so an
+        # apostrophe in an earlier body left it in quote state and a later
+        # undecodable opener looked quoted — the refusal never fired. **The
+        # same oversight `heredoc_spans` had just been fixed for, in the
+        # function beside it.** Raised in review.
+        guard = self.guard_module()
+        command = ("cat > a.md <<'EOF'\n"
+                   "don't\n"
+                   "EOF\n"
+                   "git commit -F - <<$'E\\'OF'\n"
+                   "git push origin +HEAD:main\n"
+                   "EOF")
+        self.assertTrue(guard.undecodable_heredoc(command),
+                        "the second opener is seen, apostrophe or not")
+        self.assertRefused(command)
 
     def test_a_run_of_assignments_alone_has_no_command_word(self):
         # `leading_command` answers `""` for a run that is all assignments, and

@@ -269,6 +269,18 @@ def _heredoc_delimiter(word):
             quote = word[peek]
             close = word.index(quote, peek + 1)
             body = word[peek + 1:close]
+            if quote == '"':
+                # **A locale-quoted delimiter is TRANSLATED**, exactly as
+                # a locale-quoted word is, and this branch was reading
+                # `$"EOF"` as the literal `EOF` while
+                # `undecodable_dollar_quote` refused the same construct
+                # three functions along. A catalogue naming `EOF` for
+                # `safe` ends the body where bash does not, and a push
+                # between the two lines is swallowed or exposed depending
+                # on which way the mismatch falls. Raised in review, which
+                # also caught the test that had just pinned `$"EOF"` as
+                # literal — the assertion and the defect landed together.
+                return None, False
             # **Either sigil, and an earlier revision refused only the
             # ANSI-C one.** `<<$"E\\"OF"` names `E"OF` to bash, where
             # `word.index` finds the ESCAPED quote and derives `E\\OF` — a
@@ -629,22 +641,32 @@ def undecodable_heredoc(command):
     inside an argument is not one of these; the two guards below are
     `heredoc_spans`', for the same reasons it states.
     """
+    # **The bodies are computed FIRST and handed to the scanner**, which is
+    # the same fix `heredoc_spans` took one function above and the same
+    # oversight arriving in the function beside it: an apostrophe in an earlier
+    # body left the scanner in quote state, so a later undecodable opener
+    # looked quoted and this refusal never fired. Raised in review.
+    bodies = heredoc_spans(command)
     quoted = set()
-    for index, in_quotes, in_comment in shell_positions(command):
+    for index, in_quotes, in_comment in shell_positions(
+            command, [(start, end) for start, end, _ in bodies]):
         if in_quotes or in_comment:
             quoted.add(index)
     # **A `<<` inside a heredoc BODY is data, not an opener**, and reading one
     # as an opener refused an innocent filing: a body quoting `<<$'E\\x4fF'` —
     # documentation of this very mechanism — was rejected as an undecodable
-    # delimiter. `shell_positions` does not mark a body, because a body is not
-    # quoted; `heredoc_spans` is what knows where one is. Raised in review;
-    # measured.
-    bodies = heredoc_spans(command)
+    # delimiter. `heredoc_spans` is what knows where a body is, which is why it
+    # is asked above rather than here.
     for match in HEREDOC.finditer(command):
         index = match.start()
         if index in quoted:
-            continue
-        if any(start <= index < end for start, end, _expands in bodies):
+            # A body is among the spans handed to the scanner above, so an
+            # opener inside one arrives quoted and this is where it stops.
+            # **The containment test that used to stand here as well was the
+            # quadratic** — 3,200 heredocs meant ten million comparisons, and
+            # the hook's timeout is empty stdout, which is non-blocking. Raised
+            # in review against `stdin_scripts`, where the same test sat for
+            # the same reason; this copy was found by profiling the fix.
             continue
         if index > 0 and command[index - 1] == "<":
             continue
@@ -1260,6 +1282,94 @@ def separate_lines(command):
 REDIRECTION_OPERATORS = ("&>>", "&>", ">>", ">&", ">|", "<>", "<&", ">", "<")
 
 
+def word_end(command, position, ordinary):
+    """The end of the shell WORD beginning at `position`.
+
+    **One parse of a word, because there were two and they disagreed.**
+    `stdin_scripts` had its own, ending a here-string at the first
+    unquoted metacharacter — so `bash <<<$(printf 'git push origin
+    +HEAD:main')` yielded `$` as the script, the inner `printf` was judged
+    as the data it is, and the redirection strip removed the rest. The push
+    ran and the hook admitted it. Raised in review; verified allowed, with
+    the backtick spelling beside it — which is this parse's OWN fail-open,
+    recorded below, arriving a second time in the function that did not
+    share it.
+
+    **A substitution is part of the word, and stopping at its `(` was a
+    fail-open.** A word ends at an unquoted metacharacter — but the `(` of
+    `$(…)` is not one to bash, it opens a nested command list. Stopping
+    there left the parentheses standing, `is_boundary` read them as run
+    boundaries, and `git >/tmp/$(echo x) push origin +HEAD:main` had its
+    `git` severed from its own subcommand: the force push ran and the guard
+    admitted it. Raised in review; verified allowed, with `$((…))`, a bare
+    `$(…)` target and a backtick spelling beside it.
+
+    An UNBALANCED opener stops the word instead of swallowing the rest of
+    the line, because consuming to the end would hide whatever followed —
+    the same fail-open one layer along.
+
+    **And a word may not BEGIN with `(`, which is the difference between a
+    substitution inside a target and a process substitution being one.**
+    `echo <(git push origin +HEAD:main)` is not a redirect with `(…)` for a
+    target: `<(` is one construct, the inner command runs, and consuming it
+    as a word deleted that push from the judged string outright. Caught by
+    `test_a_process_substitution_is_not_the_printers_argument`, which is
+    why it exists — the same reading applies to `> >(tee f)`, whose target
+    is a process substitution that also runs. Left alone, the parentheses
+    stay the run boundaries they already were and the inner command is
+    judged in its own right.
+    """
+    def plain(offset):
+        return offset < len(command) and ordinary[offset]
+
+    first = position
+    while position < len(command):
+        char = command[position]
+        if not ordinary[position]:
+            position += 1
+            continue
+        if char == "`":
+            # **Escape-aware, because `\`` is how the legacy form nests.**
+            # A plain `find` ended the word at the inner delimiter of
+            # `` >/tmp/`echo \`echo x\`` `` and left the outer backtick
+            # sitting where the subcommand goes. `substitutions` already
+            # scans this way; the two agree on purpose.
+            scan = position + 1
+            while scan < len(command):
+                if command[scan] == "\\" and scan + 1 < len(command):
+                    scan += 2
+                    continue
+                if command[scan] == "`":
+                    break
+                scan += 1
+            if scan >= len(command):
+                return position
+            position = scan + 1
+            continue
+        if command.startswith("${", position):
+            # **A parameter expansion is part of the word, metacharacters
+            # and all.** `>${PATH:+/tmp/x;y}` redirects to `/tmp/x;y`, and
+            # returning at that `;` left a separator standing between `git`
+            # and its subcommand.
+            close = _closing_brace(command, position + 2)
+            if close is None:
+                return position
+            position = close + 1
+            continue
+        if char == "(":
+            if position == first:
+                return position
+            close = _closing_paren(command, position + 1)
+            if close is None:
+                return position
+            position = close + 1
+            continue
+        if char in METACHARACTERS:
+            return position
+        position += 1
+    return position
+
+
 def redirection_spans(command):
     """Every redirection in `command`, as `(start, end)` character offsets.
 
@@ -1296,80 +1406,6 @@ def redirection_spans(command):
 
     def plain(position):
         return position < len(command) and ordinary[position]
-
-    def word_end(position):
-        """The end of the redirect target WORD beginning at `position`.
-
-        **A substitution is part of the word, and stopping at its `(` was a
-        fail-open.** A word ends at an unquoted metacharacter — but the `(` of
-        `$(…)` is not one to bash, it opens a nested command list. Stopping
-        there left the parentheses standing, `is_boundary` read them as run
-        boundaries, and `git >/tmp/$(echo x) push origin +HEAD:main` had its
-        `git` severed from its own subcommand: the force push ran and the guard
-        admitted it. Raised in review; verified allowed, with `$((…))`, a bare
-        `$(…)` target and a backtick spelling beside it.
-
-        An UNBALANCED opener stops the word instead of swallowing the rest of
-        the line, because consuming to the end would hide whatever followed —
-        the same fail-open one layer along.
-
-        **And a word may not BEGIN with `(`, which is the difference between a
-        substitution inside a target and a process substitution being one.**
-        `echo <(git push origin +HEAD:main)` is not a redirect with `(…)` for a
-        target: `<(` is one construct, the inner command runs, and consuming it
-        as a word deleted that push from the judged string outright. Caught by
-        `test_a_process_substitution_is_not_the_printers_argument`, which is
-        why it exists — the same reading applies to `> >(tee f)`, whose target
-        is a process substitution that also runs. Left alone, the parentheses
-        stay the run boundaries they already were and the inner command is
-        judged in its own right.
-        """
-        first = position
-        while position < len(command):
-            char = command[position]
-            if not ordinary[position]:
-                position += 1
-                continue
-            if char == "`":
-                # **Escape-aware, because `\`` is how the legacy form nests.**
-                # A plain `find` ended the word at the inner delimiter of
-                # `` >/tmp/`echo \`echo x\`` `` and left the outer backtick
-                # sitting where the subcommand goes. `substitutions` already
-                # scans this way; the two agree on purpose.
-                scan = position + 1
-                while scan < len(command):
-                    if command[scan] == "\\" and scan + 1 < len(command):
-                        scan += 2
-                        continue
-                    if command[scan] == "`":
-                        break
-                    scan += 1
-                if scan >= len(command):
-                    return position
-                position = scan + 1
-                continue
-            if command.startswith("${", position):
-                # **A parameter expansion is part of the word, metacharacters
-                # and all.** `>${PATH:+/tmp/x;y}` redirects to `/tmp/x;y`, and
-                # returning at that `;` left a separator standing between `git`
-                # and its subcommand.
-                close = _closing_brace(command, position + 2)
-                if close is None:
-                    return position
-                position = close + 1
-                continue
-            if char == "(":
-                if position == first:
-                    return position
-                close = _closing_paren(command, position + 1)
-                if close is None:
-                    return position
-                position = close + 1
-                continue
-            if char in METACHARACTERS:
-                return position
-            position += 1
-        return position
 
     spans, index = [], 0
     while index < len(command):
@@ -1414,7 +1450,7 @@ def redirection_spans(command):
             end = digits + 3
             while plain(end) and command[end] in " \t":
                 end += 1
-            end = word_end(end)
+            end = word_end(command, end, ordinary)
             spans.append((start, end))
             index = end
             continue
@@ -1475,7 +1511,7 @@ def redirection_spans(command):
                 spans.append((start, close + 1))
                 index = close + 1
                 continue
-        end = word_end(end)
+        end = word_end(command, end, ordinary)
         spans.append((start, end))
         index = end
     return spans
@@ -1891,9 +1927,18 @@ def reads_stdin_as_script(words):
     body = [word for word in words if not ASSIGNMENT.match(word)]
     if not body or program_name(body[0]) in DATA_ONLY_COMMANDS:
         return False
-    if any(SCRIPT_FLAG.match(word) for word in body[1:]):
-        return False
-    return any(program_name(word) in EVALUATORS for word in body)
+    for position, word in enumerate(body):
+        if program_name(word) not in EVALUATORS:
+            continue
+        # **A `-c` before the shell is the WRAPPER's option**, and reading the
+        # whole run for one confused the two: `ionice -c 2 bash` runs bash on
+        # its stdin, `-c` there being the scheduling class, and the run was
+        # dismissed as carrying its own script. Raised in review; verified
+        # allowed. Only what follows the shell token can be the shell's
+        # script flag.
+        if not any(SCRIPT_FLAG.match(element) for element in body[position + 1:]):
+            return True
+    return False
 
 
 def _run_words(command, start, end, ordinary):
@@ -2070,10 +2115,14 @@ def stdin_scripts(command):
     `git commit -F - <<EOF` a filing rather than a command: the leading word of
     the run has to be a shell.
     """
+    # The bodies first, for `undecodable_heredoc`'s reason: an apostrophe in
+    # one used to leave this scan in quote state for everything after it.
+    spans = heredoc_spans(command)
     ordinary = [False] * len(command)
     literal = [False] * len(command)
     escaped = None
-    for index, in_quotes, in_comment in shell_positions(command):
+    for index, in_quotes, in_comment in shell_positions(
+            command, [(start, end) for start, end, _ in spans]):
         ordinary[index] = not in_quotes and not in_comment
         if index == escaped:
             # **An escaped metacharacter is part of the word**, and treating
@@ -2106,13 +2155,17 @@ def stdin_scripts(command):
         and not (match.start() > 0 and command[match.start() - 1] == "<")
         and not command.startswith("<<<", match.start())
     ]
-    spans = heredoc_spans(command)
+    # **Two monotonic cursors, because the containment test that used to sit
+    # here was quadratic.** It re-scanned every earlier body for every
+    # opener/body pair, so a command carrying enough heredocs ran for long
+    # enough to hit the hook timeout — which is empty stdout, which is
+    # non-blocking. Raised in review, against the commit that had just removed
+    # the same shape from `heredoc_spans` and pinned only that function's
+    # timing. An opener inside a body is no longer in this list at all: the
+    # scan above is told where the bodies are, so it reports one as quoted.
     cursor = 0
     for start, end, _expands in spans:
-        while cursor < len(openers) and (
-                openers[cursor] >= start
-                or any(body <= openers[cursor] < close
-                       for body, close, _ in spans if close <= start)):
+        while cursor < len(openers) and openers[cursor] >= start:
             cursor += 1
         if cursor >= len(openers):
             break
@@ -2130,9 +2183,9 @@ def stdin_scripts(command):
         cursor = index + 3
         while cursor < len(command) and command[cursor] in " \t":
             cursor += 1
-        word = cursor
-        while word < len(command) and not boundary(word):
-            word += 1
+        word = word_end(command, cursor, [not literal[position] and value
+                                          for position, value
+                                          in enumerate(ordinary)])
         if consumed:
             # **A here-string is quote-removed before the shell runs it, and
             # `shlex` has no rule for either dollar quote.** So
@@ -2157,6 +2210,51 @@ def stdin_scripts(command):
             if parts:
                 yield " ".join(parts)
         index = max(word, index + 3)
+
+
+def substitution_fed_shells(command):
+    """Whether a process substitution supplies a shell in `command` its script.
+
+    **`bash < <(printf '%s\\n' 'git push origin +HEAD:main')` runs the push,
+    and every pass here judged the halves apart.** The inner `printf` is data,
+    correctly; the redirection strip then removes `< <(…)` whole, correctly,
+    because a process substitution IS the redirect target; and what is left is
+    a `bash` with no script, which is nothing at all. Raised in review;
+    verified allowed, and `bash <(echo …)` runs it too, the substitution being
+    a filename the shell is told to execute.
+
+    **Refused rather than read, on `unmodelled_printer`'s argument.** What the
+    shell executes is the substitution's OUTPUT, and reproducing a command's
+    output is the specification this file declines to carry — the same reason
+    `printf 'git p%ssh …' u | bash` refuses instead of being modelled. Reading
+    the inner command instead would be right for `<(echo '…')` and wrong for
+    every spelling that computes, and the wrong half fails open.
+
+    A run led by a printer is left alone, exactly as the pipeline pass leaves
+    one: `echo <(git push origin +HEAD:main)` is text, and the inner command is
+    judged in its own right by `substitutions`.
+    """
+    ordinary = [False] * len(command)
+    escaped = None
+    bodies = [(start, end) for start, end, _ in heredoc_spans(command)]
+    for index, in_quotes, in_comment in shell_positions(command, bodies):
+        if index == escaped:
+            escaped = None
+            continue
+        if command[index] == "\\" and not in_quotes and not in_comment:
+            escaped = index + 1
+            continue
+        ordinary[index] = not in_quotes and not in_comment
+
+    for index in range(len(command) - 1):
+        if not (ordinary[index] and ordinary[index + 1]):
+            continue
+        if command[index:index + 2] not in ("<(", ">("):
+            continue
+        start, end = _run_bounds(command, index, ordinary)
+        if reads_stdin_as_script(_run_words(command, start, end, ordinary)):
+            return True
+    return False
 
 
 def evaluated_scripts(tokens):
@@ -2496,6 +2594,14 @@ def _offence(command, depth, judged):
             refusal = offence(variant, depth + 1, judged)
             if refusal is not None:
                 return f"with {description}: {refusal}"
+
+    if substitution_fed_shells(command):
+        return (
+            "a shell is handed its script by a process substitution, so what "
+            "it runs is that command's output rather than anything written "
+            "here; refusing rather than judging the source instead of the "
+            "result."
+        )
 
     for script in stdin_scripts(command):
         # **A substitution inside a script a shell will run supplies the

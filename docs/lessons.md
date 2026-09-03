@@ -638,8 +638,13 @@ own line rather than sending a reader to a file that does not hold it.
   grammar and `subcommand_of` each read as something different and none read
   as syntax; and the quote scanner had no notion of a heredoc body, so an
   apostrophe in one opened a quote that ran to the end of the command and hid
-  every later opener from the function whose whole job is finding them. Each
-  fix was correct, and each left the next copy of the model standing.
+  every later opener from the function whose whole job is finding them — and
+  then the same oversight was still standing in `undecodable_heredoc` and in
+  `stdin_scripts`, one function either side of the fix; and `stdin_scripts`
+  had a parse of a shell WORD of its own, ending a here-string at the first
+  metacharacter, which is the fail-open `word_end` already had recorded in its
+  own docstring. Each fix was correct, and each left the next copy of the model
+  standing.
   **Several were fail-open** — a force push to `main` admitted,
   more than once — because a model that merely *differs* from the shell's is
   wrong in whichever direction the difference falls, and only one of those
@@ -655,6 +660,14 @@ own line rather than sending a reader to a file that does not hold it.
   guard's timeout is a fail-open. Appending to the list the scanner is
   walking, so the spans arrive as they are found, is one pass and the same
   answer.
+
+  **And a cost measured on one function is not a cost measured.** That pass
+  was pinned linear by a test over `heredoc_spans`, while the containment scan
+  it had removed still stood in two other functions that every `offence` call
+  reaches — ten million comparisons for 3,200 heredocs, found by profiling
+  rather than by the test that was watching. Measure the entry point, and
+  measure a rate rather than a total: a total goes stale on a faster runner
+  while the shape it stands in for does not.
 
 - **`git checkout <commit> -- <path>` writes the INDEX as well as the working
   tree, and a green suite says nothing about what is staged.** Taking a

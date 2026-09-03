@@ -658,6 +658,17 @@ refused now. The cost is a construct nothing in this repository writes, and
 `$'…'` is unaffected: its escapes are decoded, and one outside the decoded set
 was already refused.
 
+**A shell fed by a process substitution is refused for the same reason a
+printer feeding one is.** `bash < <(printf '%s' '…')` executes the
+substitution's output, and `bash <(echo '…')` executes it as a file — both
+ran, and every pass judged the halves apart: the inner command is data, the
+redirection strip removes `< <(…)` whole because a process substitution *is*
+the target, and what is left is a shell with no script. Reading the inner
+command instead would be right for `<(echo '…')` and wrong for every spelling
+that computes, so this joins `unmodelled_printer` rather than trying. The cost
+is `bash < <(cat script.sh)`, which nothing here writes; `diff <(a) <(b)` and
+`echo <(…)` are untouched, because the run has to be a shell.
+
 **A crash in the guard is a fail-open, so a crash now refuses the command it
 crashed on.** `PreToolUse` reads empty stdout as non-blocking, and a
 traceback is empty stdout — so each of the four crash paths found here (two
