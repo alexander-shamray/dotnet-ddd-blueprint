@@ -142,7 +142,10 @@ path-scope `Edit` away from every tracked tree while each keeps its own subject
 editable; **#30** and **#23**, the argv guard — the `--output` write primitive
 in every spelling including the quoted one, `ext::`, command substitution, and
 a push allow-list that refuses anything but one remote, one refspec naming a
-destination, and options from a fixed set; **#181**, the edit-target guard —
+destination, and options from a fixed set; **#183**, that a redirection is
+syntax rather than an argument — the honest `2>&1` push admitted, the three
+directions the stray descriptor failed in, and the bash rule that `foo2>x`
+writes the word `foo2`; **#181**, the edit-target guard —
 that a link inside an allowed tree is refused whatever it points at, that a
 denied tree spelled as *itself* is admitted here rather than judged twice, and
 that a checkout reached through a link is not refused wholesale, with its cases
@@ -167,7 +170,9 @@ run-against-every-primitive rule reaches the junction fallback there, and
 `macos-latest` reports `symlink`;
 **#150**, that what suppresses a
 sweep finding is decided by a helper rather than by a reader; **#75**
-again, that the issue helper leaves `gh issue create` no free parameter and
+again, that the issue helper leaves `gh issue create` no free parameter and,
+since **#184**, that neither provenance line is accepted under the other's
+route, and
 that the conversion exclusion reaches its own child rather than only its
 source — the second helper of the kind that never shipped wrong, whose title
 did; and **#17**, that every credential-bearing `docker run` in the reviewer

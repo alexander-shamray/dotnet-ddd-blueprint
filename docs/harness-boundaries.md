@@ -306,9 +306,10 @@ defeatable rather than theoretically so.
 **What closed it is the second of the two things named here as owed: a rule
 over the executed argv rather than the typed string.**
 `.claude/hooks/guard-git-argv.py`
-is a `PreToolUse` hook on `Bash` that `shlex.split`s the command — the same
-quote removal the shell performs — and judges the resolved argv, so the
-fragments are rejoined before anything is compared and the dodge stops working.
+is a `PreToolUse` hook on `Bash` that resolves the command the way the shell
+would — quote removal, heredoc bodies, comments, line separation and, since
+#183, redirections — and judges the argv that is left, so the fragments are
+rejoined before anything is compared and the dodge stops working.
 **It reaches further than any rule could**, and that is the part worth carrying:
 hooks run on every tool call in the loop, including the read-only `git` forms
 the harness waves through as promptless built-ins, where no allow or deny rule
@@ -629,7 +630,11 @@ no rule is consulted for. The deny stays as defence in depth and the three read
 grants stay with it, because removing them still buys nothing against a
 built-in. What survives as residual is one line rather than a grant: a flag the
 shell *computes* — `F=--output=x; git log $F` — is not visible to a hook that
-resolves quoting but not expansion.
+resolves quoting but not expansion. **#183's redirection strip inherits that
+same bound and adds none**: a descriptor the shell computes — `${N}>&1` — is
+not digits, so no descriptor is read and the word stays, which costs a
+positional and refuses. Every shape the strip cannot resolve fails that way
+round.
 
 **A seventh thing is a gap in the mechanism rather than in a grant.** Pinning a
 command to one subagent type is a **deny list of every other type**, because

@@ -633,7 +633,10 @@ own line rather than sending a reader to a file that does not hold it.
   where a comment starts; the escape handling in `_closing_paren` covered
   double quotes and not the unquoted state; and the `DATA_ONLY_COMMANDS`
   boundary was applied to the `git` scan and not to the evaluator pass one
-  function below it. Each fix was correct, and each left the next copy of the
+  function below it; and `shlex`'s `punctuation_chars` peeled the file
+  descriptor off `2>&1` as an ordinary word, which the run splitter, the push
+  grammar and `subcommand_of` each read as something different and none read
+  as syntax. Each fix was correct, and each left the next copy of the
   model standing. **Several were fail-open** — a force push to `main` admitted,
   more than once — because a model that merely *differs* from the shell's is
   wrong in whichever direction the difference falls, and only one of those
