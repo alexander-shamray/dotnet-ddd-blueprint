@@ -5873,6 +5873,50 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertRefused("git p$'\\165'sh origin +HEAD:main")
         self.assertAdmitted("echo $'\\0101'")
 
+    def test_an_assignment_prefix_is_not_the_command(self):
+        # **`X=1 bash` is a run led by `bash`**, and reading the first token
+        # instead made it a run led by `X=1`: the here-string was stripped as
+        # an ordinary redirect target, the evaluator scan then saw a `bash`
+        # with no script, and the push ran. Raised in review; verified allowed.
+        #
+        # The same reading is owed at three sites — the stdin scan, the
+        # printer's end of a pipe and the shell's — which is why it is one
+        # function rather than a test repeated at each. The printer's arguments
+        # are sliced past the COMMAND word for the same reason: past the first
+        # token they began with `echo`, and the data-only exemption then waved
+        # the judgement through.
+        for command in (
+            "X=1 bash <<<'git push origin +HEAD:main'",
+            "X=1 Y=2 bash <<EOF\ngit push origin +HEAD:main\nEOF",
+            "X=1 echo 'git push origin +HEAD:main' | bash",
+            "echo 'git push origin +HEAD:main' | X=1 bash",
+            "X=1 printf 'git p%ssh origin +HEAD:main' u | bash",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The controls: an assignment prefix on honest traffic is ordinary, and
+        # a printer with no shell behind it is still text.
+        self.assertAdmitted("X=1 git log --oneline -5")
+        self.assertAdmitted("GIT_DIR=/tmp/x git status")
+        self.assertAdmitted("X=1 echo 'git push origin +HEAD:main'")
+
+    def test_a_nested_default_is_unwrapped_one_layer_at_a_time(self):
+        # Raised in review as a miss, and it is not one — recorded because the
+        # reasoning is the interesting part. `DEFAULTED` is a flat regex and
+        # does reject braces in the name, but `${x:-${y:-push}}` does not need
+        # one pass: the reading rewrites the outer expansion, the result
+        # differs from its input, and `offence` recurses onto it — so the
+        # nesting is unwrapped a layer per level. The refusal reason says so
+        # out loud, carrying "with an expansion taken as its default" once per
+        # layer.
+        self.assertRefused("git ${x:-${y:-push}} origin +HEAD:main")
+        self.assertRefused("git ${a:-${b:-${c:-push}}} origin +HEAD:main")
+        self.assertRefused("git log ${x:-${y:---output=/tmp/probe}}")
+
+        reason = self.judge("git ${x:-${y:-push}} origin +HEAD:main")
+        self.assertEqual(2, reason.count("taken as its default"))
+
     def test_the_readings_do_not_multiply(self):
         # **The four readings and the substitution recursion each descend onto
         # a string barely shorter than the one they came from, so a command

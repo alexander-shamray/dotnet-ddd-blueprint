@@ -1693,6 +1693,29 @@ def program_name(token):
     return name
 
 
+# `NAME=value` before a command sets a variable for it and is not the command.
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def leading_command(run):
+    """The command word of `run`, past any assignment prefix.
+
+    **`X=1 bash` is a run led by `bash`**, and reading the first token instead
+    made it a run led by `X=1`: `X=1 bash <<<'git push origin +HEAD:main'` had
+    its here-string stripped as an ordinary redirect target, the evaluator scan
+    then saw a `bash` with no script, and the push ran. Raised in review;
+    verified allowed.
+
+    The same reading is owed to the printer half — `X=1 echo … | bash` — and to
+    the data-only exemption, which is why this is one function rather than a
+    test repeated at each site.
+    """
+    for token in run:
+        if not ASSIGNMENT.match(token):
+            return token
+    return ""
+
+
 def _run_leader(command, position, ordinary):
     """The first word of the command run containing `position`."""
     start = position
@@ -1701,13 +1724,18 @@ def _run_leader(command, position, ordinary):
         if ordinary[previous] and command[previous] in ";&|()\n":
             break
         start = previous
-    while start < position and command[start] in " \t":
-        start += 1
-    end = start
-    while end < position and not (
-            ordinary[end] and command[end] in METACHARACTERS):
-        end += 1
-    return command[start:end]
+    while start < position:
+        while start < position and command[start] in " \t":
+            start += 1
+        end = start
+        while end < position and not (
+                ordinary[end] and command[end] in METACHARACTERS):
+            end += 1
+        word = command[start:end]
+        if not ASSIGNMENT.match(word):
+            return word
+        start = end
+    return ""
 
 
 def unmodelled_printer(tokens):
@@ -1729,11 +1757,11 @@ def unmodelled_printer(tokens):
     for before, after in zip(runs, runs[1:]):
         if not before or not after:
             continue
-        if program_name(after[0]) not in EVALUATORS:
+        if program_name(leading_command(after)) not in EVALUATORS:
             continue
         if any(SCRIPT_FLAG.match(element) for element in after[1:]):
             continue
-        name = program_name(before[0])
+        name = program_name(leading_command(before))
         if name == "printf" and any("%" in element for element in before[1:]):
             return True
         if name == "echo" and any(element.startswith("-") and "e" in element
@@ -1875,13 +1903,18 @@ def evaluated_scripts(tokens):
     for before, after in zip(runs, runs[1:]):
         if not before or not after:
             continue
-        if program_name(before[0]) not in DATA_ONLY_COMMANDS:
+        if program_name(leading_command(before)) not in DATA_ONLY_COMMANDS:
             continue
-        if program_name(after[0]) not in EVALUATORS:
+        if program_name(leading_command(after)) not in EVALUATORS:
             continue
         if any(SCRIPT_FLAG.match(element) for element in after[1:]):
             continue
-        written = [element for element in before[1:]
+        # Sliced past the command word rather than past the first token: with
+        # an assignment prefix the two differ, and taking `before[1:]` handed
+        # the judgement a string beginning `echo`, which the data-only
+        # exemption then waved through.
+        spoken = before[before.index(leading_command(before)) + 1:]
+        written = [element for element in spoken
                    if not element.startswith("-")]
         if written:
             yield " ".join(written)
