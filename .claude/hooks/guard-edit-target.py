@@ -28,13 +28,21 @@ changes, and it cannot lock the repository out of its own control surface
 either: an edit spelled at the file it actually is passes here and is then
 judged by the rules that already exist.
 
-**Two things follow from the anchoring that are worth stating before someone
+**Three things follow from the anchoring that are worth stating before someone
 reads a false positive as a bug.** The checkout root is itself resolved, so a
 worktree under a temp root that is a link — `/tmp` on macOS, an 8.3 or `subst`
 path on Windows — is judged against its own real spelling rather than refused
-wholesale. And the comparison is case-insensitive where the platform is:
-Windows' `realpath` returns the on-disk case, so `DOCS/x` would otherwise
-differ from `docs/x` and be refused for a difference that is not one.
+wholesale. An anchor is a checkout **root** and every anchor containing the
+target must agree, because an anchor excuses one link traversal — its own root
+prefix — so an anchor at a linked directory inside the tree excuses precisely
+what this file refuses. And the comparison folds case where the **filesystem**
+does, asked of the filesystem by `case_insensitive` rather than read off the
+platform: Windows' `realpath` returns the on-disk case, so `DOCS/x` would
+otherwise differ from `docs/x` and be refused for a difference that is not one
+— and macOS mounts APFS case-insensitively by default, where a platform test
+folds nothing and a differently-cased checkout prefix matches no anchor at
+all, which is the branch that admits. A case-insensitive mount on Linux is the
+same case again, which is why the question is asked of the mount.
 
 **The residual, stated rather than left to be found.** The subject is a target
 spelled *inside* a checkout this session is standing in. A path spelled
@@ -156,8 +164,9 @@ def anchors(event):
     """The checkouts this guard is standing in, as (spelled, resolved) pairs.
 
     **Three sources, because no one of them is right in every session.**
-    `CLAUDE_PROJECT_DIR` is what the harness sets and what `.claude/settings.json`
-    interpolates into this hook's own command line; the event's `cwd` is where
+    `CLAUDE_PROJECT_DIR` is what the harness sets and what
+    `.claude/settings.json` interpolates into this hook's own command line;
+    the event's `cwd` is where
     the session actually is, which differs the moment `/branch` moves it into a
     sibling worktree; and this file's own location is the checkout that owns
     the guard, which is true even if the other two are absent or wrong.
