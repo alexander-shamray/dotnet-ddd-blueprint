@@ -75,6 +75,16 @@
             "statusMessage": "checking git argv"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3.12 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-edit-target.py\"",
+            "statusMessage": "checking edit target"
+          }
+        ]
       }
     ]
   }
