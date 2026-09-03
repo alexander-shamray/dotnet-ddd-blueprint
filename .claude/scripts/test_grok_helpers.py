@@ -137,7 +137,6 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import time
 import unittest
 from pathlib import Path
 
@@ -3741,6 +3740,24 @@ class WhatSuppressesIsDecidedByCodeNow(unittest.TestCase):
                 )
 
 
+class _TallyingList(list):
+    """A list that records how many elements are read out of it.
+
+    The instrument for `test_the_whole_judgement_stays_linear_in_the_heredocs`,
+    which needs a count rather than a clock — the defect it pins re-read a
+    list, so reads are what it costs and reads are deterministic.
+    """
+
+    def __init__(self, items, tally):
+        super().__init__(items)
+        self.tally = tally
+
+    def __iter__(self):
+        for item in super().__iter__():
+            self.tally[0] += 1
+            yield item
+
+
 class TheGitArgvGuard(unittest.TestCase):
     """#30 and #23 — two holes a permission rule cannot close, closed at argv.
 
@@ -6240,27 +6257,26 @@ class TheGitArgvGuard(unittest.TestCase):
                            "EOF\n"
                            "git push origin +HEAD:main")
 
-    def test_finding_the_bodies_stays_one_linear_pass(self):
+    def test_finding_the_bodies_stays_one_pass(self):
         # The spans tell the scanner which characters are body text and the
         # scanner is what finds the spans, so the two have to be interleaved.
         # **Feeding the spans back between whole passes instead recovers
         # exactly one body per pass** — each newly visible body breaks the
         # state again at its own apostrophe — which was measured at n+1 passes
-        # for n heredocs. That is the quadratic shape this file already treats
-        # as a fail-open by timeout, so `heredoc_spans` appends to the list the
-        # scanner is walking rather than repeating itself.
+        # for n heredocs. `heredoc_spans` appends to the list the scanner is
+        # walking rather than repeating itself.
         #
-        # A thousand of them, each with an apostrophe, in one pass.
+        # A thousand of them, each with an apostrophe, and every one found.
+        # **The assertion is the count of spans, not a duration**: a timing
+        # assertion on CI is a flake, which this file says elsewhere and this
+        # test used to contradict. Raised in review.
         guard = self.guard_module()
         body = "cat > f.md <<'EOF'\ndon't\nEOF\n"
-        started = time.monotonic()
-        found = guard.heredoc_spans(body * 1000)
-        elapsed = time.monotonic() - started
-        self.assertEqual(1000, len(found), "every body, not one per pass")
-        self.assertLess(elapsed, 5, "and linearly, not quadratically")
+        self.assertEqual(1000, len(guard.heredoc_spans(body * 1000)),
+                         "every body, not one per pass")
 
     def test_the_whole_judgement_stays_linear_in_the_heredocs(self):
-        # **The timing test above measures `heredoc_spans` and the hook runs
+        # **The test above measures `heredoc_spans` and the hook runs
         # `offence`**, which was the gap: the containment scan that had just
         # been removed from `heredoc_spans` was still standing in
         # `stdin_scripts` AND in `undecodable_heredoc`, each re-reading every
@@ -6269,18 +6285,39 @@ class TheGitArgvGuard(unittest.TestCase):
         # 3,200 heredocs. **A guard that runs past its timeout produces no
         # verdict, and `PreToolUse` reads that as non-blocking.**
         #
-        # Measured per heredoc rather than in total, because a total is the
-        # figure that goes stale on a faster runner while the shape it is
-        # standing in for does not.
+        # **Counted rather than timed, and the count is exact.** The earlier
+        # form of this test asserted a wall-clock ratio, which a contended or
+        # paused runner can violate with no regression at all — raised in
+        # review, against this file's own rule that a timing assertion on CI is
+        # a flake. What the defect actually did was READ the span list once per
+        # opener, so the instrument is a list that tallies how often it is
+        # iterated: doubling the heredocs doubles the reads when the passes are
+        # linear and quadruples them when they are not. Measured on the commit
+        # that carried the defect: 1.00 -> 3.93 -> 3.97 against 2.00 -> 2.00
+        # here.
         guard = self.guard_module()
         body = "cat > f.md <<'EOF'\nplain\nEOF\n"
-        cost = {}
-        for count in (400, 3200):
-            started = time.monotonic()
-            guard.offence(body * count)
-            cost[count] = (time.monotonic() - started) / count
-        self.assertLess(cost[3200], cost[400] * 1.8,
-                        "eight times the input is not sixteen times the work")
+        original = guard.heredoc_spans
+        reads = {}
+        try:
+            for count in (100, 200, 400):
+                tally = [0]
+                guard.heredoc_spans = (
+                    lambda command, _o=original, _t=tally:
+                    _TallyingList(_o(command), _t))
+                # A distinct trailing comment per size, because `offence`
+                # memoises its verdict per string.
+                guard.offence(body * count + "# " + str(count))
+                reads[count] = tally[0]
+        finally:
+            guard.heredoc_spans = original
+
+        self.assertGreater(reads[100], 0, "the instrument saw the list at all")
+        for smaller, larger in ((100, 200), (200, 400)):
+            with self.subTest(sizes=(smaller, larger)):
+                self.assertLess(
+                    reads[larger], reads[smaller] * 2.5,
+                    "twice the heredocs is twice the reads, not four times")
 
     def test_a_wrappers_own_option_is_not_the_shells_script_flag(self):
         # `ionice -c 2 bash` runs bash on its stdin — `-c` there is the
@@ -6387,6 +6424,65 @@ class TheGitArgvGuard(unittest.TestCase):
         # Honest traffic carrying the same shapes is still admitted.
         self.assertAdmitted("echo $'\\n'; git log --oneline -5")
         self.assertAdmitted("git log --grep='$x' -5")
+
+    def test_the_nested_closers_read_the_shared_quoting(self):
+        # **`_closing_paren` and `_closing_brace` were the sixth and seventh
+        # copies of the model**, consolidated one round after the other five —
+        # so `git log "$( : $'\\'x\\\\'\\''; git push origin +HEAD:main)"` closed
+        # and reopened on the wrong quotes, `_closing_paren` returned None, no
+        # substitution was extracted, and `shlex` kept the outer one opaque.
+        # Raised in review; verified allowed.
+        guard = self.guard_module()
+        command = ('git log "$( : $\'x\\\'\'; git push origin +HEAD:main)"')
+        self.assertIsNotNone(
+            guard._closing_paren(command, command.index("$(") + 2),
+            "the substitution has a closer and it is found")
+        self.assertRefused(command)
+
+        # **Over `command[start:]`, because a substitution body is re-parsed as
+        # a fresh command line.** Asking about absolute positions would mark
+        # the whole body of a substitution inside double quotes as quoted and
+        # lose its own closer — so this control matters as much as the case
+        # above.
+        plain = 'git log "$(printf x)"'
+        self.assertEqual(
+            plain.index(")"),
+            guard._closing_paren(plain, plain.index("$(") + 2))
+        self.assertAdmitted(plain)
+
+        # The quoted-paren and commented-paren cases this function was fixed
+        # for before are still right.
+        self.assertRefused(
+            'git log "$(printf \')\'; git push origin +HEAD:main)"')
+        self.assertRefused(
+            'git log "$(echo ok # )\ngit push origin +HEAD:main)"')
+
+    def test_an_assignment_prefix_has_four_spellings(self):
+        # Bash reads `NAME=value`, `NAME+=value`, `NAME[i]=value` and
+        # `NAME[i]+=value` all as assignment prefixes, and this knew one — so
+        # `X+=1 printf 'git p%ssh …' u | bash` ran the push while both printer
+        # passes took `X+=1` for the command word and left the run alone.
+        # Raised in review; verified allowed, with the `arr[0]=v` form beside
+        # it.
+        guard = self.guard_module()
+        for word in ("X=1", "X+=1", "arr[0]=v", "arr[0]+=v", "PATH=/x:/y"):
+            with self.subTest(word=word):
+                self.assertIsNotNone(guard.ASSIGNMENT.match(word))
+        for word in ("git", "--grep=x", "=x", "1X=y", "echo"):
+            with self.subTest(word=word):
+                self.assertIsNone(guard.ASSIGNMENT.match(word),
+                                  "and a command word is not an assignment")
+
+        for command in (
+            "X+=1 printf 'git p%ssh origin +HEAD:main' u | bash",
+            "X+=1 echo 'git push origin +HEAD:main' | bash",
+            "arr[0]=v echo 'git push origin +HEAD:main' | bash",
+            "X+=1 bash <<<'git push origin +HEAD:main'",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        self.assertAdmitted("GIT_PAGER=cat git log --oneline -5")
 
     def test_a_locale_quote_is_refused_for_its_own_reason(self):
         # One sentence covered two decisions and said the wrong thing about

@@ -1768,56 +1768,35 @@ def substitutions(command, quotes=True):
 def _closing_brace(command, start):
     """Index of the `}` closing a function substitution, or None.
 
-    The same quote-and-escape tracking `_closing_paren` does, one bracket over.
-    Written as its own function rather than parameterised, because the two
-    differ in what nests inside them and a shared one would have to be told.
+    The same quoting `_closing_paren` reads, one bracket over, and from the
+    same place: `quote_states`. Written as its own function rather than
+    parameterised, because the two differ in what nests inside them and a
+    shared one would have to be told.
+
+    **Over `command[start:]`, not over `command`.** A substitution body is
+    re-parsed as a fresh command line, so the outer context's quoting does not
+    reach inside one — asking about absolute positions would mark the whole
+    body of `"$(printf x)"` as double-quoted and lose its own closer.
     """
+    states = quote_states(command[start:])
     depth, index = 1, start
-    single = double = comment = False
-    at_word_start = True
     while index < len(command):
         char = command[index]
-        if comment:
-            # A function substitution's body is a command list too, so a `}`
-            # inside a comment closes nothing. The same handling
-            # `_closing_paren` carries, and owed here for the same reason —
-            # raised in review, one bracket over.
-            if char == "\n":
-                comment = False
-                at_word_start = True
+        if states[index - start] in ("single", "double", "comment"):
+            # A `}` inside a quote or a comment closes nothing — a function
+            # substitution's body is a command list too. Raised in review, one
+            # bracket over.
             index += 1
             continue
-        if single:
-            if char == "'":
-                single = False
-        elif double:
-            if char == "\\" and index + 1 < len(command):
-                index += 2
-                continue
-            if char == '"':
-                double = False
-        elif char == "\\" and index + 1 < len(command):
+        if char == "\\" and index + 1 < len(command):
             index += 2
-            at_word_start = False
             continue
-        elif char == "#" and at_word_start:
-            comment = True
-            index += 1
-            continue
-        elif char == "'":
-            single = True
-            at_word_start = False
-        elif char == '"':
-            double = True
-            at_word_start = False
-        elif char == "{":
+        if char == "{":
             depth += 1
         elif char == "}":
             depth -= 1
             if not depth:
                 return index
-        if not (single or double):
-            at_word_start = char in METACHARACTERS
         index += 1
     return None
 
@@ -1830,33 +1809,34 @@ def _closing_paren(command, start):
     `git log "$(printf ')'; git push origin +HEAD:main)"` ended extraction at
     the `)` inside `'…'`, leaving the push hidden in the outer token. Raised in
     review; verified allowed.
+
+    **And the tracking is `quote_states`', not a seventh copy of it.** This
+    function kept its own, which never learned that `$'…'` takes escapes, so
+    `git log "$( : $'x\''; git push origin +HEAD:main)"` closed and reopened on
+    the wrong quotes and returned None — no substitution was extracted, `shlex`
+    kept the outer one opaque, and the push ran. Raised in review; verified
+    allowed, in the round after the five siblings were consolidated and this
+    one was missed.
+
+    **Over `command[start:]`, not over `command`.** A substitution body is
+    re-parsed as a fresh command line, so the outer context's quoting does not
+    reach inside one — asking about absolute positions would mark the whole
+    body of `"$(printf x)"` as double-quoted and lose its own closer.
     """
+    states = quote_states(command[start:])
     depth, index = 1, start
-    single = double = comment = False
-    at_word_start = True
     while index < len(command):
         char = command[index]
-        if comment:
+        if states[index - start] in ("single", "double", "comment"):
             # **A substitution's body is a command list, so `#` opens a comment
             # inside it and a `)` in that comment closes nothing.**
             # `git log "$(echo ok # )` / `git push origin +HEAD:main)"` ended
             # extraction at the commented paren and left the push in the outer
-            # token — measured, bash runs it. Raised in review.
-            if char == "\n":
-                comment = False
-                at_word_start = True
+            # token — measured, bash runs it. Raised in review. A quoted paren
+            # closes nothing either, which is this function's first fix.
             index += 1
             continue
-        if single:
-            if char == "'":
-                single = False
-        elif double:
-            if char == "\\" and index + 1 < len(command):
-                index += 2
-                continue
-            if char == '"':
-                double = False
-        elif char == "\\" and index + 1 < len(command):
+        if char == "\\" and index + 1 < len(command):
             # An unquoted `\)` is a literal paren to bash, so counting it closed
             # the substitution early and hid the rest of it in the outer token:
             # `git log "$(printf \); git push origin +HEAD:main)"`. The escape
@@ -1864,19 +1844,8 @@ def _closing_paren(command, start):
             # review; the bash behaviour measured — `printf` receives the paren
             # and the push runs.
             index += 2
-            at_word_start = False
             continue
-        elif char == "#" and at_word_start:
-            comment = True
-            index += 1
-            continue
-        elif char == "'":
-            single = True
-            at_word_start = False
-        elif char == '"':
-            double = True
-            at_word_start = False
-        elif command.startswith("$(", index):
+        if command.startswith("$(", index):
             depth += 1
             index += 2
             continue
@@ -1886,8 +1855,6 @@ def _closing_paren(command, start):
             depth -= 1
             if not depth:
                 return index
-        if not (single or double):
-            at_word_start = char in METACHARACTERS
         index += 1
     return None
 
@@ -1931,7 +1898,13 @@ def program_name(token):
 
 
 # `NAME=value` before a command sets a variable for it and is not the command.
-ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# **Four spellings, and the first version of this knew one.** Bash reads
+# `NAME=value`, `NAME+=value`, `NAME[i]=value` and `NAME[i]+=value` all as
+# assignment prefixes, so `X+=1 printf 'git p%ssh origin +HEAD:main' u | bash`
+# ran the push while both printer passes took `X+=1` for the command word and
+# left the run alone. Raised in review; verified allowed, with the `arr[0]=v`
+# form beside it.
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=")
 
 
 def leading_command(run):

@@ -645,8 +645,10 @@ own line rather than sending a reader to a file that does not hold it.
   metacharacter, which is the fail-open `word_end` already had recorded in its
   own docstring; and then the escape-awareness taught to the quote scanner was
   missing from all **five** of its siblings at once, so one prefix carrying an
-  escaped ANSI-C quote walked past four passes in a single command. Each fix
-  was correct, and each left the next copy of the model standing.
+  escaped ANSI-C quote walked past four passes in a single command; and the
+  round that consolidated those five missed the two nested closers, so the
+  same prefix inside `$(…)` walked past the seventh copy. Each fix was
+  correct, and each left the next copy of the model standing.
   **Several were fail-open** — a force push to `main` admitted,
   more than once — because a model that merely *differs* from the shell's is
   wrong in whichever direction the difference falls, and only one of those
@@ -662,6 +664,13 @@ own line rather than sending a reader to a file that does not hold it.
   signal to make that move is not elegance, it is having fixed the same
   sentence in a third place.
 
+  **Consolidating copies is a search, and the search is what gets skipped.**
+  Five became adapters over one primitive in a single commit, and the next
+  review found two more — `_closing_paren` and `_closing_brace`, whose own
+  docstrings advertised that they tracked quotes. Grep for the *state* the
+  model keeps, not for the function you remember: `in_single` found all seven
+  in one command, and nobody ran it.
+
   **And when two of those models feed each other, interleave them rather than
   alternating.** The heredoc scanner needs the body spans to read the command
   correctly, and finding the body spans is what it is for. Feeding them back
@@ -670,6 +679,14 @@ own line rather than sending a reader to a file that does not hold it.
   guard's timeout is a fail-open. Appending to the list the scanner is
   walking, so the spans arrive as they are found, is one pass and the same
   answer.
+
+  **And measure work, not wall-clock.** The replacement for that test asserted
+  a timing *ratio*, which contradicted this repository's own rule — a timing
+  assertion on CI is a flake — and a contended runner can violate it with no
+  regression at all. What the defect did was re-read a list once per opener, so
+  the instrument is a list that tallies its own reads: 2.00 then 2.00 when the
+  passes are linear, 3.93 then 3.97 when they are not. Deterministic, exact,
+  and it names the mechanism rather than its symptom.
 
   **And a cost measured on one function is not a cost measured.** That pass
   was pinned linear by a test over `heredoc_spans`, while the containment scan
