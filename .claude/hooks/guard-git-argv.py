@@ -323,8 +323,14 @@ def _heredoc_delimiter(word):
     return "".join(out), not quoted
 
 
-def shell_positions(command):
+def shell_positions(command, data=()):
     """Walk `command`, yielding `(index, in_quotes, in_comment)` per character.
+
+    `data` is spans this scanner must read as data rather than as shell text —
+    heredoc bodies, and only `heredoc_spans` passes any. Inside one, a quote
+    opens nothing and a `#` starts nothing: the characters are yielded as
+    quoted, which is what every consumer of this scanner means by "not a
+    command line".
 
     **One scanner, because both callers were defeated by the same thing.** A
     regex search for `<<` found a heredoc opener inside a COMMENT, so
@@ -350,6 +356,9 @@ def shell_positions(command):
     locale-quoted word already follows the double-quoted rule this scanner
     applies to it.
     """
+    # **Not copied and not sorted**: `heredoc_spans` appends to this list
+    # while consuming the generator, and every span it appends starts ahead of
+    # the cursor, so the order holds by construction.
     single = double = comment = False
     # Whether the single quote now open was introduced by a `$`, and whether
     # the character just yielded was an unquoted, unescaped `$`.
@@ -363,7 +372,21 @@ def shell_positions(command):
     # in review.
     at_word_start = True
     index = 0
+    # A cursor rather than a search: this walk is monotonic, so the spans are
+    # consumed in order. Searching them per character made a command carrying
+    # 200 heredocs ten times slower, and a quadratic path in this file is the
+    # shape that produced the memoisation fix.
+    cursor = 0
     while index < len(command):
+        while cursor < len(data) and data[cursor][1] <= index:
+            cursor += 1
+        if cursor < len(data) and data[cursor][0] <= index:
+            while index < data[cursor][1] and index < len(command):
+                yield index, True, False
+                index += 1
+            at_word_start = True
+            dollar = False
+            continue
         char = command[index]
         if comment:
             if char == "\n":
@@ -453,8 +476,25 @@ def heredoc_spans(command):
     `git status # <<EOF` delete the command on the following line — the guard
     removing the very thing it exists to read.
     """
-    openers = []
-    for index, in_quotes, in_comment in shell_positions(command):
+    # **A body is data, and its quotes are not the command line's.** An
+    # apostrophe in one used to open a quote that ran to the end of the
+    # command, so every later opener sat `in_quotes`, was skipped, and its
+    # body was left standing to be tokenised as commands. Found by hitting it:
+    # writing four replies to disk with `cat > f <<'EOF'` heredocs was refused
+    # because a body quoting `bash -c` reached the evaluator scan. Over-refusal
+    # in every direction probed — a push after such a body was refused before
+    # and after — which is how it survived this long.
+    #
+    # **`data` is handed to the scanner and appended to WHILE it walks**, which
+    # is what makes this one pass. Feeding the spans back between whole passes
+    # instead recovers exactly one body per pass, because each newly visible
+    # body breaks the state again at its own apostrophe: measured at n+1 passes
+    # for n heredocs, which is the quadratic shape this file already treats as
+    # a fail-open by timeout. The scanner consumes `data` through a cursor and
+    # this loop only ever appends spans that start ahead of it, so the list is
+    # sorted by construction and the walk stays monotonic.
+    data, spans, pending = [], [], 0
+    for index, in_quotes, in_comment in shell_positions(command, data):
         if in_quotes or in_comment:
             continue
         if not command.startswith("<<", index):
@@ -473,28 +513,25 @@ def heredoc_spans(command):
             continue
         if command.startswith("<<<", index):
             continue
-        if not openers or index >= openers[-1][0]:
-            match = HEREDOC.match(command, index)
-            if match:
-                # One parse of the delimiter word, quote removal included —
-                # `<<\EOF` is a quoted delimiter to bash the same way `<<'EOF'`
-                # is, and `<<E"OF"` is one in parts.
-                delimiter, expands = _heredoc_delimiter(match.group("word"))
-                if delimiter is None:
-                    # A delimiter this file cannot decode opens no body, so the
-                    # lines after it stay commands and are judged as such.
-                    continue
-                openers.append(
-                    (match.end(), expands, delimiter, bool(match.group("dash"))))
-
-    spans, pending = [], 0
-    for intro_end, expands, delimiter, dash in openers:
-        # An introducer sitting inside an earlier body is body text, not an
-        # opener. Containment, not "before the cursor" — two heredocs stacked on
-        # ONE line both introduce before either body starts, so an ordering test
-        # discards the second.
-        if any(start <= intro_end < end for start, end, _ in spans):
+        match = HEREDOC.match(command, index)
+        if not match:
             continue
+        # One parse of the delimiter word, quote removal included —
+        # `<<\EOF` is a quoted delimiter to bash the same way `<<'EOF'`
+        # is, and `<<E"OF"` is one in parts.
+        delimiter, expands = _heredoc_delimiter(match.group("word"))
+        if delimiter is None:
+            # A delimiter this file cannot decode opens no body, so the
+            # lines after it stay commands and are judged as such.
+            continue
+        intro_end, dash = match.end(), bool(match.group("dash"))
+
+        # An introducer sitting inside an earlier body is body text, not an
+        # opener — which the scanner now settles by refusing to walk a body at
+        # all, so the containment test that used to stand here is gone rather
+        # than kept as a second answer to one question. Two heredocs stacked on
+        # ONE line both introduce before either body starts, and that is still
+        # `pending`'s job below rather than an ordering test's.
 
         # **A body begins on the NEXT LINE, and taking it to begin at the
         # introducer was a third admitted force push.** Everything between the
@@ -533,6 +570,7 @@ def heredoc_spans(command):
             break
         pending = start + closing.end()
         spans.append((start, pending, expands))
+        data.append((start, pending))
     return spans
 
 

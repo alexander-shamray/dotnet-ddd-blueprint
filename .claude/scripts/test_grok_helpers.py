@@ -137,6 +137,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -6194,6 +6195,59 @@ class TheGitArgvGuard(unittest.TestCase):
         # refused for carrying a `$`.
         self.assertAdmitted("bash <<<'git log --oneline -5'")
         self.assertAdmitted("bash <<<'git log --grep=$x -5'")
+
+    def test_a_body_does_not_carry_its_quotes_into_the_next_heredoc(self):
+        # **`shell_positions` had no notion of a heredoc body, so an
+        # apostrophe in one opened a quote that ran to the end of the
+        # command.** Every later opener then sat `in_quotes` and was skipped,
+        # `strip_heredocs` left that body standing, and its lines were
+        # tokenised as commands. Found by hitting it: writing these very
+        # replies to disk with four `cat > f <<'EOF'` heredocs was refused,
+        # because a body quoting `bash -c` reached the evaluator scan as a
+        # command line.
+        #
+        # **Over-refusal in every direction probed, which is why it survived
+        # this long**: a push after such a body was refused before the fix and
+        # is refused after it, on both this branch and its parent. The cost was
+        # honest traffic, and the traffic was this repository writing about
+        # itself.
+        guard = self.guard_module()
+        command = ("cat > a.md <<'EOF'\n"
+                   "it is the reviewer's point\n"
+                   "EOF\n"
+                   "cat > b.md <<'EOF'\n"
+                   "the shape `echo x | bash` is the one at issue\n"
+                   "EOF")
+        self.assertEqual(
+            2, len(guard.heredoc_spans(command)),
+            "both bodies are found, not just the one before the apostrophe")
+        self.assertAdmitted(command)
+
+        # And the fail-safe direction is unchanged: a command after a body,
+        # however the body quotes, is still judged.
+        self.assertRefused("cat > a.md <<'EOF'\n"
+                           "don't\n"
+                           "EOF\n"
+                           "git push origin +HEAD:main")
+
+    def test_finding_the_bodies_stays_one_linear_pass(self):
+        # The spans tell the scanner which characters are body text and the
+        # scanner is what finds the spans, so the two have to be interleaved.
+        # **Feeding the spans back between whole passes instead recovers
+        # exactly one body per pass** — each newly visible body breaks the
+        # state again at its own apostrophe — which was measured at n+1 passes
+        # for n heredocs. That is the quadratic shape this file already treats
+        # as a fail-open by timeout, so `heredoc_spans` appends to the list the
+        # scanner is walking rather than repeating itself.
+        #
+        # A thousand of them, each with an apostrophe, in one pass.
+        guard = self.guard_module()
+        body = "cat > f.md <<'EOF'\ndon't\nEOF\n"
+        started = time.monotonic()
+        found = guard.heredoc_spans(body * 1000)
+        elapsed = time.monotonic() - started
+        self.assertEqual(1000, len(found), "every body, not one per pass")
+        self.assertLess(elapsed, 5, "and linearly, not quadratically")
 
     def test_a_run_of_assignments_alone_has_no_command_word(self):
         # `leading_command` answers `""` for a run that is all assignments, and
