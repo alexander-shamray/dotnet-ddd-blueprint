@@ -519,16 +519,22 @@ def undecodable_heredoc(command):
 def glued(command, start, end):
     """Whether `command[start:end]` touches other characters of its own word.
 
-    A word boundary is whitespace, a metacharacter, a quote, or the end of the
-    string — so an expansion standing alone as `$BRANCH` is not glued, and the
-    `${x}` of `--out${x}put=` is. This is the whole of the line between an
-    expansion whose emptiness closes a word up and one that simply supplies a
-    value.
+    A word boundary is whitespace, a metacharacter, or the end of the string —
+    so an expansion standing alone as `$BRANCH` is not glued, and the `${x}` of
+    `--out${x}put=` is. This is the whole of the line between an expansion
+    whose emptiness closes a word up and one that simply supplies a value.
+
+    **A quote is NOT a boundary**, and counting one as such left half of this
+    open: `git $x'push' origin +HEAD:main` runs the push, because quoting ends
+    no word in bash — `'pu'$x'sh'` is one word too. Found by an adversarial
+    audit after the `${x}` half had been closed, which is this file's own
+    lesson about fixing the case in front of you rather than the grammar
+    behind it.
     """
     def boundary(position):
         if position < 0 or position >= len(command):
             return True
-        return command[position] in METACHARACTERS or command[position] in "'\""
+        return command[position] in METACHARACTERS
 
     return not (boundary(start - 1) and boundary(end))
 
@@ -650,7 +656,19 @@ def dollar_quotes(command):
         if char == "\\" and index + 1 < len(command):
             index += 2
             continue
-        if char == "$" and command[index + 1:index + 2] in ("'", '"'):
+        if (char == "$" and not in_double
+                and command[index + 1:index + 2] in ("'", '"')):
+            # **Neither form is a quoting form INSIDE double quotes**, and
+            # missing that broke this three ways at once. To bash
+            # `"regex $'\\d' matches"` is an ordinary message about a regex —
+            # it was refused. `"$'\\x22'"` was decoded and re-emitted as a
+            # single-quoted word *inside* the surrounding double quotes, which
+            # unbalanced the line, sent it to the `ValueError` path and let
+            # `git p''ush origin +HEAD:main` through beside it. And `"a$"`
+            # closed at the wrong quote, swallowing the rest of the line into
+            # one word. All three raised in an adversarial audit; all three
+            # this branch's own doing.
+            #
             # **Escape-aware, like every other closer in this file.** A plain
             # `find` closed `$"\"'"` on the ESCAPED quote, resumed inside the
             # string, read the `'` there as opening single quotes, and from
@@ -730,7 +748,17 @@ def decode_ansi_c(body):
                 digits = digits[:-1]
             if not digits:
                 return None
-            out.append(chr(int(digits, 16)))
+            # **`chr` raises above 0x10FFFF, and a hook that raises fails
+            # OPEN.** `$'\\UFFFFFFFF'` took the process down with an
+            # `OverflowError`: exit 1, empty stdout, which `PreToolUse` treats
+            # as a non-blocking error, so the command ran. Found by an
+            # adversarial audit, and it is the worst shape a defect in this
+            # file can take — every refusal in it is reached by returning a
+            # string, and none of that happens after a traceback.
+            point = int(digits, 16)
+            if point > 0x10FFFF:
+                return None
+            out.append(chr(point))
             index += 2 + len(digits)
             continue
         if escape == "c":
@@ -740,7 +768,14 @@ def decode_ansi_c(body):
             index += 3
             continue
         return None
-    return "".join(out)
+    # **A NUL truncates the word in bash, and keeping one changed what the
+    # word said.** `$'a\\0b'` is the single byte `a`, so `git p$'\\0'ush` is
+    # `git push` — measured — and the hook was holding a NUL in the middle of a
+    # token nothing would match. Truncating models the shell exactly, where
+    # refusing would have been the cruder answer. Found by an adversarial
+    # audit.
+    text = "".join(out)
+    return text.split("\0", 1)[0]
 
 
 def decode_locale_quote(body):
@@ -779,15 +814,23 @@ def undecodable_dollar_quote(command):
     the whole command down the `ValueError` path, where the push allow-list
     does not run.
 
-    **Both forms are read, and only the ANSI-C one can fail.** `$"…"` has
-    double-quote semantics, which `decode_locale_quote` implements completely;
-    `$'…'` can carry an escape outside the set `decode_ansi_c` knows, and that
-    is the case with no safe reading.
+    **Both forms can fail, for different reasons.** `$'…'` can carry an escape
+    outside the set `decode_ansi_c` knows. And `$"…"` is a *translated
+    double-quoted string*, so bash performs the expansions inside it —
+    `git $"$(echo push)" origin +HEAD:main` runs the push. Freezing that body
+    as a literal made an expansion inert and admitted it, so a locale quote
+    carrying one is refused rather than read. Found by an adversarial audit;
+    the earlier claim that this form "cannot fail" was true of its backslash
+    rules and false of its semantics.
     """
-    return any(
-        ansi_c and decode_ansi_c(command[start + 2:end - 1]) is None
-        for start, end, ansi_c in dollar_quotes(command)
-    )
+    for start, end, ansi_c in dollar_quotes(command):
+        body = command[start + 2:end - 1]
+        if ansi_c:
+            if decode_ansi_c(body) is None:
+                return True
+        elif "$(" in body or "${" in body or "`" in body:
+            return True
+    return False
 
 
 def strip_dollar_quotes(command):

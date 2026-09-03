@@ -5626,6 +5626,107 @@ class TheGitArgvGuard(unittest.TestCase):
         self.assertAdmitted("git log --format=$(cat /tmp/fmt) -5")
         self.assertAdmitted("git commit -m \"built at $(date)\"")
 
+    def test_a_dollar_quote_inside_double_quotes_is_not_one(self):
+        # **Neither form is a quoting form inside double quotes**, and missing
+        # that broke three things at once — all of them this branch's own
+        # doing, all found by an adversarial audit.
+        #
+        # `"$'\\x22'"` was decoded and re-emitted as a single-quoted word
+        # INSIDE the surrounding double quotes, which unbalanced the line, sent
+        # it to the `ValueError` path, and let the command beside it through.
+        # `"a$"` closed on the wrong quote and swallowed the rest of the line
+        # into one word.
+        self.assertRefused(
+            'git log "$\'\\x22\'" ; git p\'\'ush origin +HEAD:main')
+        self.assertRefused(
+            'git log "a$" ; git push origin +HEAD:main ; echo "b"')
+
+        # And the over-refusal half: to bash this is an ordinary message about
+        # a regex, and it was refused as an undecodable escape.
+        self.assertAdmitted('git commit -m "regex $\'\\d\' matches"')
+        self.assertAdmitted('git log "$\'\\x22\'"')
+
+    def test_a_locale_quote_expands_what_is_inside_it(self):
+        # `$"…"` is a TRANSLATED double-quoted string, so bash performs the
+        # expansions in it — `git $"$(echo push)" origin +HEAD:main` runs the
+        # push. Freezing the body as a literal made the expansion inert and
+        # admitted it, so one carrying an expansion is refused rather than
+        # read. The claim that this form "cannot fail" was true of its
+        # backslash rules and false of its semantics.
+        for command in (
+            'git $"$(echo push)" origin +HEAD:main',
+            'git $"`echo push`" origin +HEAD:main',
+            'git $"${x}"push origin +HEAD:main',
+            'git log $"$(echo --output=/tmp/probe)"',
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_a_nul_truncates_the_word_the_way_bash_does(self):
+        # `$'a\\0b'` is the single byte `a`, so `git p$'\\0'ush` is `git push`.
+        # Keeping the NUL left a token nothing would match, and the earlier
+        # answer — refusing any backslash — had hidden it. Truncating models
+        # the shell exactly rather than refusing around it.
+        for command in (
+            "git p$'\\0'ush origin +HEAD:main",
+            "git $'push\\0IGNORED' origin +HEAD:main",
+            "git p$'\\400'ush origin +HEAD:main",
+            "git log --out$'\\0'put=/tmp/probe",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+    def test_an_expansion_beside_a_quoted_fragment_is_still_glued(self):
+        # **A quote ends no word in bash**, and counting one as a boundary left
+        # half of the glued-expansion fix open: `git $x'push' …` and
+        # `git 'pu'$x'sh' …` are one word each. Found by an adversarial audit
+        # after the `${x}` half had been closed — the same lesson this file
+        # keeps paying for, about fixing the case rather than the grammar.
+        for command in (
+            "git $x'push' origin +HEAD:main",
+            "git 'push'$x origin +HEAD:main",
+            'git $x"push" origin +HEAD:main',
+            "git 'pu'$x'sh' origin +HEAD:main",
+            "git ${x}'push' origin +HEAD:main",
+            "git log $x'--output=/tmp/probe'",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # The controls, which are why `glued` exists rather than a blanket
+        # deletion: an expansion supplying a value is ordinary traffic.
+        self.assertAdmitted('git commit -m "msg-$VERSION"')
+        self.assertAdmitted("git tag v$VERSION")
+        self.assertAdmitted("git log -${N}")
+
+    def test_the_guard_never_exits_on_an_exception(self):
+        # **A hook that raises fails OPEN**, which makes this the worst shape a
+        # defect in this file can take: `chr()` raised `OverflowError` on
+        # `$'\\UFFFFFFFF'`, the process exited 1 with empty stdout, and
+        # `PreToolUse` treats that as a non-blocking error — so the command
+        # ran. Every refusal here is reached by RETURNING a string, and none of
+        # that happens after a traceback. Found by an adversarial audit.
+        for command in (
+            "echo $'\\UFFFFFFFF'; git push origin +HEAD:main",
+            "echo $'\\U00110000'; git push origin +HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertRefused(command)
+
+        # And the property behind those two, asserted over the corpus rather
+        # than over the one input that exposed it: nothing in this suite may
+        # take the hook down. `judge` already fails the test on a non-zero
+        # exit, so this is the subject stated where a reader will find it.
+        for command in (
+            "git log $'\\u0000' -5",
+            "git log $'\\777' -5",
+            "git log $'\\c' -5",
+            "git log $'\\' -5",
+            "git log $'\\x' -5",
+        ):
+            with self.subTest(command=command):
+                self.judge(command)
+
     def test_a_word_ending_in_a_digit_is_not_a_file_descriptor(self):
         # The boundary of the exemption, and it is bash's own rule: digits are
         # a descriptor only where they are a WHOLE token glued to the operator.
