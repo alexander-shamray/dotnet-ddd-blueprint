@@ -8,6 +8,16 @@ It says what to build and in what order; it does not say how long. This roadmap
 attaches a number to each pull request in the plan that appendix sequences, and
 derives a calendar from them.
 
+> **This roadmap is frozen.** It laid a calendar over a plan that is complete
+> — every numbered row of Appendix C has landed — so no estimate here is
+> revised, no row is added, and the *After the plan* rows keep the empty
+> columns that section argues for. Under
+> [`change-locality.md`](change-locality.md) this file is the record of what
+> was forecast, kept beside what was built. Re-pricing the plan against
+> delivered work, which *What these numbers are* names as the one thing that
+> should move the total, would be a successor to this file and not an edit
+> to it.
+
 **The plan is not the whole of Appendix C, and the difference is the one thing
 this file does not price.** The appendix has since grown an *After the plan*
 section — rows for work no numbered row covered, written after the plan was
@@ -306,8 +316,10 @@ of claim, whatever column it is written in.
 **They still cost days, and the days were real.** What is claimed here is that
 this file cannot say how many — not that the work was free, and not that the
 total is right in spite of them. Whoever re-prices this roadmap against
-delivered work is the person who can fill this table in, and *What these
-numbers are* already names that as the one thing that should move the total.
+delivered work is the person who could fill this table in — in the successor
+the note at the top of this file names, since this one is frozen — and *What
+these numbers are* already names that as the one thing that should move the
+total.
 
 ## Milestones
 
