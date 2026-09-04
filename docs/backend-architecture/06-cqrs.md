@@ -341,12 +341,16 @@ Request
 
 **Two of those seats are load-bearing, and the order is not a preference.**
 Idempotency sits inside Validation so that a malformed command is refused
-before the claim is taken — a claim lives for [§8.5](08-caching-redis.md)'s
-window, and a caller whose command failed validation would otherwise find its
-`CommandId` burnt for the rest of it. It sits outside Transaction so that the
-claim is held before any work starts, which is the fast, atomic exclusion
-§8.5 argues; the marker `TransactionBehavior` writes under the same key inside
-the transaction is the durable half of that one mechanism
+before the store is asked for anything. The claim is a round trip to Redis
+([§8.5](08-caching-redis.md)), and `IdempotencyBehavior` releases it for any
+fault raised inside `next()`, a thrown `ValidationException` included — so
+the cost of the other order is not a `CommandId` burnt for the window but a
+claim taken and released for nothing, and a moment in which a concurrent
+duplicate of an invalid command is refused as *concurrent* rather than as
+*invalid*. It sits outside Transaction so that the claim is held before any
+work starts, which is the fast, atomic exclusion §8.5 argues; the marker
+`TransactionBehavior` writes under the same key inside the transaction is
+the durable half of that one mechanism
 ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)),
 and neither half is complete alone.
 

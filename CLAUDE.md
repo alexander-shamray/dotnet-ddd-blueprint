@@ -39,12 +39,11 @@ so build the structure and raise the domain question rather than assuming.
 One line per entry; why each is *shaped* that way is `docs/repo-map.md`'s job.
 
 ```
-docs/backend-architecture/   the blueprint — README index, chapters 01..15, appendices A–D
+docs/backend-architecture/   the blueprint — README index, the numbered chapters, appendices A–D
 docs/roadmap.md              a calendar laid over Appendix C — closed
 docs/runbooks/               NOT one per alert — the one sharer is declared
 global.json, .config/        SDK pin (§4.4); dotnet-ef, pinned to the EF Core version
 Directory.*.props            shared MSBuild settings and ADR-019's analyser policy; exact package pins
-.editorconfig                house style; a build input, not a hint
 .github/workflows/           ci, compose, helm, observability, deploy, closure-gate, broker-permissions, realm
 .github/<gate>/              licence-gate, secret-scan, closure-gate, pipeline-gate, coverage — a directory each
 deploy/canary/               §15.5's ladder, its arithmetic and its verdict
@@ -190,10 +189,11 @@ The contract's §6 lists what locality leaves in force; these are the rest.
 ### What cuts across them
 
 `docs/harness-boundaries.md` is the inventory of what the harness grants these
-commands and what it refuses them — the deny list and its self-lock, every
-grant wider than the operation it buys, and the hooks that closed the rest.
-**Read it before touching anything under `.claude/`**, and state a new
-residual there rather than here. One rule reaches every session, so it stays:
-**file permission rules take `Edit(...)`, never `Write(...)`** — `Edit(path)`
-covers every file-editing tool, and a `Write(path)` rule matches nothing and
-stops Claude Code from starting.
+commands and what it refuses them — every grant wider than the operation it
+buys, and the hooks that closed the rest. **Read it before touching anything
+under `.claude/`**, and state a new residual there rather than here. Two
+rules reach every session, so they stay: **file permission rules take
+`Edit(...)`, never `Write(...)`** — a `Write(path)` rule matches nothing and
+stops Claude Code from starting; and **`.claude/settings.json` self-locks,
+not instantaneously** — a change to it lands complete and goes last, and a
+restore is verified by reading the file, never by trying what it forbids.

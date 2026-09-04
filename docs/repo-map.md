@@ -46,13 +46,13 @@ is authoritative. **This one is.** Where a line here says more than the line
 there, that is the split working rather than drift; where the two disagree
 about *where a thing lives*, one of them is a bug report against the other.
 
-**Some triggers were deliberately left behind rather than moved**, under
-*What the map is load-bearing for* in `CLAUDE.md` — the unused-reference rule,
-the two about Catalog breaking the scaffold, the licence register, and what a
-`.TestSupport` project is. Each fires before anyone would think to open this
-file, which is the only reason this repository holds a rule in two places at
-all. Each is argued in full below, and this file is the master copy of every
-one of them.
+**Some triggers were deliberately left behind rather than moved**, beside the
+tree in `CLAUDE.md` — the unused-reference rule, the two about Catalog
+breaking the scaffold, the licence register, and what a `.TestSupport`
+project is — because each fires before anyone would think to open this file.
+The primer rewrite dropped them there, and the short forms now sit in
+[`change-locality.md`](change-locality.md)'s class notes instead. Each is
+argued in full below, and this file is the master copy of every one of them.
 
 ## The tree
 
@@ -66,13 +66,13 @@ docs/backend-architecture/   the blueprint — README index, 01-purpose ..
                              15-cicd-deployment, appendix A (ADR-001..042),
                              B (licences), C (delivery plan), D (type inventory)
 docs/roadmap.md              estimates and a calendar laid over Appendix C
-docs/pr-decision-log.md      what each PR from PR-08 on decided — the other
-                             half of `CLAUDE.md`'s phase section
+docs/pr-decision-log.md      what each PR from PR-08 on decided — closed, and
+                             the phase section it was the long half of is gone
 docs/lessons.md              the lessons that generalise past the PR that
                              found them, and the measurement behind each —
-                             `CLAUDE.md`'s other half again, one level up from
-                             the log: the log says what a PR decided, this
-                             says what the next PR should do about it
+                             one level up from the log: the log says what a
+                             PR decided, this says what the next PR should
+                             do about it
 docs/harness-boundaries.md   what the harness grants these commands and what
                              it refuses them — the deny list, the sandbox and
                              its residuals, and every grant wider than the

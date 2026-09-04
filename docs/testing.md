@@ -39,8 +39,8 @@ Three runners, and `dotnet test` says nothing about any suite but its own.
 **No count opens this sentence**, and its removal is the fix rather than a
 recount: it said seven, then ten, and #61's secret scan made it eleven inside
 the pull request correcting the sentence around it. What a reader can check is
-whether this block matches the enumeration in `CLAUDE.md` and the workflows
-that run them, which needs no numeral. **Workflows, plural, and not `ci.yml`
+whether this block matches the workflows that run them, which needs no
+numeral. **Workflows, plural, and not `ci.yml`
 alone** — ADR-036's broker ACL runs in `broker-permissions.yml`, so a check
 aimed at the one file misses a suite that is in this block and was, until
 recently, missing from `CLAUDE.md`'s enumeration as well.
