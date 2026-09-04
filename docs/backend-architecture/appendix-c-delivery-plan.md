@@ -113,6 +113,18 @@ completeness, and nothing depends on it.
 
 ### After the plan
 
+> **This section is closed at PR-37, and the rows below are the whole of it.**
+> Each was earned either by a gap the plan left or by a rule that moved, and
+> the prose beside each row says which. From here neither earns a row: a rule
+> that moves is an ADR, and the ADR is the row —
+> [Appendix A](appendix-a-adrs.md) carries the decision and the pull request
+> body that lands it carries what building it found. A gap the plan left is a
+> pull request whose body says so.
+> The plan is complete and this section is what completing it left behind;
+> neither grows again, under
+> [`docs/change-locality.md`](../change-locality.md)'s rule that a fact has
+> one owner, and a plan is not the owner of a decision.
+
 **This section exists because the plan was complete and a specified mechanism
 had no row in it**, which is a different failure from a PR being late. §8.5
 specified six types, §4.2's composition root showed the line that wires one,

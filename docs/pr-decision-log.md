@@ -3,6 +3,14 @@
 **What each landed PR from PR-08 onward decided, and why those decisions bind
 what comes after.**
 
+> **This log is closed at PR-37.** No entry is added after it and no entry
+> below is edited. The record of what a pull request decided is, from here,
+> the commit bodies and the pull request body that landed it, and a rule that
+> moves is an ADR — [`change-locality.md`](change-locality.md) is the
+> contract that says so, and its plan is what froze this file. The entries
+> below stay as the record of how PR-08 to PR-37 were reasoned through,
+> verbatim, and each reads as what was true on the day it was written.
+
 **PR-01 to PR-07 have no entries, and never did.** The practice of recording a
 PR's findings began with PR-08's persistence layer; the seven before it landed
 the foundation, the building blocks and Catalog's skeleton without one. What
@@ -52,19 +60,22 @@ index, carries no nav footer, and is in the scope of neither
 directory. Nothing structural will catch its drift; the *one rule* is what
 carries it, exactly as it carries `CLAUDE.md` itself.
 
-**Newest first.** A PR appends its block at the top of the log, under the same
-heading form as its neighbours.
+**Newest first.** PR-37 is at the top and PR-08 at the bottom, because each PR
+appended its block above its neighbours while the log was open.
 
-**It does not rewrite another PR's argument — but it does reconcile another
-PR's live claims, and the two are not the same thing.** An entry records how a
-PR was reasoned through, so re-arguing it later destroys the only thing the
-entry is for. A *number* restated inside that argument is different: it is a
-claim about the system, and the one rule above binds it exactly as it binds any
-other. PR-10's block is the worked example — it states the compose smoke's
-timeout and says in place that the figure "is restated here, which is what
-makes it a claim to reconcile rather than a fact to read". PR-17, PR-18 and
-PR-19 each raised it, in that block, and were right to. **A log that forbade
-those edits would guarantee the staleness the one rule exists to prevent.**
+**It does not rewrite another PR's argument, and since the freeze it does not
+reconcile another PR's live claims either — which reverses a rule this
+paragraph used to state, so the reversal is argued rather than silent.** An
+entry records how a PR was reasoned through, so re-arguing it later destroys
+the only thing the entry is for. While the log was open, a *number* restated
+inside an entry was treated differently — as a claim about the system that the
+one rule bound like any other — and PR-10's block is the worked example: it
+states the compose smoke's timeout and says in place that the figure "is
+restated here, which is what makes it a claim to reconcile rather than a fact
+to read", and PR-17, PR-18 and PR-19 each raised it there. That tour is the
+cost [`change-locality.md`](change-locality.md) withdraws: a value has one
+owner, and a restatement met in a closed log is dated by the heading above it
+rather than corrected. A reader who needs the current figure reads the code.
 
 ---
 

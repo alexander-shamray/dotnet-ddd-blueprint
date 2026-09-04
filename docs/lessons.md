@@ -41,6 +41,16 @@ read the decision log. `CLAUDE.md` keeps the rules an agent needs in order to
 of these disagrees with a blueprint chapter, the chapter wins and the
 disagreement is a bug report against one of them.
 
+> **This file is frozen as written.** A new lesson is a test or a gate whose
+> subject is what the gate is looking at — the rule the first entry below
+> states, and the one `CLAUDE.md` keeps — and not a paragraph here; the
+> entries stay verbatim, on the terms above. Where a lesson genuinely has no
+> test to carry it, its entry is one paragraph under a new `##` heading at
+> the end of this file, and nothing above that heading moves. That is rare
+> enough that two pull requests meeting at the tail is a conflict worth
+> accepting, where a file every PR appends to is the cost
+> [`change-locality.md`](change-locality.md) exists to withdraw.
+
 > **This file is outside the blueprint tree, so nothing structural catches its
 > drift.** `/check-links` checks `docs/backend-architecture/` and the root
 > README's entry point into it, so a file anywhere else is outside its scope
