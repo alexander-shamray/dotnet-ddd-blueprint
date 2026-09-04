@@ -1145,6 +1145,13 @@ check could be rejected by its own auth pipeline.
 Exactly one thing: `Common.Contracts`, containing integration event records and
 nothing else. No behaviour, no validation, no domain types.
 
+**A record arrives in the PR whose code first publishes or consumes it**, and
+a new service's contracts arrive with that service rather than ahead of it. A
+record's members follow the same rule from the other direction: the PR that
+becomes a contract's first producer is the last one that can fix its shape
+for free ([§9.2](09-messaging.md)), so read the record against the type that
+will fill it before writing the mapper, not after.
+
 > **Trap — the shared kernel that ate the platform.** A `Common.Entities`
 > assembly containing `Product`, `Customer` and `Order` looks like sensible reuse
 > and is the single most reliable way to destroy service independence. Two
