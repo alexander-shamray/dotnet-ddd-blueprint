@@ -89,6 +89,15 @@ Notes that decide the edge cases:
 - Catalog is the scaffold's template and the script reads it at run time, so
   a Catalog change that adds or removes a file reconciles `tools/new-service`
   in the same PR. That is the one extra shared surface Class A and B get.
+  The scaffold's own suite reads the rendered text and never compiles it,
+  so a change touching `tests/Catalog.*` is not verified until a scaffolded
+  service has been built — the dogfood in
+  [`repo-map.md`](repo-map.md), which CI's `scaffold-build` job repeats.
+- An unused project reference is a claim about the dependency graph that
+  nothing makes true. Draw one only for the member that cannot be written
+  without it, and a reference existing is not permission to reach across
+  §4.2 through it; [`repo-map.md`](repo-map.md) argues each edge that
+  exists.
 - A migration is Class A only for the service whose schema moved. Two
   migrations in one PR against two services is two PRs.
 - Appendix B is the one shared Markdown Class E must edit, because the
@@ -138,7 +147,6 @@ deploy/compose/keycloak/realm-export.json
 .github/secret-scan/allowed-secrets.txt
 docs/backend-architecture/appendix-a-adrs.md   (until ADRs are one file each)
 docs/backend-architecture/appendix-b-licences.md
-CLAUDE.md                       (until the primer rewrite lands)
 ```
 
 ## 5. The procedure
@@ -157,8 +165,10 @@ What an agent does instead of touring the corpus:
 5. Run the smallest suite that can fail for this class.
    `docs/testing.md` has the invocations; `dotnet test Platform.slnx
    --filter "Category!=Integration"` needs no daemon.
-6. If a Catalog file was added or removed, run the scaffold's unit tests
-   with `py -3.12` and the four-command dogfood in `docs/repo-map.md`.
+6. After a Catalog change, run the scaffold's unit tests with `py -3.12` —
+   a file added or removed is what forces `tools/new-service` to change —
+   and after a change touching `tests/Catalog.*`, the four-command dogfood
+   in `docs/repo-map.md` as well.
 7. `/validate-blueprint` after Class C, or after an edit to a file in its
    scope — a chapter or appendix, `docs/roadmap.md`, `docs/testing.md`. Not
    after Class A. `/ship` selects its checks by the same class.
@@ -196,7 +206,8 @@ the same PR. It waives nothing else. In particular:
 [ ] Symbol searched in src/ and tests/, not the value in docs/
 [ ] Owning chapter paragraph opened only for Class B or C
 [ ] Test written first; smallest suite that can fail is green
-[ ] Scaffold tests and dogfood run if a Catalog file was added or removed
+[ ] Scaffold tests run after a Catalog change; dogfood if tests/Catalog.*
+    changed
 [ ] ADR appended only if a rule moved; nothing in it rewritten
 [ ] No present-tense count, version or raw value written outside its owner;
     no "since PR-NN"

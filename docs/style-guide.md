@@ -111,8 +111,8 @@ time.
   checks, so the change was caught and reconciled inside the PR that caused it,
   where the residual nobody looks at is the one that rots unnoticed. Keep them
   current when a callout is added; do not bring the total back —
-  `CLAUDE.md` makes the same argument about its own line count at the top of
-  that file, and `deploy/observability/README.md` about its rule counts.
+  `deploy/observability/README.md` makes the same argument about its rule
+  counts.
 
   If you do need the figure, it is `grep -h '^> \*\*' *.md | wc -l` over the
   twenty blueprint files, minus the three definitional entries below — and
@@ -648,8 +648,9 @@ because the commands that consult this table send a reviewer for the whole
 set.** An external reviewer regularly flags `Aspire.*` packages as unpinned.
 They are not pinned and that is correct: §14.2's AppHost is optional, **Aspire
 is not adopted**, nothing references an `Aspire.*` package, and §4.4 therefore
-pins none — the argument lives in `CLAUDE.md`'s tree section, which is the
-authority for it. Reject the finding and cite that, not this table.
+pins none — the argument lives in [`repo-map.md`](repo-map.md)'s AppHost
+entry, which is the authority for it. Reject the finding and cite that, not
+this table.
 
 **A pointer rather than a copy, deliberately.** `/review-branch` and
 `/review-grok` list the house non-findings a reviewer may reject by name and
