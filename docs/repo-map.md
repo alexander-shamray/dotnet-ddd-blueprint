@@ -51,8 +51,9 @@ tree in `CLAUDE.md` — the unused-reference rule, the two about Catalog
 breaking the scaffold, the licence register, and what a `.TestSupport`
 project is — because each fires before anyone would think to open this file.
 The primer rewrite dropped them there, and the short forms now sit in
-[`change-locality.md`](change-locality.md)'s class notes instead. Each is
-argued in full below, and this file is the master copy of every one of them.
+[`change-locality.md`](change-locality.md) — the edge-case notes under its
+class table, and its procedure's scaffold step — instead. Each is argued in
+full below, and this file is the master copy of every one of them.
 
 ## The tree
 
