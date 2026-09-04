@@ -699,7 +699,7 @@ connection-string environment variable conventions (reproduce them in Compose).
 For a platform this size, roughly one to three days of mechanical work.
 
 > **Decision** — Compose is the documented baseline; Aspire is offered as an
-> optional accelerator. See [ADR-011](appendix-a-adrs.md#adr-011--compose-baseline-aspire-optional).
+> optional accelerator. See [ADR-011](adr/ADR-011-compose-baseline-aspire-optional.md).
 
 ## 14.3 Seed data
 

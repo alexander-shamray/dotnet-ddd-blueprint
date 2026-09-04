@@ -1,7 +1,7 @@
 # Canary rollout
 
 §15.5's progressive delivery, as data and one decision function.
-[ADR-022](../../docs/backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)
+[ADR-022](../../docs/backend-architecture/adr/ADR-022-the-canary-is-a-second-release-weighted-by-replicas.md)
 records the mechanism.
 
 **Nothing here has ever reached a cluster.** There is no dev, staging or

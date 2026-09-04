@@ -47,7 +47,7 @@ everything the steps below need. Use the Management API's `get` with
 `ackmode=ack_requeue_true`, which reads the message and puts it back:
 
 **The credentials are not `guest/guest`, and since
-[ADR-036](../backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+[ADR-036](../backend-architecture/adr/ADR-036-the-broker-has-a-per-service-identity.md)
 that account exists nowhere.** It was §14.1's Compose default until the broker
 gained per-service identities; a deployed broker's credentials are supplied by
 External Secrets ([§15.4](../backend-architecture/15-cicd-deployment.md)), one
@@ -389,7 +389,7 @@ an outbox, in that order — **and which outbox depends on the endpoint**.
 Ordering's three ordinary endpoints take the in-memory one, which defers sends
 until the consumer returns; `ordering-fulfilment-saga` takes MassTransit's
 transactional outbox instead
-([ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)),
+([ADR-032](../backend-architecture/adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)),
 which writes them to `ordering.OutboxMessage` in the saga instance's own
 transaction. The **order** is the same on all four and the nesting rule behind
 it is unchanged; what differs is what a failure after the commit costs, and on

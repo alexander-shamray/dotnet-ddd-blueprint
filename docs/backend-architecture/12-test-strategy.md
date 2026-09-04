@@ -113,7 +113,7 @@ Run it. It fails because `Cancel` does not check status yet — not because
 red test; make it compile first, then watch it fail.
 
 > **Test names are sentences, and that costs exactly one analyser rule.** CA1707
-> forbids underscores in member names and [ADR-019](appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)
+> forbids underscores in member names and [ADR-019](adr/ADR-019-warnings-are-errors-and-the-editorconfig-is-a-build-input.md)
 > makes every warning an error, so the name above fails the build until the rule
 > is turned off. `Directory.Build.props` turns it off for projects whose name
 > ends `Tests` and nowhere else. The convention wins because a test name is read
@@ -280,7 +280,7 @@ internal static class OrderBuilder
 ## 12.4 Application tests — real infrastructure
 
 > **Decision — integration tests use real SQL Server and Redis, not in-memory
-> substitutes.** See [ADR-010](appendix-a-adrs.md#adr-010--testcontainers-not-in-memory-providers).
+> substitutes.** See [ADR-010](adr/ADR-010-testcontainers-not-in-memory-providers.md).
 
 The EF Core in-memory provider does not enforce foreign keys, does not
 implement `rowversion` concurrency, and translates LINQ differently from the SQL
@@ -1116,13 +1116,13 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 > naming.** ADR-033 withdrew the token-denylist claim, so
 > `RedisKeys.Denylist` and the case pinning its shape went with it and the
 > fast half was seventy where it had been seventy-one. It went back up on the
-> next branch: [ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)'s
+> next branch: [ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)'s
 > floor on `RetentionPolicy.IdempotencyWindow` brought cases of its own; the
 > branch that retired that floor's allowance
-> ([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin))
+> ([ADR-038](adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md))
 > then added one integration case and rewrote the floor's own rather than
 > adding to them, so only the integration half moved. The branch after it
-> ([ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it))
+> ([ADR-039](adr/ADR-039-the-markers-purge-asks-the-claim-rather-than-out-counting-it.md))
 > moved the same half again and by more — seven cases for the port's fifth
 > member, every one of them needing the server it asks — and left the fast half
 > at seventy-two for the third retake running. The pair above is what a
@@ -1174,7 +1174,7 @@ Respawn between tests keeps them isolated at a fraction of the cost.
 because the design it replaced looked correct and delivered its payload only
 by accident — in the ordinary flow it delivered nothing, which is the failure
 the grid below locates precisely
-([ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)).
+([ADR-027](adr/ADR-027-the-order-summary-stores-product-ids-and-resolves-the-name-locally.md)).
 
 | | |
 |---|---|
@@ -2234,7 +2234,7 @@ second is the consumer-driven contract at the end of this section.
 The contract assembly's rules are all stated elsewhere as things reviewers
 should notice: §9.1's "a contract may not name a domain type", §9.2's versioned
 namespace, `required` members, and — since
-[ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject) —
+[ADR-028](adr/ADR-028-a-money-movement-command-carries-no-subject.md) —
 that a command carries no subject. The first three are mechanical, so each is a
 test rather than a review note.
 
@@ -2566,7 +2566,7 @@ served, where a contract with one is the consumer saying which number it is
 relying on.
 
 **It is not Pact, and the mechanism was a decision rather than a
-convenience** — [ADR-023](appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)
+convenience** — [ADR-023](adr/ADR-023-the-consumer-driven-contract-is-a-linked-file-not-pact.md)
 records it. Pact's .NET binding cannot express gRPC at all, which is the only
 relationship here that needed one; what Pact is *for* — one artefact the
 consumer authors and the provider verifies — is taken, and the broker and wire

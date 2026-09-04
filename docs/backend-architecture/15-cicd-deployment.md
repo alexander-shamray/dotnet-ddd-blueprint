@@ -248,7 +248,7 @@ promote/rollback decision have a suite because they are the parts a workflow
 cannot be trusted with.
 
 The fifth is the Keycloak realm gate
-([ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)).
+([ADR-042](adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md)).
 A workflow path-filtered to `deploy/keycloak/**` runs that tree's own suite,
 `realm_check.py inputs` and `realm_check.py check --kind local`, which asserts
 [§11](11-identity-authorization.md)'s token obligations against
@@ -280,7 +280,7 @@ rollout does. A red run **files a tracker issue** rather than paging, labelled
 `security` and `critical`, or comments on the one already open: nothing in
 §13.6 fires it, and an issue stays open until somebody closes it where a
 notification is read once
-([ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)).
+([ADR-043](adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md)).
 The job is opted in by a repository variable, because an hourly job in a
 repository with no Environment would go red twenty-four times a day for want
 of a cluster, and that guard reads a configuration rather than a runtime
@@ -311,7 +311,7 @@ lifetime every realm owes is read out of `AccessTokenLifetime` rather than
 restated, `deploy/compose/keycloak/realm-export.json`, because that file is
 its subject in CI, and `deploy/canary/**`, because its scheduled job loops
 over the plan's workloads to find every release it judges
-([ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)).
+([ADR-043](adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md)).
 **None of the four keeps that list in its own YAML.**
 `smoke.sh`, `check.py`, `canary.py` and `realm_check.py` each declare
 `SOURCE_INPUTS` beside the reads, and each asserts that both of its workflow's
@@ -1138,7 +1138,7 @@ this table — a chart whose service calls `AddRedisConnections` must declare
 The rule for the Kind column is mechanical: **if the value contains a
 credential, it is a Secret.** Every connection string here does — SQL Server
 carries a login, and RabbitMQ and Redis each carry a **per-service** account —
-the broker's from [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity),
+the broker's from [ADR-036](adr/ADR-036-the-broker-has-a-per-service-identity.md),
 Redis's from [§8.1](08-caching-redis.md).
 A connection string in a ConfigMap is a password readable by anyone with
 namespace read access.
@@ -1160,7 +1160,7 @@ namespace read access.
 | `ConnectionStrings__OrderingMigrator` | Secret | External Secrets → migrator Job only | ✓ (Job) |
 | `ConnectionStrings__RedisCache` | **Secret** | External Secrets — carries the §8.1 ACL user and password | ✓ **when the host calls `AddRedisConnections`** — see below |
 | `ConnectionStrings__RedisCoordination` | **Secret** | External Secrets — separate ACL user, `noeviction` instance | ✓ **when the host calls `AddRedisConnections`** — both or neither |
-| `ConnectionStrings__RabbitMq` | Secret | External Secrets — carries the per-service broker account of [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity) | ✓ — the Secret is named per service (`catalog-rabbitmq`, `ordering-rabbitmq`) and never shared |
+| `ConnectionStrings__RabbitMq` | Secret | External Secrets — carries the per-service broker account of [ADR-036](adr/ADR-036-the-broker-has-a-per-service-identity.md) | ✓ — the Secret is named per service (`catalog-rabbitmq`, `ordering-rabbitmq`) and never shared |
 | `Identity__Authority` | Config | Helm `identity.authority` → ConfigMap | ✓ — **every host**, including the gateway |
 | `Identity__Client__ClientId` | Config | Helm `identity.clientId` | ✓ **BFF only** — the one host that calls a peer ([§9.7](09-messaging.md), [§11.5](11-identity-authorization.md)) |
 | `Identity__Client__Scope` | Config | Helm `identity.scope` | ✓ **BFF only** |
@@ -1170,7 +1170,7 @@ namespace read access.
 | `Ingress__Enabled` | Config | Helm `ingress.enabled` → ConfigMap — **gateway only** | ✓ — true in Kubernetes, false only where the gateway is the edge (Compose) |
 | `Ingress__TrustedNetworks__0…n` | Config | Helm `ingress.trustedNetworks` → ConfigMap — **gateway only** | ✓ **when `Ingress__Enabled`**; CIDRs of the LB/Ingress, without which the rate limiter partitions everyone together |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Config | Helm `observability.otlpEndpoint` → ConfigMap | ✓ — **every host**. The SDK does default, which is the argument for requiring it rather than against — see below |
-| `OTEL_RESOURCE_ATTRIBUTES` | Config | Helm — derived from `canary.enabled`, never set by hand | ✓ — **every host**, as `deployment.track=stable` or `=canary`. §15.5's rollout compares the two tracks and this is the only thing that tells them apart ([ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)) |
+| `OTEL_RESOURCE_ATTRIBUTES` | Config | Helm — derived from `canary.enabled`, never set by hand | ✓ — **every host**, as `deployment.track=stable` or `=canary`. §15.5's rollout compares the two tracks and this is the only thing that tells them apart ([ADR-022](adr/ADR-022-the-canary-is-a-second-release-weighted-by-replicas.md)) |
 
 | Kind | Source | Example |
 |---|---|---|
@@ -1282,7 +1282,7 @@ minutes, then progress to 25%, 50%, 100%. Roll back automatically if either
 metric regresses beyond threshold.
 
 **The mechanism is replica-weighted and it is
-[ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)**,
+[ADR-022](adr/ADR-022-the-canary-is-a-second-release-weighted-by-replicas.md)**,
 taken by PR-25 because building the rollout was what forced the choice. The
 canary is a second Helm release of the same chart whose pods answer to the same
 Service, so the share it serves is `canary / (stable + canary)`. No mesh and no
@@ -1372,7 +1372,7 @@ is the saga's answer and a new endpoint is the cross-service one.
 **Either way `<queue>_skipped` is alerted on ([§13.6](13-observability.md)), so
 choosing wrong is meant to be loud rather than silent** — subject to the
 deployment prerequisite
-[ADR-026](appendix-a-adrs.md#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it)
+[ADR-026](adr/ADR-026-consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it.md)
 states, since per-queue broker metrics are not something this repository
 configures. That alert is what makes this
 section's rule enforceable; before it, a rollout that lost messages looked

@@ -64,8 +64,10 @@ rule forbids. This tree says where things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
-                             15-cicd-deployment, appendix A (ADR-001..042),
+                             15-cicd-deployment, appendix A (the ADR index),
                              B (licences), C (delivery plan), D (type inventory)
+docs/backend-architecture/adr/  one file per ADR, so two agents appending
+                             one each meet only in Appendix A's table
 docs/roadmap.md              estimates and a calendar laid over Appendix C
 docs/pr-decision-log.md      what each PR from PR-08 on decided — closed, and
                              the phase section it was the long half of is gone

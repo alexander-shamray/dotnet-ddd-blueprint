@@ -3,7 +3,7 @@
 
 [§11.3](../../docs/backend-architecture/11-identity-authorization.md) states a
 300-second access-token lifetime and
-[ADR-033](../../docs/backend-architecture/appendix-a-adrs.md) composes the
+[ADR-033](../../docs/backend-architecture/adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md) composes the
 330-second revocation bound out of it; ADR-034 states that the browser is
 issued no refresh token. Both are realm settings, and until this gate existed
 the only realm anything read was `deploy/compose/keycloak/realm-export.json` —

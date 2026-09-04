@@ -118,7 +118,7 @@ return leg is an event.
 **Payments subscribes to `OrderPlaced` to build its own record of the order —
 the payer, the total and the currency.** The payer is the one it cannot do
 without, and
-[ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+[ADR-028](adr/ADR-028-a-money-movement-command-carries-no-subject.md)
 forbids `AuthorisePayment` from carrying one: the subject of a money-movement
 decision is the deciding service's to derive, not the sender's to state, and a
 subject on that command would transport an authority the receiver already
@@ -148,7 +148,7 @@ projection.** [§6.4](06-cqrs.md)'s `PlaceOrder` reads
 handler that needs another service's fact looks it up in a table Ordering owns.
 That is exactly Payments' shape: a **write-path** lookup, on the path that
 decides, against a record built from events.
-[ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)
+[ADR-027](adr/ADR-027-the-order-summary-stores-product-ids-and-resolves-the-name-locally.md)
 is the same mechanism on the read path, for product **names** rather than
 prices — the two tables are deliberately distinct, and `ordering.ProductPrices`
 has never carried a name.
@@ -180,7 +180,7 @@ here, an assertion nobody could verify replaced by a record the service owns.
 nothing to do.** `ReleaseStock` is where that gap was load-bearing, and it is
 now closed here rather than assumed in the saga that sends it. Inventory owes
 two guarantees, both recorded in
-[ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation):
+[ADR-024](adr/ADR-024-a-release-answers-for-the-order-not-for-the-reservation.md):
 
 - **A `ReleaseStock` always publishes `StockReleased`**, including for a
   reservation that was never held or has already been released. The event
@@ -219,7 +219,7 @@ absorptions is the only thing between a cancelled confirmed order and a fault:
 
 > **Decision — Inventory keeps `OrderCancelled`, and the second route is held
 > deliberately rather than tolerated.** See
-> [ADR-029](appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word).
+> [ADR-029](adr/ADR-029-inventory-releases-on-the-cancellation-not-on-the-sagas-word.md).
 > Routing every release through `ReleaseStock` would tidy this cell and pay for
 > it with a cancellation that releases nothing whenever no saga instance
 > survives to send the command — §9.6 finalises down several branches before

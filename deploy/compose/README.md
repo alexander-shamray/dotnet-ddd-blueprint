@@ -25,7 +25,7 @@ every deployed environment takes its secrets from a vault
 
 **The broker's row is the one that changed, and the management console is the
 visible cost.** Since
-[ADR-036](../../docs/backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+[ADR-036](../../docs/backend-architecture/adr/ADR-036-the-broker-has-a-per-service-identity.md)
 each service authenticates as itself — `catalog-svc` and `ordering-svc`, whose
 passwords are in `docker-compose.yml` beside every other local default — and
 **`guest` is not created at all**. RabbitMQ seeds that account only when it
@@ -75,7 +75,7 @@ and exits, then `catalog-api` starts (§14.1's pair rule).
 **Both OpenAPI documents need a token**, and that is a decision rather than an
 oversight. `MapOpenApi()` carries no authorization metadata, so the
 deny-by-default fallback
-([ADR-030](../../docs/backend-architecture/appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block))
+([ADR-030](../../docs/backend-architecture/adr/ADR-030-authorization-is-deny-by-default-in-the-building-block.md))
 answers 401 to an anonymous request for one: the document enumerates every
 route and every schema its service has, and
 [§11.2](../../docs/backend-architecture/11-identity-authorization.md) assumes

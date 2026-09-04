@@ -141,7 +141,7 @@ place for a saga to be stuck, which is why §9.6 gives compensation a timeout
 like any other wait.
 
 **This row means the release did not complete, and since
-[ADR-024](../backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+[ADR-024](../backend-architecture/adr/ADR-024-a-release-answers-for-the-order-not-for-the-reservation.md)
 it means nothing else.** A `ReleaseStock` publishes `StockReleased` whether or
 not a reservation was held, so "there was never anything to release" is no
 longer one of the ways to get here — which used to be reachable through
@@ -396,7 +396,7 @@ what to *do*, and the row says it.
    **And a gone one still has to be checked**, though no longer for the
    reason this line used to give. #128's crash window could delete the
    instance with its `CancelOrder` never sent;
-   [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+   [ADR-032](../backend-architecture/adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
    closed it, so a finalised instance now proves the command was *staged*
    in the transaction that finalised it. What it still does not prove is
    that the command was delivered and handled — so the instruction is
@@ -487,7 +487,7 @@ left `AwaitingConfirmation` without ever entering `Confirmed`.
    Inventory releasing off `OrderCancelled` anyway, so **the restraint saves a
    message and not the stock**. That was the open question behind this step and
    it is now decided:
-   [ADR-029](../backend-architecture/appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word)
+   [ADR-029](../backend-architecture/adr/ADR-029-inventory-releases-on-the-cancellation-not-on-the-sagas-word.md)
    keeps Inventory's direct subscription — it is the only evidence a
    cancellation gives the saga, and #143's guards are built on it — and
    records the restraint as withholding a **second** instruction, not the
@@ -582,7 +582,7 @@ instruction, and `CurrentState` is half of it**:
 
      **`StockReleased` is not proof that a reservation was released**, and
      this branch read "the reservation actually released" until
-     [ADR-024](../backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+     [ADR-024](../backend-architecture/adr/ADR-024-a-release-answers-for-the-order-not-for-the-reservation.md)
      made that false. It reports a postcondition — Inventory holds no stock
      for this order — so it is published for a release that found nothing and
      for a reserve refused against the tombstone, neither of which freed
@@ -598,7 +598,7 @@ instruction, and `CurrentState` is half of it**:
      and finalised in the same transaction, so #128's window lost both
      sends together — a reservation still held, no review row naming it,
      and no cancellation.
-     [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+     [ADR-032](../backend-architecture/adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
      closed that window: the exit's sends are written to
      `ordering.OutboxMessage` in the transaction that finalises the
      instance, so they are exactly as durable as the finalisation.
@@ -633,7 +633,7 @@ instruction, and `CurrentState` is half of it**:
      `UseInMemoryOutbox` flushed the buffered `CancelOrder` only after the
      consume pipeline returned, so a crash between the two left no
      instance and no `CancelOrder` ever sent.
-     [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+     [ADR-032](../backend-architecture/adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
      put those sends in that same transaction. The two now commit
      together, so no instance means the `CancelOrder` was durably
      *staged* — written to `ordering.OutboxMessage`, MassTransit's table,

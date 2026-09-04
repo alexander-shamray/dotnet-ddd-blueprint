@@ -86,7 +86,7 @@ In every other state `PaymentVerdictOutstanding` merely records that
 and is the whole diagnosis in the states that can carry it.**
 [§3.2](../backend-architecture/03-bounded-contexts.md) has Inventory consuming
 `OrderCancelled` directly
-([ADR-029](../backend-architecture/appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word)),
+([ADR-029](../backend-architecture/adr/ADR-029-inventory-releases-on-the-cancellation-not-on-the-sagas-word.md)),
 so a `StockReleased` arriving in a state that sent no `ReleaseStock` proves a
 cancellation reached Inventory before this saga consumed its own copy — and
 since [#143](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/143)
@@ -197,7 +197,7 @@ aggregate *refusing* the command does not land here: that is a `Rule` failure
 
 ## The timeout scheduler is the usual culprit
 
-[ADR-021](../backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
+[ADR-021](../backend-architecture/adr/ADR-021-saga-timeouts-are-scheduled-by-the-broker.md)
 schedules every saga timeout on RabbitMQ's **delayed message exchange**, which
 is why §14.1's RabbitMQ is the one infrastructure image that is *built* rather
 than pulled. Three ways that breaks, all of which look like a hung saga:
@@ -240,7 +240,7 @@ all: a stalled outbox means messages are not leaving the service, which is
 > **handler** stages; a saga sends on the bus, so its `CancelOrder`,
 > `ConfirmOrder`, `FlagOrderForReview` and scheduled expiries never appear
 > there. Since
-> [ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> [ADR-032](../backend-architecture/adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 > they are written to `ordering.OutboxMessage` — MassTransit's table, singular
 > — in the transaction that commits the instance, and delivered after it. Two
 > tables, two mechanisms, and the one to look in is decided by *who sent the
@@ -276,7 +276,7 @@ about the command, only that nothing downstream of it has committed yet.
 
 **For the command itself, look in `ordering.OutboxMessage`** — MassTransit's
 table, singular, where
-[ADR-032](../backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+[ADR-032](../backend-architecture/adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 puts every `Send` and `Schedule` a transition makes, in the instance's own
 transaction. Rows there are delivered after that transaction commits, and each
 is joined to its triggering delivery through `InboxMessageId`/`InboxConsumerId`
@@ -396,7 +396,7 @@ pages on, with the message retained, and
 
 **The rest of the machine's events are still consumed cleanly when nothing
 correlates**, on MassTransit's default — `StockReleased` included, which
-[ADR-024](../backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+[ADR-024](../backend-architecture/adr/ADR-024-a-release-answers-for-the-order-not-for-the-reservation.md)
 makes answerable for every release. An earlier version of this
 paragraph named `OrderCancelled` among them, and cited its registration as
 where that default was written down. That registration now decides instead of

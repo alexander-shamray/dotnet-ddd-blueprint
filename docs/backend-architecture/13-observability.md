@@ -90,7 +90,7 @@ public path by omission and a public path by decision read identically in a
 route file, and only one of them survives someone else's edit. The argument
 belongs to [§11.4](11-identity-authorization.md), which owns this platform's
 authorization rules, and is recorded in
-[ADR-030](appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block);
+[ADR-030](adr/ADR-030-authorization-is-deny-by-default-in-the-building-block.md);
 it is restated here only because this is the block that registers it.
 
 Note what is **not** here. `AddCommonWebDefaults` covers what every host needs
@@ -221,7 +221,7 @@ policy mean anything — the two arrive together because neither works alone.
 > [§15.5](15-cicd-deployment.md)'s rollout compares the two versions by, and it
 > arrives through `OTEL_RESOURCE_ATTRIBUTES`, the SDK's own mechanism, set by
 > the chart from `canary.enabled` (§15.4,
-> [ADR-022](appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)).
+> [ADR-022](adr/ADR-022-the-canary-is-a-second-release-weighted-by-replicas.md)).
 > The resource builder above already honours it, so nothing in `Common.Web`
 > knows the word *canary* and no `AddAttributes` line was added for it.
 > Asserted end to end against an exported resource rather than against the
@@ -380,7 +380,7 @@ if (fulfilment is not null)
 > would have to re-read the aggregate to find its own start time.
 >
 > **This used to draw an analogy with the denormalised product name, and
-> [ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)
+> [ADR-027](adr/ADR-027-the-order-summary-stores-product-ids-and-resolves-the-name-locally.md)
 > took the other half of it away.** The name is no longer gathered beside the
 > order at all — it is written to a product-keyed table and resolved on read —
 > so the two are now opposites rather than a pair. The duration keeps the
@@ -1884,7 +1884,7 @@ public sealed class MetricsInitialiser : IHostedService
 
 > **This sample was written as a primary constructor whose parameters were
 > named `_`, `__` and `___`, and it did not compile.** Two rules, both made
-> errors by [ADR-019](appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input),
+> errors by [ADR-019](adr/ADR-019-warnings-are-errors-and-the-editorconfig-is-a-build-input.md),
 > and PR-24 met each by changing the code rather than waiving anything.
 > **CS9113** — *parameter is unread* — fires three times, and the
 > discard-looking names do not escape it: `_` in a primary constructor is an

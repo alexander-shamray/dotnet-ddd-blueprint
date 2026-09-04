@@ -3,7 +3,7 @@
 **What §11's token obligations are, which realms are held to them, and what
 this tree deliberately does not check.**
 
-[ADR-042](../../docs/backend-architecture/appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+[ADR-042](../../docs/backend-architecture/adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md)
 is the decision; [§15.1](../../docs/backend-architecture/15-cicd-deployment.md)
 lists this as the fifth `deploy/**` subtree CI exercises rather than deploys.
 This file is that tree's operational reference, on
@@ -15,7 +15,7 @@ This file is that tree's operational reference, on
 |---|---|
 | `realm.yml`, `check` | `deploy/compose/keycloak/realm-export.json` — [§14.1](../../docs/backend-architecture/14-local-development.md)'s Compose realm, on every change to it, to `AuthenticationExtensions.cs` or to this tree |
 | `deploy.yml` | the realm a deployment is about to be rolled onto — **derived from the chart**, fetched by `read_admin.py`, and judged before the rollout changes anything |
-| `realm.yml`, `deployed` | the realm every deployed release points at, **between rollouts** — the same three calls, hourly and on `workflow_dispatch`, over every workload in `deploy/canary/canary.json` ([ADR-043](../../docs/backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)) |
+| `realm.yml`, `deployed` | the realm every deployed release points at, **between rollouts** — the same three calls, hourly and on `workflow_dispatch`, over every workload in `deploy/canary/canary.json` ([ADR-043](../../docs/backend-architecture/adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md)) |
 
 **One predicate judges both subjects**, because a Keycloak realm export and the
 admin API's `RealmRepresentation` are the same document — the export is that
@@ -36,7 +36,7 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
 
 - `accessTokenLifespan` equals the `AccessTokenLifetime` `Common.Web` declares.
   **Read out of that declaration**, never restated —
-  [ADR-040](../../docs/backend-architecture/appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+  [ADR-040](../../docs/backend-architecture/adr/ADR-040-no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound.md)
   made it the one place the number lives.
 - No client carries an `access.token.lifespan` attribute disagreeing with it.
   Keycloak resolves the client attribute over the realm value, so a realm at
@@ -44,7 +44,7 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
 - No client enables the implicit flow, which is what makes
   `accessTokenLifespanForImplicitFlow` unreachable and its silence honest.
 - `web-app` carries `use.refresh.tokens` `"false"`
-  ([ADR-034](../../docs/backend-architecture/appendix-a-adrs.md#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)),
+  ([ADR-034](../../docs/backend-architecture/adr/ADR-034-the-browser-holds-an-access-token-and-no-refresh-token.md)),
   and carries it — an absent attribute is the violation, because Keycloak's
   default is to issue refresh tokens on the standard flow.
 - `web-app` enables the standard flow, without which the line above holds

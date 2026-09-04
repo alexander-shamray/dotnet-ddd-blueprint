@@ -323,7 +323,7 @@ public void Every_handler_implementation_is_registered()
 }
 ```
 
-> **Decision — no mediator library.** See [ADR-004](appendix-a-adrs.md#adr-004--no-mediator-library).
+> **Decision — no mediator library.** See [ADR-004](adr/ADR-004-no-mediator-library.md).
 
 ## 6.3 Pipeline behaviours
 
@@ -351,7 +351,7 @@ duplicate of an invalid command is refused as *concurrent* rather than as
 work starts, which is the fast, atomic exclusion §8.5 argues; the marker
 `TransactionBehavior` writes under the same key inside the transaction is
 the durable half of that one mechanism
-([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)),
+([ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)),
 and neither half is complete alone.
 
 **Behaviours are registered explicitly, in order, and are deliberately not part
@@ -644,7 +644,7 @@ dispatch publishes nothing, no count check makes principle 3 advisory.
 > **The two marker calls are the only thing in this behaviour that belongs to
 > another section, and where each one sits is the whole of what it buys.**
 > [§8.5](08-caching-redis.md) owns the mechanism and
-> [ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)
+> [ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)
 > owns the decision; what this behaviour supplies is the one thing §8.5 has no
 > access to — a transaction. A marker written anywhere else is a second Redis
 > claim in different clothes, and §8.5's whole residual was that no ordering of
@@ -663,7 +663,7 @@ dispatch publishes nothing, no count check makes principle 3 advisory.
 > passes a key and nothing more: `CommittedAt` is written by a
 > `SYSDATETIMEOFFSET()` column default, so the row is aged by the database it
 > commits to rather than by whichever replica ran the command. §8.5 and
-> [ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)
+> [ADR-038](adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md)
 > carry the argument; what matters here is that this behaviour has no clock in
 > it to get wrong.
 >
@@ -1171,7 +1171,7 @@ public sealed class GetOrderSummariesHandler(IDbConnectionFactory connections, I
 > which contradicts §7.2 and gives the aggregate a second, storable total to
 > disagree with its own.
 
-> **Decision — cursor pagination is the default; `page`/`pageSize` is not.** See [ADR-016](appendix-a-adrs.md#adr-016--cursor-pagination-by-default).
+> **Decision — cursor pagination is the default; `page`/`pageSize` is not.** See [ADR-016](adr/ADR-016-cursor-pagination-by-default.md).
 > `OFFSET @n ROWS` requires SQL Server to produce and discard every skipped row,
 > so page 500 costs roughly 500 times page 1. Worse, rows inserted while a user
 > pages cause items to be skipped or repeated. A keyset cursor over
@@ -1606,7 +1606,7 @@ arrived, since `PriceChanged` reaches the same insert branch and lists it.
 > `NOT MATCHED` branch, so an ordinary price change lists that product with no
 > rebuild having happened — carrying a price and nothing else, because
 > `PriceChanged` has no `Name` or `ThumbnailUrl` to carry. That is a door
-> rather than a repair, and [ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally) turns on
+> rather than a repair, and [ADR-027](adr/ADR-027-the-order-summary-stores-product-ids-and-resolves-the-name-locally.md) turns on
 > it: an order placed through this door is the one a repair that read names at
 > *insert* time could never fill, because at insert there is no name to read.
 > The old patch handler would eventually fill it, whenever `ProductPublished`
@@ -1917,7 +1917,7 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
 > of its own by construction and there is no array element to compare.
 
 > **Decision — the summary stores product ids and resolves the name locally.**
-> See [ADR-027](appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally).
+> See [ADR-027](adr/ADR-027-the-order-summary-stores-product-ids-and-resolves-the-name-locally.md).
 
 > **The shape this replaced filled a name only by accident, and the reason is
 > worth keeping.** An earlier revision inserted `name` and `thumb` as empty

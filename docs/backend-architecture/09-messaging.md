@@ -161,7 +161,7 @@ bought to avoid.
 > to argue for it** on the grounds that Shipping cannot function without the
 > address and should not call back to get it. The first half is true and the
 > second was the wrong remedy:
-> [ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)
+> [ADR-035](adr/ADR-035-an-integration-event-carries-identifiers-not-personal-data.md)
 > records the removal and leaves the delivery mechanism to Shipping's own PR,
 > where the code that needs the address will be in front of whoever chooses it.
 > A postal address is personal data under GDPR Art. 4 and §11.7's erasure
@@ -233,7 +233,7 @@ rather than the breaking-change paragraph below.
 > rule above is checkable rather than a hope, because a message skipped during
 > a rollout is meant to page someone rather than to vanish. **What the alert
 > depends on is stated in
-> [ADR-026](appendix-a-adrs.md#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it)
+> [ADR-026](adr/ADR-026-consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it.md)
 > rather than assumed here**: per-queue broker metrics are a deployment
 > prerequisite this repository does not configure, so the enforcement is
 > owed a cluster that has. See
@@ -274,7 +274,7 @@ architecture exists to avoid.
 > **The rule has been used once, and the case is worth reading carefully
 > because the first condition was met in spirit rather than to the letter.**
 > `OrderConfirmed` dropped its shipping address, and
-> [ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)
+> [ADR-035](adr/ADR-035-an-integration-event-carries-identifiers-not-personal-data.md)
 > is the record the second condition demands. It is also an instance of the
 > harmful-window class below rather than merely a cheap edit, which is why it
 > did not take a V2.
@@ -291,7 +291,7 @@ architecture exists to avoid.
 > independent schedule**, and Ordering is not one of those with respect to
 > itself — producer and consumer ship in the same build. What that costs
 > instead is the *overlap within one service's own rollout*, which is
-> [ADR-026](appendix-a-adrs.md#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it)'s
+> [ADR-026](adr/ADR-026-consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it.md)'s
 > subject rather than this section's, and ADR-035 records the deployment shape
 > the removal therefore owes. Reading the condition as satisfied without
 > naming that would have hidden a live-rollout fault behind a rule about
@@ -300,7 +300,7 @@ architecture exists to avoid.
 > **For one class of change the deprecation window is not merely useless but
 > harmful**, and it is worth naming because it inverts the rule's intent. When
 > the point of the change is that a field *must not be on the wire* —
-> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+> [ADR-028](adr/ADR-028-a-money-movement-command-carries-no-subject.md)
 > removing the subject from `AuthorisePayment` is the worked case — emitting
 > V1 alongside V2 keeps the offending shape published, and consumable, for the
 > length of the window. The standard remedy would re-arm the defect it was
@@ -443,7 +443,7 @@ they are prohibitions rather than guidance.
 
 **The third has exactly one recorded exception, and recording it is what keeps
 it an exception.**
-[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+[ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 admits MassTransit's Entity Framework outbox on §9.6's saga receive endpoint,
 which brings a second table set into the `ordering` schema. It is that endpoint
 and no other: the platform's three ordinary receive endpoints keep
@@ -465,7 +465,7 @@ additional guarantee" — true only while the in-memory outbox was believed to b
 durable, which it is not: it defers, it does not persist. The stronger objection
 is availability rather than cost. The saga's waits are scheduled messages, the
 delay is a transport feature
-([ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)),
+([ADR-021](adr/ADR-021-saga-timeouts-are-scheduled-by-the-broker.md)),
 and no dispatcher of ours can replay a delay it never held — so an application
 outbox would carry `AuthorisePayment` and not `PaymentTimeout`, closing half the
 window and leaving the half with no bound at all.
@@ -1160,13 +1160,13 @@ public sealed class OutboxTable
 > them being the one nobody monitors.
 >
 > **That argument is untouched by
-> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction),
+> [ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md),
 > and the difference is what makes the exception one.** The ADR admits
 > MassTransit's outbox on the saga's receive endpoint, which stages what the
 > **state machine** sends inside the consume transaction — a job this
 > dispatcher does not do and cannot be given, since a scheduled message's
 > delay is a transport feature
-> ([ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker))
+> ([ADR-021](adr/ADR-021-saga-timeouts-are-scheduled-by-the-broker.md))
 > that no dispatcher of ours could replay. A second dispatcher for *these*
 > rows would be a second answer to the question this one already answers,
 > which is exactly what the paragraph above refuses.
@@ -1762,7 +1762,7 @@ public sealed class CancelOrderMapper : ICommandMessageMapper<CancelOrder, Cance
 > queue and be mapped as system-initiated.
 >
 > **Each service now authenticates as itself, and `write` is scoped to what its
-> own code addresses** ([ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)).
+> own code addresses** ([ADR-036](adr/ADR-036-the-broker-has-a-per-service-identity.md)).
 > `catalog-svc` has no `write` matching `ordering-commands` or
 > `Common.Contracts.Ordering.V1:*`, so a compromised Catalog can neither send
 > `ConfirmOrder` nor forge an `OrderPlaced` — verified by attempting all four
@@ -1970,7 +1970,7 @@ against RabbitMQ's configured limits, not a default to accept.
 the same hosted service, and they are not every messaging table in the
 database.** Ordering's saga endpoint
 takes MassTransit's own outbox
-([ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)),
+([ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)),
 whose three tables are kept in three different ways and not one of them is
 this service's.
 
@@ -2019,7 +2019,7 @@ loses a suppression the broker will not exercise again, where a purged marker
 loses the row that refuses a retry of a command that already committed. That is
 why `RetentionPolicy.IdempotencyWindow` is the one window with a **floor** — it
 may not be shorter than the Redis claim it backs up
-([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
+([ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)).
 Matching the claim exactly is admitted, and that is the floor's whole shape
 rather than a rounding of it: the claim is taken before the marker is stamped,
 so the marker outlives it for every window at least as long. **What the floor
@@ -2037,8 +2037,8 @@ and that the marker reaches the database inside the claim's window. The first
 is gone rather than bounded, for the reason the next paragraph gives; the
 second is unchanged, is now the only one, and [§8.5](08-caching-redis.md)
 carries it as a residual of its own
-([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin),
-[ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)).
+([ADR-038](adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md),
+[ADR-039](adr/ADR-039-the-markers-purge-asks-the-claim-rather-than-out-counting-it.md)).
 
 **Its pass is two statements where the other two are one, and the cutoff it
 computes for itself now *selects* rather than decides.** The two above are
@@ -2076,7 +2076,7 @@ and that pair held only **by construction** — nothing enforces uniqueness on a
 `datetimeoffset(7)`, so a database clock set to a selected row's exact
 100-nanosecond tick matched the replacement and deleted it with a live claim
 behind it
-([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)).
+([ADR-041](adr/ADR-041-the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp.md)).
 The column is an EF **shadow property**, declared by each service's own
 `IEntityTypeConfiguration` beside the schema and named from the entity, so the
 mapping and the two statements cannot drift apart; the delete still costs two
@@ -2104,7 +2104,7 @@ has ordinarily gone.
 > reads a zero from the wrong side of a race: [§15.3](15-cicd-deployment.md)
 > ships three replicas, so another purger may have deleted the selected rows
 > first, and that zero is progress rather than a wall
-> ([ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)).
+> ([ADR-039](adr/ADR-039-the-markers-purge-asks-the-claim-rather-than-out-counting-it.md)).
 
 **What the carve-out costs is smaller than it reads, and saying so is cheaper
 than letting a reader discover it.** No retention test here substitutes the
@@ -2489,7 +2489,7 @@ public sealed record AuthorisePayment(Guid OrderId, decimal Amount, string Curre
 
 > **An instruction travels; an authority is derived — and that is why this
 > contract narrowed rather than emptied.**
-> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+> [ADR-028](adr/ADR-028-a-money-movement-command-carries-no-subject.md)
 > carries the argument. `Amount` and `Currency` say *what to do*: the sender
 > decides them, so they travel, and Payments may refuse a mismatch against its
 > own record as a consistency check. A subject says *on whose behalf*, which is
@@ -3453,7 +3453,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > fault worth six retries and one error-queue message.
 >
 > **There were three, and
-> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> [ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 > closed the middle one.** It was a crash before the in-memory outbox flushed,
 > leaving the instance advanced and its commands unsent — permanent silent
 > loss, and the arrival that made the trade one-sided. The saga's endpoint has
@@ -3491,7 +3491,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > that would have rescued the order was buffered in the same flush.
 >
 > **What closed it is
-> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction),
+> [ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md),
 > and the mechanism is that the two writes became one.** The endpoint takes
 > `UseEntityFrameworkOutbox<OrderingDbContext>(context)` instead, and the
 > repository above it is configured with
@@ -3685,7 +3685,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > | `AwaitingPayment` | Stock held, **authorisation already sent** | The decline branch's compensation, recording `OrderCancelled.Reason` — this does not stop the charge |
 > | `AwaitingConfirmation` | The card is authorised, and **nothing downstream has been told** — `ConfirmOrder` is in flight, so no `OrderConfirmed` has been published and Shipping has no despatch to prepare | `AwaitingPayment`'s compensation unchanged, one state later: release, wait, cancel. It escalates nothing, because Payments voids off `OrderCancelled` itself and there is no despatch to stop. **What it cannot see is whether the aggregate confirmed a moment before the customer cancelled** — that is caught in `Compensating` below, on the confirmation's arrival |
 > | `Confirmed` | The card is authorised **and Shipping has been told** | Escalate — `cancelled_after_confirmation`, because a despatch may still be moving — and finalise. A second `OrderConfirmed` is absorbed here rather than faulted: it is either §9.5's unrecorded redelivery or a rollout handing this replica an instance the previous release advanced |
-> | `Compensating` | A cancellation is already the outcome — but the money, the reservation and the **confirmation** may still land | Every arrival written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved` and `StockReservationFailed`, since the exits cancel the order anyway; `When(PaymentAuthorised)` escalates `payment_authorised_during_compensation`; `When(OrderConfirmed)` escalates `cancelled_after_confirmation`; `When(PaymentDeclined)` and `When(PaymentTimeout.Received)` escalate nothing and simply record that the verdict is in or given up on. **This state waits on two halves and finalises on neither alone** — Inventory owes a release and Payments may owe a verdict, so each exit asks about the other and `Finalize` is conditional on both being settled (#124). **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation**, and it is [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation) rather than this machine that makes that safe: §9.4 orders nothing, so a release handled before its reserve would otherwise strand the reservation that follows it. Inventory owes the tombstone; this row used to close the case with "`ReleaseStock` is already in flight" |
+> | `Compensating` | A cancellation is already the outcome — but the money, the reservation and the **confirmation** may still land | Every arrival written out, none left to the catch-all: `Ignore` for `OrderCancelled`, `StockReserved` and `StockReservationFailed`, since the exits cancel the order anyway; `When(PaymentAuthorised)` escalates `payment_authorised_during_compensation`; `When(OrderConfirmed)` escalates `cancelled_after_confirmation`; `When(PaymentDeclined)` and `When(PaymentTimeout.Received)` escalate nothing and simply record that the verdict is in or given up on. **This state waits on two halves and finalises on neither alone** — Inventory owes a release and Payments may owe a verdict, so each exit asks about the other and `Finalize` is conditional on both being settled (#124). **`PaymentDeclined` was the one the enumeration missed**: reaching this state from `AwaitingPayment` used to mean the payment had already answered, and the `OrderCancelled` transition arrives with the authorisation still outstanding, so either verdict can follow. **`Ignore(StockReserved)` absorbs the event and does not release the reservation**, and it is [ADR-024](adr/ADR-024-a-release-answers-for-the-order-not-for-the-reservation.md) rather than this machine that makes that safe: §9.4 orders nothing, so a release handled before its reserve would otherwise strand the reservation that follows it. Inventory owes the tombstone; this row used to close the case with "`ReleaseStock` is already in flight" |
 >
 > **Every row above is what happens when the cancellation ARRIVES, and the
 > harder case is the interval before it does.** Each of those transitions
@@ -3701,7 +3701,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > correlated to.
 >
 > **What closes it is an obligation the machine carries rather than an event
-> it waits for**, which is [ADR-025](appendix-a-adrs.md#adr-025--a-saga-state-that-waits-on-two-services-finalises-on-neither-alone)'s rule applied to a
+> it waits for**, which is [ADR-025](adr/ADR-025-a-saga-state-that-waits-on-two-services-finalises-on-neither-alone.md)'s rule applied to a
 > fact instead of a join. A `StockReleased` arriving in a state that sent no
 > release proves a cancellation reached Inventory, so the four states that
 > absorb one record `CancellationObserved` on the instance, and **every**
@@ -3760,7 +3760,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > `OrderCancelled` directly, so the cancellation that raises this row has
 > already told it to release; what the saga withholds is a second, redundant
 > instruction, not the release itself — which is the decision
-> [ADR-029](appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word) now records rather than leaves to be read
+> [ADR-029](adr/ADR-029-inventory-releases-on-the-cancellation-not-on-the-sagas-word.md) now records rather than leaves to be read
 > off a comment. `Confirmed`'s `When(StockReleased)` is that fact arriving as
 > an event: Inventory answering a cancellation this saga never forwarded, and
 > since [#143](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/143)
@@ -3782,7 +3782,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > restraint is the mitigation. It was filed as
 > [#141](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/141)
 > and is answered by
-> [ADR-029](appendix-a-adrs.md#adr-029--inventory-releases-on-the-cancellation-not-on-the-sagas-word): Inventory keeps `OrderCancelled` and releases
+> [ADR-029](adr/ADR-029-inventory-releases-on-the-cancellation-not-on-the-sagas-word.md): Inventory keeps `OrderCancelled` and releases
 > regardless, so the hazard stays open and is Inventory's to close when
 > Inventory exists.
 >
@@ -3815,7 +3815,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 >
 > **It is closed in [§3.2](03-bounded-contexts.md), not here, and the reason
 > is worth carrying.**
-> [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+> [ADR-024](adr/ADR-024-a-release-answers-for-the-order-not-for-the-reservation.md)
 > has Inventory remember a release for an order whose `ReserveStock` has not
 > arrived and refuse the reserve that follows, answering with `StockReleased`
 > — the same postcondition, and not `StockReservationFailed`, which reports
@@ -3862,7 +3862,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 > the machine.
 >
 > **In the three states that send a release, absorbing is correct because of
-> [ADR-024](appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation)
+> [ADR-024](adr/ADR-024-a-release-answers-for-the-order-not-for-the-reservation.md)
 > and was not correct without it.** Recording the arrival still consumes it
 > rather than answering with it, so
 > `Compensating`'s exit has to come from somewhere else — and it does: the
@@ -4257,7 +4257,7 @@ repository in §12.5 deliberately trades away for test speed.
 **`ExistingDbContext` buys a second thing, and it took a defect to find it.**
 Sharing the context is what lets the messages a transition sends commit in the
 same transaction as the instance that sent them, which is
-[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+[ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 and the reason this endpoint takes `UseEntityFrameworkOutbox<OrderingDbContext>`
 where the other three take `UseInMemoryOutbox` (§9.8). Until it did, the
 instance committed and its `Send`s and `Schedule`s were still in a buffer — a
@@ -4293,7 +4293,7 @@ cfg.UseDelayedMessageScheduler();
 > ratio. §12.5 carries the same measurement and the same caveat; this was the
 > third copy and the one that still read as a claim about the live suite.
 
-[ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
+[ADR-021](adr/ADR-021-saga-timeouts-are-scheduled-by-the-broker.md)
 records the choice and what it costs. The short of it: on RabbitMQ this
 scheduler is the delayed message exchange **plugin**, so §14.1 builds the broker
 image rather than pulling a stock one. A broker without the plugin takes the
@@ -4359,7 +4359,7 @@ depends on another service being up is a write that inherits its downtime.
 
 ### The hop budget
 
-> **Decision — maximum one synchronous downstream hop per inbound request.** See [ADR-017](appendix-a-adrs.md#adr-017--one-synchronous-hop).
+> **Decision — maximum one synchronous downstream hop per inbound request.** See [ADR-017](adr/ADR-017-one-synchronous-hop.md).
 
 `Client → Gateway → A → B` is permitted. `A → B → C` is **not**, and neither is
 any deeper chain. Stated as a number rather than as advice, because "avoid long
@@ -4650,7 +4650,7 @@ contract**: `Web.Bff` writes down what it needs, its own suite drives every
 expectation through the screen that needs it, and Catalog's suite verifies the
 same list against the real service.
 [§12.6](12-test-strategy.md) has the shape and
-[ADR-023](appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)
+[ADR-023](adr/ADR-023-the-consumer-driven-contract-is-a-linked-file-not-pact.md)
 has the mechanism, which is a linked file rather than Pact.
 
 > **A stub is a second specification, and nothing was verifying it.** The BFF's
@@ -4686,7 +4686,7 @@ saga's endpoint was the exception until PR-21 found what that exemption did not
 cover, and the callout under it is the argument. **Retry differs, and so does
 the outbox** — three endpoints defer their sends with `UseInMemoryOutbox` and
 the saga's persists them, which is
-[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+[ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 and the callout under that block.
 The **projection** endpoint from §9.4, carrying Catalog's events into local read
 models:
@@ -4768,7 +4768,7 @@ cfg.ReceiveEndpoint(
 > this callout: a consumer whose sends must survive its own commit wants a
 > transactional outbox rather than the in-memory one, because the in-memory
 > outbox defers and does not persist. The saga is that consumer, and
-> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> [ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 > gave it one. **The nesting rule survives the substitution unchanged**: on the
 > saga's endpoint the inbox filter is still added first and still outermost,
 > and MassTransit's outbox delivers after the inner pipeline returns exactly as
@@ -4861,7 +4861,7 @@ cfg.ReceiveEndpoint(
 
 > **The outbox is not the default, and this endpoint is the only one that
 > departs from it.**
-> [ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+> [ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 > carries the argument. The short version is that the other three endpoints
 > buffer nothing that matters — their consumers publish through §9.4's
 > application outbox, whose row commits with the aggregate, so the in-memory
@@ -4923,7 +4923,7 @@ cfg.ReceiveEndpoint(
 > leans on.** A scheduled message is delivered with the token id its schedule
 > was armed with, and MassTransit discards one that no longer matches the
 > instance before the machine is asked — measured, and the reason
-> [ADR-021](appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)'s
+> [ADR-021](adr/ADR-021-saga-timeouts-are-scheduled-by-the-broker.md)'s
 > uncancellable timeouts are harmless. This paragraph credited the state
 > machine for it, which is a mechanism a reader would copy and not get.
 >
@@ -5021,7 +5021,7 @@ a state with no work for it is written out with its own `Ignore`, so what
 reaches this queue is an arrival nobody enumerated: a misroute, which is worth
 a page. **It used to be a misroute *or* a crash that lost the instance's
 commands**, and
-[ADR-032](appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+[ADR-032](adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 removed the second by committing those commands with the instance. The callout
 in §9.6 states the trade and what a catch-all would still cost.
 
