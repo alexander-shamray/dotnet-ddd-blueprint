@@ -14,7 +14,7 @@ Add a chapter to `docs/backend-architecture/`: number `$1`, title `$2`.
    without confirmation.
 2. **Create the file** as `NN-kebab-title.md`, zero-padded, matching the
    existing naming (`09-messaging.md`, `15-cicd-deployment.md`).
-3. **Write the skeleton** in house style — see `CLAUDE.md`:
+3. **Write the skeleton** in house style — see `docs/style-guide.md`:
 
    ```markdown
    # <N>. <Title>

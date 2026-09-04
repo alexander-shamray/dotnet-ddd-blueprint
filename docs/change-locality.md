@@ -138,7 +138,6 @@ deploy/compose/keycloak/realm-export.json
 .github/secret-scan/allowed-secrets.txt
 docs/backend-architecture/appendix-a-adrs.md   (until ADRs are one file each)
 docs/backend-architecture/appendix-b-licences.md
-CLAUDE.md                       (until the primer rewrite lands)
 ```
 
 ## 5. The procedure
