@@ -34,8 +34,13 @@ of content is `/validate-blueprint`.
    table row points at a file that exists. The `adr/` files are indexed by
    Appendix A's table instead: every file there appears in it exactly once,
    every row points at a file that exists, the row's `ADR-NNN` matches the
-   file's, and Appendix A carries no `##` heading — an ADR body written
-   there is in the wrong file.
+   file's, **no two files and no two rows carry the same `ADR-NNN`**, and
+   Appendix A carries no `##` heading — an ADR body written there is in the
+   wrong file. The uniqueness check is the one a per-file layout needs and a
+   per-row match cannot give: two `/new-adr` runs on two branches each take
+   `highest + 1` under different slugs, each row matches its own file, and
+   the duplicate number exists only after the merge — so it is caught here,
+   not there.
 6. **Root README.** `../../README.md`'s entry point still resolves.
 7. **Orphans.** Any file no other file links to, an ADR file included.
 

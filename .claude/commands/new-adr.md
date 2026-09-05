@@ -17,7 +17,10 @@ one index row apiece, and the row is the only place they meet.
    agree; where it does not, the files are right and the table is missing a
    row. **Never reuse or renumber.** If this decision reverses an existing
    ADR, write a new one and add a `**Supersedes.**` line; amend the old one
-   with `**Superseded by ADR-NNN.**` rather than deleting it.
+   with `**Superseded by ADR-NNN.**` rather than deleting it. Two branches
+   that each take `highest + 1` collide only when the second merges, and
+   `/check-links` check 5 is what catches the duplicate number; the later
+   branch renumbers its own ADR, never the one already on `main`.
 2. **Name the file** `ADR-0NN-<slug>.md`: the title lower-cased, punctuation
    dropped, spaces to hyphens — the slug the title's heading anchor would
    carry, so a reader who knows one knows the other.

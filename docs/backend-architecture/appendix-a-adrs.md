@@ -1,8 +1,9 @@
 # Appendix A — Architecture decision records
 
-Short-form ADRs. Each records what was decided, why, and what it costs. The
-value is in the "consequences" column — that is what a future reader needs when
-the decision looks wrong.
+Short-form ADRs, one file each under `adr/`, indexed here. Each records what
+was decided, why, and what it costs. The value is in each one's
+**Consequences.** sentence — that is what a future reader needs when the
+decision looks wrong.
 
 | | |
 |---|---|
