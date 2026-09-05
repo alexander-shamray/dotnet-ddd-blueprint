@@ -186,7 +186,7 @@ read decorative, which is the shape ADR-033 was written to withdraw.
   [ADR-043](ADR-043-the-deployed-realm-is-checked-between-rollouts.md)**, which
   takes the third bullet's window: the realm is now also read on a schedule,
   and #176 closes. The bullet stands as written because it was true when it
-  was written, and the record that moved it is the one below.
+  was written, and the record that moved it is ADR-043.
 
 ---
 
