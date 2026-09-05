@@ -111,7 +111,7 @@ engineer-days; **Week** is the calendar week that total completes in, at
 PR-01 is scaffolding except for the licence allow-list gate, which is a real
 piece of CI work rather than a checkbox. PR-04 is the largest of the six
 because the dispatcher is hand-rolled —
-[ADR-004](backend-architecture/appendix-a-adrs.md#adr-004--no-mediator-library)
+[ADR-004](backend-architecture/adr/ADR-004-no-mediator-library.md)
 takes no mediator library — and the behaviour-ordering tests are the point of
 it, not a garnish.
 
@@ -188,7 +188,7 @@ capabilities are four lines together, and the day priced the decisions in
 front of them: a body-size limit needed a number nobody had chosen — one
 mebibyte — and turning compression on at the edge needed the `EnableForHttps`
 argument made where an ADR could hold it, which is
-[ADR-020](backend-architecture/appendix-a-adrs.md#adr-020--the-edge-compresses-over-tls-and-says-so).
+[ADR-020](backend-architecture/adr/ADR-020-the-edge-compresses-over-tls-and-says-so.md).
 **A day is what an argument costs when the code is already obvious**, and
 pricing it at zero because the diff is small is how design decisions end up
 taken by whoever types first.
@@ -267,7 +267,7 @@ mean two different things depending on when it was read. So the 99 days still
 describe the plan as estimated; the week PR-26 actually cost is beside it, not
 in it.
 
-The estimate said Pact and the delivery is not — [ADR-023](backend-architecture/appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)
+The estimate said Pact and the delivery is not — [ADR-023](backend-architecture/adr/ADR-023-the-consumer-driven-contract-is-a-linked-file-not-pact.md)
 records why, and Appendix C's row carries what was found. That is worth a line
 here only because it moved the estimate's shape: no broker to stand up and no
 package to adopt, against a stub that had to be corrected in four places before
@@ -370,7 +370,7 @@ where the work would be.** "A canary nobody has run" is still a fair
 description of what shipped — no cluster exists — but the invisible work was
 not the running, it was the deciding. §15.5 named a behaviour and no chapter
 had chosen a mechanism, so the pull request had to take
-[ADR-022](backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas);
+[ADR-022](backend-architecture/adr/ADR-022-the-canary-is-a-second-release-weighted-by-replicas.md);
 the attribute the analysis compares on turned out to be constant across every
 build in the platform and needed replacing; §15.5's first rung turned out to be
 inexpressible at the replica count §15.3 ships; and the arithmetic that
@@ -494,7 +494,7 @@ starts nothing — so no standing test mints a password-grant token for `demo` o
 still the only suite in the solution that starts an identity provider.
 
 **The `Directory.Build.props` analyser policy is settled, and it is a tax.**
-[ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)
+[ADR-019](backend-architecture/adr/ADR-019-warnings-are-errors-and-the-editorconfig-is-a-build-input.md)
 takes `TreatWarningsAsErrors` and `EnforceCodeStyleInBuild` from PR-01 and
 declines StyleCop. The half day it adds to PR-01 is inside that estimate. What
 is **not** priced anywhere below is the per-pull-request cost — small each

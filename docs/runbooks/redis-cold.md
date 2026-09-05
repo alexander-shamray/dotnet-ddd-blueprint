@@ -46,7 +46,7 @@
 
 Redis lost its working set. Every miss becomes a database read, and **the
 databases are sized for a warm cache**
-([ADR-006](../backend-architecture/appendix-a-adrs.md)) — so the immediate risk
+([ADR-006](../backend-architecture/adr/ADR-006-redis-for-cache-and-coordination-never-as-a-store-of-record.md)) — so the immediate risk
 is not the cache, it is the database behind it falling over under a load it was
 never provisioned for.
 
@@ -144,7 +144,7 @@ This is the case that does not resolve itself.
   `{service}:cache|lock|idem|denylist:`, and a service writing outside its
   prefix is both a bug and a capacity surprise. The list is the reserved set
   and not an inventory of what is live: **nothing writes `denylist:`**, which
-  [ADR-033](../backend-architecture/appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+  [ADR-033](../backend-architecture/adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)
   records as a decision rather than a gap, so an empty `denylist:` namespace is
   the healthy reading and a key found under it is the anomaly worth chasing.
 - Raising `maxmemory` is a real fix if the working set genuinely grew. Raising

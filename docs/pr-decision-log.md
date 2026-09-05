@@ -96,7 +96,7 @@ one.
 **The rule that moved is ADR-042's third consequence: that a rollout is the
 only moment a deployed realm is read.** It stands as written, because it was
 true when it was written, and
-[ADR-043](backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)
+[ADR-043](backend-architecture/adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md)
 amends it rather than rewriting it: `realm.yml` gains a `deployed` job that
 runs the rollout's own three calls, nominally hourly, over every release the
 canary plan names. Nothing about the predicate changed and nothing about
@@ -999,7 +999,7 @@ denylist among Redis's decided uses. Tests pinned the key's shape. **Nothing
 ever wrote or read it**, and §11.3 said so in a sentence nobody reconciled with
 the other three.
 
-[ADR-033](backend-architecture/appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+[ADR-033](backend-architecture/adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)
 withdraws the claim rather than building the consumer, and the four
 measurements behind that choice are in the record. The one worth repeating
 here: **two of the four hosts have no Redis at all**, and one of them is the
@@ -1052,7 +1052,7 @@ would have established only that the two clients differ.
 
 **What was deliberately not done.** Terminating the flow in `Web.Bff` is the
 stronger answer and is
-[ADR-034](backend-architecture/appendix-a-adrs.md#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)'s
+[ADR-034](backend-architecture/adr/ADR-034-the-browser-holds-an-access-token-and-no-refresh-token.md)'s
 stated runner-up: an OIDC handler, a cookie stack, antiforgery on every
 state-changing route, a realm change and a gateway route change. §11.5's
 account of the BFF holding exactly one credential is correct today and would
@@ -1091,7 +1091,7 @@ both chapters.
 
 **Nothing is deployed, which is the only reason this was cheap — and that is
 not the same as the field having had no consumer.**
-[ADR-035](backend-architecture/appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)
+[ADR-035](backend-architecture/adr/ADR-035-an-integration-event-carries-identifiers-not-personal-data.md)
 is the record §9.2's second condition demands. Its first condition was **not**
 met, and three separate places said it was before review caught the last of
 them: Shipping and Notifications are unbuilt, so no independently scheduled
@@ -1188,7 +1188,7 @@ which releases its buffer after the inner pipeline returns — after the
 repository has committed. A crash in that window left the order in
 `AwaitingPayment` with stock reserved, no `AuthorisePayment` sent and **no
 `PaymentTimeout` to rescue it**, because the schedule sat in the same buffer.
-[ADR-032](backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+[ADR-032](backend-architecture/adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 carries the decision, the exception it takes to §9.3 and the two costs it
 accepts, and none of that is restated here. What follows is what building it
 found.
@@ -1215,7 +1215,7 @@ outbox "would add a second staging hop with no additional guarantee" — a claim
 about cost, and true only while the in-memory outbox was believed to persist
 anything. A saga timeout is a **scheduled** message and the delay is a
 transport feature
-([ADR-021](backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)),
+([ADR-021](backend-architecture/adr/ADR-021-saga-timeouts-are-scheduled-by-the-broker.md)),
 so no dispatcher of ours can replay a delay it never held. An application
 outbox would have carried `AuthorisePayment` and not `PaymentTimeout`: it
 closes half the window and leaves the half with **no bound at all**, which is
@@ -1811,7 +1811,7 @@ answer rather than §11.4's proposed `EndpointDataSource` test, and the reason i
 §4.5: a test lives in one service's project and reaches the services the
 scaffold has already rendered, where a fallback in the building block reaches
 every host that will ever compose it. Both are kept, and
-[ADR-030](backend-architecture/appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block)
+[ADR-030](backend-architecture/adr/ADR-030-authorization-is-deny-by-default-in-the-building-block.md)
 records why neither replaces the other.
 
 **It reaches three endpoints nobody wrote, and each had to be decided rather
@@ -1845,7 +1845,7 @@ platform acquires two answers. The third ask had no owner at all: the blueprint
 discussed response security headers as neither done, nor deferred, nor out of
 scope. `nosniff` is now the service's, in a building block every host composes,
 and
-[ADR-031](backend-architecture/appendix-a-adrs.md#adr-031--the-service-owns-nosniff-the-ingress-owns-hsts)
+[ADR-031](backend-architecture/adr/ADR-031-the-service-owns-nosniff-the-ingress-owns-hsts.md)
 argues the omissions — HSTS belongs to the only component that terminates TLS,
 and framing and script policies govern a document this platform does not serve.
 
@@ -2056,7 +2056,7 @@ existed. Nothing here makes it less true.
 **It has since been taken, and the API named twice above is the wrong one** —
 reconciled here rather than rewritten, because what the entry got right is the
 part worth keeping: it wanted an ADR, and
-[ADR-032](backend-architecture/appendix-a-adrs.md#adr-032--the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction)
+[ADR-032](backend-architecture/adr/ADR-032-the-sagas-outbox-is-masstransits-in-the-sagas-own-transaction.md)
 is it. `UseBusOutbox()` is a bus-side option and does not touch a receive
 endpoint at all; what closes #128 is `UseEntityFrameworkOutbox<T>(context)` on
 the saga's endpoint, with `AddEntityFrameworkOutbox<T>` behind it. The
@@ -2592,7 +2592,7 @@ whose `ProductPublished` never reached the queue still acquires a price row and
 is orderable — and an order placed through that door would carry an empty name
 permanently, with the only thing that could repair it being the patch handler
 this change removes. So the fix is a product-keyed table and resolution on
-read ([ADR-027](backend-architecture/appendix-a-adrs.md#adr-027--the-order-summary-stores-product-ids-and-resolves-the-name-locally)),
+read ([ADR-027](backend-architecture/adr/ADR-027-the-order-summary-stores-product-ids-and-resolves-the-name-locally.md)),
 which fills every order that ever referenced a product the moment its name
 arrives, retroactively and with no rebuild.
 
@@ -2725,7 +2725,7 @@ build declares no consumer, parked in `<queue>_skipped`, nothing thrown. A new
 reason code is refused by the mapper, and §9.8 excludes
 `ContractMappingException` from retries on purpose, so it reaches the error
 queue on the first attempt. Loud and silent, closed by the same rule:
-[ADR-026](backend-architecture/appendix-a-adrs.md#adr-026--consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it).
+[ADR-026](backend-architecture/adr/ADR-026-consumer-capability-is-a-release-ahead-of-the-producer-that-uses-it.md).
 
 **Ordering closes the vocabulary case and does not close the binding case**,
 and running them together is what made this look like one problem with one fix.
@@ -2810,7 +2810,7 @@ ways and whether a verdict is owed differs by route — nothing from
 `AwaitingPayment` it depends on whether a decline, a timeout or a cancellation
 brought it there. One state name compresses all five, so the machine had
 discarded the fact before the exit ran.
-[ADR-025](backend-architecture/appendix-a-adrs.md#adr-025--a-saga-state-that-waits-on-two-services-finalises-on-neither-alone)
+[ADR-025](backend-architecture/adr/ADR-025-a-saga-state-that-waits-on-two-services-finalises-on-neither-alone.md)
 records the rule that follows: record the obligation where it is incurred, and
 finalise on the join.
 
@@ -2899,7 +2899,7 @@ asked whether a `ReleaseStock` for a reservation that was never held publishes
 and stopped there; §9 sends the command from every compensating transition it
 has and never asks.
 The answer is
-[ADR-024](backend-architecture/appendix-a-adrs.md#adr-024--a-release-answers-for-the-order-not-for-the-reservation),
+[ADR-024](backend-architecture/adr/ADR-024-a-release-answers-for-the-order-not-for-the-reservation.md),
 and once it is written down, #129 becomes a four-line change and #125 stops
 being reachable.
 
@@ -3696,7 +3696,7 @@ one path it cannot see. The race has been recorded as knowingly open since
 PR-09 and stated as an exception in §8.5's opening sentence ever since.
 
 **The fix is a row in the command's own transaction**
-([ADR-037](backend-architecture/appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)):
+([ADR-037](backend-architecture/adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)):
 `IIdempotencyMarkerStore` in `Common.Application`, `EfIdempotencyMarkerStore`
 over the service's own `DbContext` in `Common.Infrastructure`, written inside
 [§6.3](backend-architecture/06-cqrs.md)'s transaction and read at the top of it.
@@ -3729,7 +3729,7 @@ the marker's, and both are invisible from the two numbers alone (#167, #168).
 > **Both terms were closed at the source by PR-33 and the allowance is gone**,
 > so `MarkerFloor` is now `Window` unchanged and a marker window equal to the
 > claim's is admitted
-> ([ADR-038](backend-architecture/appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+> ([ADR-038](backend-architecture/adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md)).
 > Reconciled here rather than re-argued: the reasoning above is why the
 > allowance existed, which is exactly what a reader tempted to reinstate it
 > needs, and only the live claim about what the floor *is* has moved.
@@ -3764,7 +3764,7 @@ measured counterfactual.
 
 - Deleting `idempotency.Claim(key)` from `IdempotencyBehavior` leaves an unread
   primary-constructor parameter, which is **CS9113** — an error under
-  [ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input).
+  [ADR-019](backend-architecture/adr/ADR-019-warnings-are-errors-and-the-editorconfig-is-a-build-input.md).
 - A `Claim` that assigns nothing is **CA2245** (assignment to itself) or
   **CA1822** (a member that does not use instance state), depending on how it
   is broken.
@@ -3853,7 +3853,7 @@ outcome reads the resource.
 > corrected it to the claim plus an allowance, and PR-33 closed both terms the
 > allowance stood in for — so `IdempotencyWindow` may now be narrowed to
 > `IdempotencyRetention.Window` exactly
-> ([ADR-038](backend-architecture/appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+> ([ADR-038](backend-architecture/adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md)).
 > **The two terms named above are what changed, not the reasoning about them**:
 > the claim is no longer re-armed after the commit, and the marker is no longer
 > aged across two pods' clocks, so "matching the claim leaves no margin for
@@ -4029,7 +4029,7 @@ for provider verification, because its Rust core makes real TCP calls, so
 Catalog's suite would have needed a second hosting shape as well.
 
 **So the property was taken and the machinery declined**, which
-[ADR-023](backend-architecture/appendix-a-adrs.md#adr-023--the-consumer-driven-contract-is-a-linked-file-not-pact)
+[ADR-023](backend-architecture/adr/ADR-023-the-consumer-driven-contract-is-a-linked-file-not-pact.md)
 records. What makes a pact worth having is that **one artefact is authored by
 the consumer and verified against the provider**; the broker and the wire format
 are how that property is shipped across a *repository* boundary, and this is a
@@ -4101,7 +4101,7 @@ with automated rollback. It closes the roadmap's M6.
 **Decision — the canary is replica-weighted, and the mechanism was a decision
 nobody had taken.** §15.5 specified the behaviour in four sentences and named
 no machinery, so building the rollout was what forced the choice;
-[ADR-022](backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)
+[ADR-022](backend-architecture/adr/ADR-022-the-canary-is-a-second-release-weighted-by-replicas.md)
 records it. **The disqualifying argument is about this platform's topology and
 not about taste**, which is worth keeping because the rejected option is the
 one every reader reaches for first: an nginx-style ingress canary annotation
@@ -4311,7 +4311,7 @@ constructor's parameters are named `_`, `__` and `___` and never read — three
 primary constructor is an ordinary parameter and not a discard. Its
 `StartAsync` spells the token `ct`, which is **CA1725** against
 `IHostedService`. Both are errors under
-[ADR-019](backend-architecture/appendix-a-adrs.md#adr-019--warnings-are-errors-and-the-editorconfig-is-a-build-input)
+[ADR-019](backend-architecture/adr/ADR-019-warnings-are-errors-and-the-editorconfig-is-a-build-input.md)
 and both were met by changing the code, adding no fourth suppression.
 
 **The rule a reader expects to fire on those names does not.** CA1707 governs
@@ -4670,7 +4670,7 @@ reason the saga had nothing to start on. Five of its decisions bind what comes
 after.
 
 - **No chapter had ever named a message scheduler, and §9.6's `Schedule`
-  declarations do not work without one.** [ADR-021](backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)
+  declarations do not work without one.** [ADR-021](backend-architecture/adr/ADR-021-saga-timeouts-are-scheduled-by-the-broker.md)
   settles it on MassTransit's delayed message scheduler, which on RabbitMQ is
   the delayed message exchange **plugin** — so §14.1's broker is now the one
   infrastructure service that is *built* rather than pulled. Quartz over an ADO
@@ -4872,7 +4872,7 @@ next reader wondering whether it was ever there.
     `Finalize()`, not by the `Unschedule` beside it**, which is the credit
     this entry gave until a review checked the mechanism. Deleting the
     instance is what leaves the timeout correlating to nothing when it
-    arrives; [ADR-021](backend-architecture/appendix-a-adrs.md#adr-021--saga-timeouts-are-scheduled-by-the-broker)'s
+    arrives; [ADR-021](backend-architecture/adr/ADR-021-saga-timeouts-are-scheduled-by-the-broker.md)'s
     scheduler returns `Task.CompletedTask` from both `CancelScheduledSend`
     overloads, so **every `Unschedule` in this machine is a no-op** and the
     call removes nothing. The saga and §9.6 were corrected on this branch
@@ -6161,7 +6161,7 @@ after:
 authenticates as its own account and its `write` is scoped to what its own
 source addresses, declared in `deploy/compose/rabbitmq/definitions.json`,
 imported at broker start and held to the code by a gate
-([ADR-036](backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)).
+([ADR-036](backend-architecture/adr/ADR-036-the-broker-has-a-per-service-identity.md)).
 `guest` is not created.
 
 **Why.** [§9.4](backend-architecture/09-messaging.md) stamps a broker-borne

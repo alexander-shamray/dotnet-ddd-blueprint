@@ -143,7 +143,7 @@ gateway:
   declares its own `deployment.track`. Every one of those is a claim about a
   manifest. Whether kube-proxy's spread of **connections** approximates the
   replica ratio under keep-alive or HTTP/2 is a claim about a cluster, and
-  [ADR-022](../../docs/backend-architecture/appendix-a-adrs.md#adr-022--the-canary-is-a-second-release-weighted-by-replicas)
+  [ADR-022](../../docs/backend-architecture/adr/ADR-022-the-canary-is-a-second-release-weighted-by-replicas.md)
   records it as owed.
 - **A cluster.** `smoke.sh` renders and greps; it never applies. Schema
   validation against a live API server is a deploy-time gate (§15.1). These

@@ -157,7 +157,7 @@ restart, verify readiness (`/health/ready` covers SQL —
 ### A broker credential
 
 `ConnectionStrings__RabbitMq`, and there is **one per service** since
-[ADR-036](backend-architecture/appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+[ADR-036](backend-architecture/adr/ADR-036-the-broker-has-a-per-service-identity.md)
 — `catalog-rabbitmq` and `ordering-rabbitmq`, never a shared Secret. That is
 the half of the rotation worth knowing first: rotating the broker is now N
 rotations rather than one, and rotating *one* affects exactly one service.
@@ -177,12 +177,12 @@ workload, and two jobs hold it. `deploy.yml`'s rollout job authenticates with
 it, fetches the realm that deployment is about to be rolled onto, and hands
 the document to `deploy/keycloak/realm_check.py` before the rollout changes
 anything
-([ADR-042](backend-architecture/appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)).
+([ADR-042](backend-architecture/adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md)).
 `realm.yml`'s `deployed` job authenticates with the same value, hourly and on
 `workflow_dispatch`, under the same `production` Environment, and makes the
 same three calls over every release the canary plan names — between rollouts,
 which is the moment the rollout cannot be
-([ADR-043](backend-architecture/appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)).
+([ADR-043](backend-architecture/adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md)).
 
 **It is a service account of the realm being checked, with realm-read rights and
 nothing else.** Explicitly *not* a cross-realm admin account: one of those would

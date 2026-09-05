@@ -121,8 +121,9 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   └── k8s/                            Raw manifests where Helm is overkill
 │
 ├── docs/
-│   ├── backend-architecture/           This document, one file
-│   │                                   per chapter; ADRs in Appendix A
+│   ├── backend-architecture/           This document, one file per chapter;
+│   │                                   one per ADR under adr/, indexed by
+│   │                                   Appendix A
 │   ├── runbooks/                       One per alert (§13.9), plus a README
 │   │                                   that is excluded from the pairing by
 │   │                                   name
@@ -820,7 +821,7 @@ because each one produces a defect that no test catches by accident:
 
 | Rule | What breaks otherwise |
 |---|---|
-| `UseSecurityHeaders` outermost, above `UseExceptionHandler` | A response written by anything above it carries no `nosniff` ([§10.6](10-api-gateway.md), [ADR-031](appendix-a-adrs.md#adr-031--the-service-owns-nosniff-the-ingress-owns-hsts)). Outermost is only half the rule, though, and the other half is not an ordering at all: the extension writes from `Response.OnStarting` rather than before `next`, because `UseExceptionHandler` **clears** the response before writing §10.5's problem body. A header assigned on the way in is gone from exactly the 500 where a caller-supplied value is most likely to be reflected — so this line placed first and assigning eagerly would still lose the case it exists for |
+| `UseSecurityHeaders` outermost, above `UseExceptionHandler` | A response written by anything above it carries no `nosniff` ([§10.6](10-api-gateway.md), [ADR-031](adr/ADR-031-the-service-owns-nosniff-the-ingress-owns-hsts.md)). Outermost is only half the rule, though, and the other half is not an ordering at all: the extension writes from `Response.OnStarting` rather than before `next`, because `UseExceptionHandler` **clears** the response before writing §10.5's problem body. A header assigned on the way in is gone from exactly the 500 where a caller-supplied value is most likely to be reflected — so this line placed first and assigning eagerly would still lose the case it exists for |
 | `UseCorrelationId` before everything that logs, `UseExceptionHandler` immediately above it | Early log lines and traces have no correlation ID, so the one request you need to follow is the one you cannot. The handler is the deliberate exception — it has to wrap the middleware below it to catch their faults, and it reaches the ID through `Request.Headers` rather than the log scope ([§10.4](10-api-gateway.md)). This row said the handler was **alone** above it until `UseSecurityHeaders` landed; that line sits above both and decides nothing about correlation, which is why "immediately" is the word doing the work |
 | `UseAuthentication` before `UseAuthorization` | **Every authenticated request 401s** — in a `WebApplication` too. Omitting a call is repaired by auto-insertion; writing both in the wrong order is not, because the markers they set suppress it. See the callout below |
 | `UseAuthentication` before `UseRateLimiter` (gateway only) | Same empty `User`, but this one does not 403 — §10.3's per-user partition key silently degrades to per-IP, and everyone behind one NAT shares a single bucket. **Silent is the measured half**: reversing the two leaves every test in `Gateway.Api.Tests` green, the authenticated-partition test included, so nothing in the repository is watching this line (see below) |
@@ -1573,11 +1574,11 @@ its table logs a failed claim twice a second from its first boot, and §8.5's
 marker table ships on a sharper version of the same argument: without it the
 service fails a retention purge every hour and then fails the first idempotent
 command it is ever given
-([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
+([ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)).
 **The marker's `CommittedAt` default travels for the reason the table itself
 does**: the `SYSDATETIMEOFFSET()` default and the
 cutoff `RetentionPurgeService` computes in SQL are two halves of one guarantee
-([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)),
+([ADR-038](adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md)),
 so a service scaffolded with the table and without the default ages its markers
 on the writing pod's clock while the purge ages them on the server's — the skew
 that migration exists to remove, reintroduced in every new service by omission.
@@ -1585,7 +1586,7 @@ that migration exists to remove, reintroduced in every new service by omission.
 version of the argument yet**: `RetentionPurgeService` names the column in both
 of its marker statements, so a service scaffolded without the migration fails
 its own purge with `Invalid column name 'RowVersion'` on the first pass
-([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)).
+([ADR-041](adr/ADR-041-the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp.md)).
 It then edits seven shared files: `Platform.slnx`, the Compose pair and
 its `infra-only` exclusion, `.env.example`, the ports table in
 `deploy/compose/README.md` ([§14.1](14-local-development.md)), the broker
@@ -1615,7 +1616,7 @@ rather than a tally.
 **PR-35 found them stale by four before it had added anything**, which is the
 first time the drift was somebody else's rather than the recounting PR's own.
 PR-34 put four cases into `RetentionPurgeTests` for
-[ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)
+[ADR-039](adr/ADR-039-the-markers-purge-asks-the-claim-rather-than-out-counting-it.md)
 — a file the scaffold copies — and left this pair alone, so the tree read
 eighty-seven while this sentence said eighty-three. PR-35 then added two and
 measured eighty-nine, which is the arithmetic *failing* in the direction the

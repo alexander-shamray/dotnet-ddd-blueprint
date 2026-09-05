@@ -15,7 +15,7 @@ request size limits.
 > `Program.cs` — the delay was never effort. A size limit needs a **number**,
 > and Kestrel's 30 MB is a framework default rather than anything this platform
 > chose; compression needs the **HTTPS** question answered, and answering it
-> took [ADR-020](appendix-a-adrs.md#adr-020--the-edge-compresses-over-tls-and-says-so).
+> took [ADR-020](adr/ADR-020-the-edge-compresses-over-tls-and-says-so.md).
 >
 > **The number is one mebibyte**, in `GatewayLimits.MaxRequestBodyBytes`, and
 > it is a constant rather than configuration for §15.4's reason — it does not
@@ -60,7 +60,7 @@ fact.** `X-Forwarded-Proto` makes `Request.IsHttps` true on a connection that
 carried no TLS, and response compression takes its decision at the first
 *write* rather than where its `Use` call sits — so it reads the rewritten
 scheme although it is registered above the middleware that rewrote it
-([ADR-020](appendix-a-adrs.md#adr-020--the-edge-compresses-over-tls-and-says-so)).
+([ADR-020](adr/ADR-020-the-edge-compresses-over-tls-and-says-so.md)).
 Reasoning about what a response-side middleware "sees" from its position in
 the pipeline is reasoning about the wrong moment, and ADR-020's first argument
 did exactly that.
@@ -195,7 +195,7 @@ a route file that is correct.
 **`catalog-public` names `anonymous`, and that is now the only way to declare a
 route public.** Naming no policy at all was, until `AddCommonWebDefaults` set a
 fallback authorization policy
-([§11.4](11-identity-authorization.md), [ADR-030](appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block)): a route
+([§11.4](11-identity-authorization.md), [ADR-030](adr/ADR-030-authorization-is-deny-by-default-in-the-building-block.md)): a route
 with no `AuthorizationPolicy` key inherits the fallback, and the platform's one
 public path would answer 401. The key is also what makes the decision
 legible — a public path by omission and a public path by decision read
@@ -725,7 +725,7 @@ Asynchronously that is enough: [§9.1](09-messaging.md)'s envelope carries
 `CorrelationId` as a member, so a message takes the ID with it by construction.
 Synchronously there is nothing to carry it, and the platform makes exactly one
 synchronous call — the BFF's hop to Catalog ([§9.7](09-messaging.md),
-[ADR-017](appendix-a-adrs.md#adr-017--one-synchronous-hop)). Without a header
+[ADR-017](adr/ADR-017-one-synchronous-hop.md)). Without a header
 on it the callee mints an ID from its own trace, and one incident has two of
 them.
 
@@ -830,7 +830,7 @@ public static IServiceCollection AddCommonProblemDetails(this IServiceCollection
 | Aggregate not found | 404 | |
 | Concurrency conflict, no precondition sent | 409 | From `DbUpdateConcurrencyException`, `code` `request.concurrency_conflict` |
 | A request under this key is still in flight | 409 | From `ConcurrentRequestException` ([§8.5](08-caching-redis.md)), `code` `request.in_progress`. Deliberately not a status of its own: 425 is about replayed TLS early data and 503 says the service is unavailable when it is serving everyone else. This one and the row above both say *retry*, and their `detail` is what separates them |
-| The command under this key has already been applied | 409 | From `CommandAlreadyCommittedException` ([§8.5](08-caching-redis.md), [ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)), `code` `command.already_committed`. The one 409 here that does **not** say retry, which is why the `detail` carries the whole difference: the work is durable and its result is no longer available — never recorded on the lost-acknowledgement path, recorded and expired on the commoner one — so a retry meets this same refusal until the marker is purged. Read the resource. 200 with an empty body is the tempting alternative and is worse — a success-shaped answer to a request whose result this service cannot produce |
+| The command under this key has already been applied | 409 | From `CommandAlreadyCommittedException` ([§8.5](08-caching-redis.md), [ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)), `code` `command.already_committed`. The one 409 here that does **not** say retry, which is why the `detail` carries the whole difference: the work is durable and its result is no longer available — never recorded on the lost-acknowledgement path, recorded and expired on the commoner one — so a retry meets this same refusal until the marker is purged. Read the resource. 200 with an empty body is the tempting alternative and is worse — a success-shaped answer to a request whose result this service cannot produce |
 | `If-Match` / `If-Unmodified-Since` failed | **412** | The client *did* send a precondition and it did not hold. Distinguishing this from 409 tells the client whether retrying with a fresh ETag is the fix |
 | Request body past the edge's ceiling | **413** | The gateway only (§10.1). Kestrel throws `BadHttpRequestException` carrying this status and `ExceptionHandlerMiddleware` reads it off the exception rather than defaulting to 500, so unlike the 400 and 409 rows this one needs no handler of its own |
 | Domain rule violated | 422 | The request was well-formed but not allowed |
@@ -1035,7 +1035,7 @@ says the first, so a reader meeting both should check which is being counted
 rather than which is wrong. It arrived the same way the others did.
 `CommandAlreadyCommittedException` is raised by [§6.3](06-cqrs.md)'s
 transaction when a command's key already carries a committed marker
-([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)),
+([ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)),
 so it was a type nothing threw until the marker existed.
 `CommandAlreadyCommittedExceptionHandler` is registered by the same method as
 the other three, and **unregistered it costs more than its neighbour's miss
@@ -1074,7 +1074,7 @@ until it can, every conflict is the no-precondition case the 409s answer.
 four hosts, through one extension each pipeline calls outermost
 ([§4.2](04-solution-structure.md)). The header set and the ones deliberately
 absent are recorded in
-[ADR-031](appendix-a-adrs.md#adr-031--the-service-owns-nosniff-the-ingress-owns-hsts).
+[ADR-031](adr/ADR-031-the-service-owns-nosniff-the-ingress-owns-hsts.md).
 
 **The service owns this, not the edge**, and that is the whole reason it lives
 in a building block rather than in `Gateway.Api`. The gateway is one of four

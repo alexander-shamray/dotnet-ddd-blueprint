@@ -39,7 +39,7 @@ The failure has no error, no log line, and appears only under the memory
 pressure that makes it hardest to reproduce.
 
 > **A revoked token was one of the two examples here, and
-> [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+> [ADR-033](adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)
 > withdrew it.** There has never been a revoked-token entry to evict: nothing
 > writes the `{service}:denylist:` keyspace, and
 > [§11.3](11-identity-authorization.md) validates a token locally and consults
@@ -54,7 +54,7 @@ pressure that makes it hardest to reproduce.
 | `{service}:cache:` | `allkeys-lru` — eviction is the point | Shared cache instance |
 | `{service}:lock:` | **`noeviction`** | Separate instance |
 | `{service}:idem:` | **`noeviction`** | With the locks |
-| `{service}:denylist:` | **`noeviction`** | With the locks — **reserved, not built** ([ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)) |
+| `{service}:denylist:` | **`noeviction`** | With the locks — **reserved, not built** ([ADR-033](adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)) |
 | `{service}:ratelimit:` | `volatile-ttl` acceptable | Either |
 
 **Two of those rows are reservations rather than descriptions of running
@@ -262,7 +262,7 @@ spelled in exactly one place.
 
 **There are two key builders and not three, and the missing one is the point.**
 `Denylist(suffix)` existed until
-[ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+[ADR-033](adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)
 and was removed with it: §8.1's `{service}:denylist:` row is a reservation, no
 code writes that keyspace, and revocation is bounded by the token's own
 lifetime instead. A key builder is the strongest signal this chapter has that a
@@ -353,7 +353,7 @@ wrong; and a commit whose acknowledgement was lost threw over durable work that
 this code released the key for. **Two mechanisms answer the two halves and
 neither answers the other's**: the claim is the atomic exclusion that makes a
 concurrent duplicate fail early, and a row written *inside* the transaction —
-[ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction) —
+[ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md) —
 is what makes the ambiguous case decidable and outlives every TTL. The bound is
 still real and is now the marker's retention window, which
 [§9.5](09-messaging.md)'s purge sets and `RetentionPolicy` refuses to put below
@@ -364,7 +364,7 @@ belongs here rather than in a footnote.** The recorded outcome lives in the
 Redis entry, whose window runs from the claim and is never extended:
 `CompleteAsync` preserves whatever the claim had left instead of re-arming a
 fresh retention
-([ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)).
+([ADR-038](adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md)).
 So a command that ran for an hour has spent an hour of its own replay window,
 and a retry arriving after it is *refused* rather than answered. That is the
 price of the ordering, paid deliberately: the claim is taken before the marker
@@ -393,7 +393,7 @@ this section carries as a residual at *A claim carries a token* further down.
 > still selects the rows past the window; what deletes one is
 > `IIdempotencyStore.UnheldAsync` agreeing that the claim behind it is gone, and
 > a marker whose claim is still held survives its own window
-> ([ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it)).
+> ([ADR-039](adr/ADR-039-the-markers-purge-asks-the-claim-rather-than-out-counting-it.md)).
 > The comparison was standing in for a fact, and the store that holds the claim
 > is the only thing that can state the fact.
 >
@@ -401,7 +401,7 @@ this section carries as a residual at *A claim carries a token* further down.
 > still the claim's window and nothing replaced it.** Five minutes never
 > bounded a clock step either, and a step is bounded by nothing this repository
 > can assert — so a number there would repeat in a third term the mistake
-> [ADR-038](appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)
+> [ADR-038](adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md)
 > removes from two. **What this paragraph predicted was one time source for
 > both deadlines, and that is not what was built.** Giving the claim a database
 > deadline would have cost the property that a claim expires without anybody
@@ -780,7 +780,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 >   this bullet used to give.** Every sender of every command type claims under
 >   `"system"` because `ICurrentUser.IsAuthenticated` is false on that path —
 >   not because the broker has one principal. It had one when this was written;
->   [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+>   [ADR-036](adr/ADR-036-the-broker-has-a-per-service-identity.md)
 >   gave each service its own account and the bucket did not move, because
 >   nothing binds a broker identity into `ICurrentUser`. **A cause that is
 >   fixed while its effect survives is the most misleading kind of stale
@@ -790,7 +790,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 >   Splitting the bucket means binding the consumer's authenticated identity
 >   into the port §11.4 implements, which no chapter specifies today.
 >   That is not made worse by anything here, and
->   [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+>   [ADR-028](adr/ADR-028-a-money-movement-command-carries-no-subject.md)
 >   does not make it better either, which is worth stating precisely because
 >   that ADR *did* settle what §11.4 used to leave open. It rules that a
 >   message-borne command carries no subject and that the receiving service
@@ -934,7 +934,7 @@ not the transaction committed, which the next callout is about.
 > there frees the key for a command that committed. What stops the retry is not
 > a better guess in this `catch`: it is that the committing attempt left a row
 > behind, and §6.3 reads it before the retry's handler runs
-> ([ADR-037](appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)).
+> ([ADR-037](adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)).
 >
 > **Redis could not have closed it, and that is worth keeping rather than
 > deleting with the residual.** `IIdempotencyStore` is outside the transaction,
@@ -1096,7 +1096,7 @@ because the `rowversion` is a shadow property.** `RetentionPurgeService`'s
 `DELETE` names the rows its `SELECT` returned rather than describing them, and
 that column is what identifies one: unique and monotonic per database,
 immutable for the life of a row nothing updates, and reading no clock at all
-([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)).
+([ADR-041](adr/ADR-041-the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp.md)).
 **No CLR property backs it, and that is a decision rather than an omission** —
 nothing in C# reads the column through EF, because the one reader is that
 purge's own SQL, over Dapper, which never consults this model. A property here
@@ -1196,7 +1196,7 @@ exercise again; a purged marker re-opens the duplicate. So
 `RetentionPolicy.IdempotencyWindow` has a floor the other two do not — it reads
 `IdempotencyRetention.MarkerFloor` and refuses anything shorter. **What the
 floor is for changed with
-[ADR-039](appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it),
+[ADR-039](adr/ADR-039-the-markers-purge-asks-the-claim-rather-than-out-counting-it.md),
 and the new job is the smaller one.** It used to be what made the marker
 outlive the claim, and a window below the claim's own life left a stretch in
 which the key was claimable again and nothing remembered the commit. The purge
@@ -1349,7 +1349,7 @@ INNER JOIN (VALUES (@k0, @v0), (@k1, @v1), ...) AS selected([Key], RowVersion)
 > [#173](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/173)
 > rather than out-predicated, and closed by the schema saying what the clock
 > had been standing in for
-> ([ADR-041](appendix-a-adrs.md#adr-041--the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp)).
+> ([ADR-041](adr/ADR-041-the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp.md)).
 > A `rowversion` answers all five at once by reading no clock at all.
 >
 > **`CommittedAt` lost the identity and kept everything else.** It still ages

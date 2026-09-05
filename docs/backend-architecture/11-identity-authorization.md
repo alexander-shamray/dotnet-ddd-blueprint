@@ -2,7 +2,7 @@
 
 ## 11.1 Keycloak as the identity provider
 
-> **Decision — do not build an identity service.** See [ADR-009](appendix-a-adrs.md#adr-009--keycloak-not-a-hand-built-identity-service).
+> **Decision — do not build an identity service.** See [ADR-009](adr/ADR-009-keycloak-not-a-hand-built-identity-service.md).
 
 Authentication is a solved problem with a long tail of security-critical detail:
 password hashing and rotation, MFA, account recovery, session revocation, token
@@ -15,7 +15,7 @@ of liability.
 > introspection endpoint; **no service here calls either**. §11.3 configures
 > local validation only, so revocation is observed at the next token request
 > and not before —
-> [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+> [ADR-033](adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)
 > records the bounded window that leaves. The list above is the reason the
 > problem was not built in-house and remains correct as such; it is not an
 > inventory of what is wired up, and it was read as one for four PRs.
@@ -69,12 +69,12 @@ Validation is cheap; assume the network is hostile.
 > than theoretical: `revokeRefreshToken` is off and `refreshTokenMaxReuse` is
 > zero against a ten-hour SSO session, so the token was reusable and never
 > rotated for as long as the session lived.
-> [ADR-034](appendix-a-adrs.md#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)
+> [ADR-034](adr/ADR-034-the-browser-holds-an-access-token-and-no-refresh-token.md)
 > records the removal, and `web-app`'s `use.refresh.tokens: "false"` is what
 > enforces it — pinned by `RealmImportTests`, because a realm attribute is
 > exactly the kind of setting that gets changed back by someone debugging a
 > logout. **In the local realm, and since
-> [ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+> [ADR-042](adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md)
 > in a deployed one too**: the charts point at an externally provisioned
 > authority, which a deployed realm still owes the same attribute — and the
 > rollout now reads that realm and refuses to roll onto one that does not have
@@ -82,7 +82,7 @@ Validation is cheap; assume the network is hostile.
 >
 > **The access-token lifetime beside it is in the same position, and what
 > changed is only what an unchecked realm costs.** Since
-> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+> [ADR-040](adr/ADR-040-no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound.md)
 > every host refuses an inbound token carrying more remaining life than the
 > bound §11.3 derives — which **bounds** the exposure without reading the realm,
 > since a long-lived token is admitted once it approaches expiry. **A refresh
@@ -90,14 +90,14 @@ Validation is cheap; assume the network is hostile.
 > never reaches a service, so there is nothing at a host to observe it with.
 > **Neither is observed at a host and both are now observed in the realm**, and
 > the distinction is worth keeping: ADR-040 bounds what a token can cost, and
-> [ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+> [ADR-042](adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md)
 > reads the configuration that issued it. Both settings remain obligations on
 > whoever provisions the deployed realm — a repository cannot make somebody
 > else's realm correct — but a realm that fails to hold them now fails the
 > rollout instead of passing unnoticed
 > ([#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)).
 > What was left was the window between rollouts, and since
-> [ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)
+> [ADR-043](adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md)
 > the same predicate reads the deployed realm on a schedule as well, so a realm
 > edited after a rollout is seen at the next scheduled run — nominally within
 > the hour, and only as reliably as GitHub runs a schedule — rather than at
@@ -113,7 +113,7 @@ Validation is cheap; assume the network is hostile.
 > lifetime plus the skew, not the lifetime alone, and since ADR-040 a ceiling
 > every host enforces rather than a figure it assumes the realm honoured. What
 > bounds it is that number and nothing else — there is no revocation path
-> ([ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)),
+> ([ADR-033](adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)),
 > which is the same fact §11.3 states from the other side.
 >
 > **Terminating the flow in `Web.Bff` is the stronger answer and is deliberately
@@ -132,12 +132,12 @@ Validation is cheap; assume the network is hostile.
 > browser flow entirely.
 >
 > **A deployed realm must turn it off, and since
-> [ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time)
+> [ADR-042](adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md)
 > a rollout establishes that one has.** It is still a requirement rather than a
 > description — this repository owns the Compose realm and no other — but the
 > obligation is now read at the moment it matters, and a deployed realm that
 > keeps the password grant fails the deploy. Since
-> [ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)
+> [ADR-043](adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md)
 > it is read hourly between rollouts as well, and a realm that turns the grant
 > back on afterwards files an issue rather than waiting for the next deploy.
 >
@@ -155,7 +155,7 @@ Validation is cheap; assume the network is hostile.
 > `directAccessGrantsEnabled` decide how a token is *obtained*, and a token that
 > arrives at a service does not say which grant minted it; a refresh token
 > never arrives at all. What
-> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+> [ADR-040](adr/ADR-040-no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound.md)
 > reaches is the lifetime alone, and only as a ceiling on remaining life. So the
 > configuration is where all three are legible, and reading it is what closed
 > [#157](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/157)
@@ -163,7 +163,7 @@ Validation is cheap; assume the network is hostile.
 > thing true only locally, and it no longer is**: a realm used to be read when a
 > deployment read it, so an edit made between rollouts was unobserved until the
 > next one. Since
-> [ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts)
+> [ADR-043](adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md)
 > the deployed realm is read on a schedule as well — the same three settings,
 > nominally hourly, over every deployed workload — so the window an edit is
 > unobserved in is bounded by the schedule rather than by the next rollout,
@@ -325,7 +325,7 @@ it.** Five minutes, normative — not a realm default nobody chose, and not
 `ClockSkew`'s coincidentally equal *default* two paragraphs up, which is a
 different quantity that happens to share a number.
 
-**Since [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+**Since [ADR-040](adr/ADR-040-no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound.md)
 it is also a constant, because something reads it.**
 `AuthenticationExtensions.AccessTokenLifetime` is that declaration, and
 `RealmImportTests` compares the shipped realm against the field rather than
@@ -381,7 +381,7 @@ that availability cost is taken deliberately.
 > that would absorb it is the term the cap removes. The exact form is
 > `exp - iat`, declined above for a reason that has not changed, so there is no
 > third value.
-> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+> [ADR-040](adr/ADR-040-no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound.md)
 > takes the trade and `JwtAuthenticationTests` asserts the sum, so the 360 is
 > measured rather than inferred from this paragraph.
 
@@ -392,9 +392,9 @@ that availability cost is taken deliberately.
 > lifetime alone. The distinction is right and the arithmetic was not: they
 > are different quantities *that compose*, and a validation window is the sum.
 > Naming a confusion is not the same as being immune to it.
-[ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+[ADR-033](adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)
 records that this bounded window is the accepted posture and withdraws
-[ADR-006](appendix-a-adrs.md#adr-006--redis-for-cache-and-coordination-never-as-a-store-of-record)'s
+[ADR-006](adr/ADR-006-redis-for-cache-and-coordination-never-as-a-store-of-record.md)'s
 listing of a token denylist among Redis's contents.
 
 > **The claim used to read as closed from three directions, which is what made
@@ -439,9 +439,9 @@ listing of a token denylist among Redis's contents.
 > externally provisioned authority this repository still holds no configuration
 > for. That is unchanged, and it stopped settling the question twice over —
 > first by the correction
-> [ADR-040](appendix-a-adrs.md#adr-040--no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound)
+> [ADR-040](adr/ADR-040-no-host-accepts-a-token-with-more-life-left-than-the-revocation-bound.md)
 > makes to the sentence that used to follow it, and then by
-> [ADR-042](appendix-a-adrs.md#adr-042--the-deployed-realm-is-checked-at-deploy-time),
+> [ADR-042](adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md),
 > which answers it.
 >
 > **That sentence said the number above is *verified* only where the platform
@@ -462,7 +462,7 @@ listing of a token denylist among Redis's contents.
 > token carries how long it has left whatever the realm was configured to do,
 > so no host accepts one with more than the bound remaining. That holds
 > continuously, where the realm check holds at a rollout and, since
-> [ADR-043](appendix-a-adrs.md#adr-043--the-deployed-realm-is-checked-between-rollouts),
+> [ADR-043](adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md),
 > nominally once an hour between them — so the two cover different moments
 > rather than one superseding the other. The gap between rollouts was what
 > [#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)
@@ -491,7 +491,7 @@ listing of a token denylist among Redis's contents.
 > refresh token never reaches a service, and the grant that minted a token that
 > does reach one leaves no trace in it. No runtime control can observe any of
 > the three, which is what
-> [ADR-034](appendix-a-adrs.md#adr-034--the-browser-holds-an-access-token-and-no-refresh-token)
+> [ADR-034](adr/ADR-034-the-browser-holds-an-access-token-and-no-refresh-token.md)
 > records — and reading the configuration is the one place all three are
 > visible, so ADR-042 checks them beside the lifetime rather than instead of it.
 >
@@ -501,7 +501,7 @@ listing of a token denylist among Redis's contents.
 > identity provider remains somebody's operational input. What changed is that
 > the input is now inspected before it is deployed onto, which is a smaller
 > claim than owning it and a bigger one than stating it —
-> [ADR-033](appendix-a-adrs.md#adr-033--revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists)
+> [ADR-033](adr/ADR-033-revocation-is-bounded-by-the-token-lifetime-and-no-denylist-exists.md)
 > ran the two together in one clause and only the observation half has been
 > paid.
 
@@ -657,7 +657,7 @@ across a whole namespace.
 
 `AddCommonWebDefaults` therefore sets a fallback
 ([§13.2](13-observability.md),
-[ADR-030](appendix-a-adrs.md#adr-030--authorization-is-deny-by-default-in-the-building-block)):
+[ADR-030](adr/ADR-030-authorization-is-deny-by-default-in-the-building-block.md)):
 
 ```csharp
 builder.Services
@@ -691,7 +691,7 @@ longer depends on anyone having written the test — which matters most for the
 services §4.5's scaffold has not rendered yet.
 
 > **Decision — Minimal APIs, not MVC controllers.** See
-> [ADR-015](appendix-a-adrs.md#adr-015--minimal-apis-not-mvc-controllers). The endpoint layer in this
+> [ADR-015](adr/ADR-015-minimal-apis-not-mvc-controllers.md). The endpoint layer in this
 > architecture is a thin translation from HTTP to a command or query. Controllers
 > add a base class, attribute routing, model binding conventions and an action
 > filter pipeline to do that, and their filter pipeline duplicates the dispatcher
@@ -1090,7 +1090,7 @@ vocabulary either way.
 > different: re-derived, never bound.** A command arriving over the broker has
 > no principal at all — the sending service is the caller — so there is nothing
 > for `ICurrentUser` to answer with, and binding is not available. What
-> [ADR-028](appendix-a-adrs.md#adr-028--a-money-movement-command-carries-no-subject)
+> [ADR-028](adr/ADR-028-a-money-movement-command-carries-no-subject.md)
 > settles is that this does not license carrying the subject as a field
 > instead: **the service that owns the decision resolves the subject from its
 > own record**, built from an event whose subject *was* bound from a principal.
@@ -1120,7 +1120,7 @@ vocabulary either way.
 > payer: a forged one naming a real order re-triggers that order's own
 > authorisation rather than redirecting one at a customer of the sender's
 > choosing. Since
-> [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+> [ADR-036](adr/ADR-036-the-broker-has-a-per-service-identity.md)
 > the ability to publish it is itself scoped — `payments-commands` is writable
 > by the services whose own source addresses it, and by nobody else.
 >
@@ -1132,7 +1132,7 @@ vocabulary either way.
 > Notifications both consume, so it starts a fulfilment saga for an order the
 > write model has no row for and tells a customer about an order they never
 > placed. **Per-service broker identity is what closes it, and
-> [ADR-036](appendix-a-adrs.md#adr-036--the-broker-has-a-per-service-identity)
+> [ADR-036](adr/ADR-036-the-broker-has-a-per-service-identity.md)
 > is that**: forging the seeding `OrderPlaced` needs `write` on
 > `Common.Contracts.Ordering.V1:OrderPlaced`, which only Ordering's account
 > holds. This rule still does not close it, and no longer has to.
@@ -1492,7 +1492,7 @@ which is the only place it can be reliably erased.
 > concluded the rule held.
 >
 > **The rule won, and the field is gone**
-> ([ADR-035](appendix-a-adrs.md#adr-035--an-integration-event-carries-identifiers-not-personal-data)).
+> ([ADR-035](adr/ADR-035-an-integration-event-carries-identifiers-not-personal-data.md)).
 > What settled it was that the escape routes are all one-way: the payload is
 > serialised into `ordering.OutboxMessages`, whose purge deliberately spares
 > abandoned rows so §13.6's alert can see them; it sits in the broker, for

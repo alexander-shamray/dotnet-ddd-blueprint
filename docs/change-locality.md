@@ -21,8 +21,9 @@ A lower layer cites a higher one by name. It never copies the value.
 2. **Code.** Types, registrations, options, constants, SQL, Helm values. A
    value a document needs lives in one named symbol; the document names the
    symbol.
-3. **ADRs** — `docs/backend-architecture/appendix-a-adrs.md`. Append-only,
-   next free number, never rewritten. The only document that changes a rule.
+3. **ADRs** — one file each under `docs/backend-architecture/adr/`, indexed
+   by `appendix-a-adrs.md`. Append-only, next free number, never rewritten.
+   The only documents that change a rule.
 4. **Chapters** — `docs/backend-architecture/01`–`15`. The rule and the
    reason. Not an inventory, a changelog, a count, or a copy of a constant.
 5. **Git.** The commit body argues the change, the PR body is the house form,
@@ -145,7 +146,6 @@ Directory.Packages.props        Directory.Build.props        Platform.slnx
 .editorconfig                   deploy/compose/docker-compose.yml
 deploy/compose/keycloak/realm-export.json
 .github/secret-scan/allowed-secrets.txt
-docs/backend-architecture/appendix-a-adrs.md   (until ADRs are one file each)
 docs/backend-architecture/appendix-b-licences.md
 ```
 

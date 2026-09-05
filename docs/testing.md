@@ -308,7 +308,7 @@ the branch.
 **They are not skipped when the daemon is absent, and that is a decision.** A
 skip on a missing daemon **fails open**: CI goes green on a runner whose Docker
 broke, and nobody finds out until the thing those tests were guarding breaks in
-production. [ADR-010](backend-architecture/appendix-a-adrs.md) already made
+production. [ADR-010](backend-architecture/adr/ADR-010-testcontainers-not-in-memory-providers.md) already made
 real infrastructure non-optional, and this is the same rule one layer down.
 
 **A category is the opposite of a skip, which is why one exists and the other
@@ -369,7 +369,7 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > assuming past.
 >
 > **And it went back up on the next branch**, which is the same lesson from the
-> other side: [ADR-037](backend-architecture/appendix-a-adrs.md#adr-037--the-idempotency-marker-is-a-row-in-the-commands-own-transaction)'s
+> other side: [ADR-037](backend-architecture/adr/ADR-037-the-idempotency-marker-is-a-row-in-the-commands-own-transaction.md)'s
 > floor on `RetentionPolicy.IdempotencyWindow` brought two cases with it, so
 > the fast half went to seventy-two and the total to 98. A figure that has
 > moved in both directions inside two branches is one nobody should reason
@@ -378,7 +378,7 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **And it moved again on the branch that retired that floor's allowance**,
 > which is the third direction: one integration case joined
 > `RedisIdempotencyStoreTests` for the claim's inherited expiry
-> ([ADR-038](backend-architecture/appendix-a-adrs.md#adr-038--the-marker-and-its-claim-are-ordered-by-construction-not-a-margin)),
+> ([ADR-038](backend-architecture/adr/ADR-038-the-marker-and-its-claim-are-ordered-by-construction-not-a-margin.md)),
 > so the fast half is unchanged at seventy-two and the total is 99. The floor's
 > own cases were rewritten rather than added to, which is why only one of the
 > two numbers moved.
@@ -386,7 +386,7 @@ public sealed class IntegrationCollection : ICollectionFixture<ServiceFixture>;
 > **And it moved once more, by more, on the branch that stopped the purge
 > counting at all.** The port gained a fifth member — `UnheldAsync`, which
 > §9.5's marker pass asks instead of comparing two clocks
-> ([ADR-039](backend-architecture/appendix-a-adrs.md#adr-039--the-markers-purge-asks-the-claim-rather-than-out-counting-it))
+> ([ADR-039](backend-architecture/adr/ADR-039-the-markers-purge-asks-the-claim-rather-than-out-counting-it.md))
 > — and its seven cases all need the server they interrogate, so the fast half
 > is unchanged at seventy-two for the third retake running and the total is
 > 106. **Three consecutive retakes moving one number and not the other is the

@@ -73,8 +73,10 @@ time.
   match a type name.
 - **Chapter headings are numbered**: `# 9. Messaging`, `## 9.1 Integration
   events`. Third-level headings are unnumbered prose titles
-  (`### Handler contracts`). Appendices use `# Appendix A — <title>` and
-  `## ADR-001 — <title>`; `docs/pr-decision-log.md` follows the ADR form.
+  (`### Handler contracts`). Appendices use `# Appendix A — <title>`; an ADR
+  is its own file under `adr/`, titled `# ADR-001 — <title>` and listed in
+  Appendix A's table; `docs/pr-decision-log.md` is one file of
+  `## PR-01 — <title>` entries.
 - **Cross-references use the section sign**: `§9.3`, and link the first mention
   in a passage — `[§9.3](09-messaging.md)`. Within a chapter, `(§6.5)` bare is
   fine. Cite the section that actually states the claim; a reference to a
@@ -88,7 +90,7 @@ time.
   > **Trap — projecting everything by default.** Each projection is a second
   > copy of the truth, with its own bugs and its own rebuild procedure.
 
-  > **Decision — no mediator library.** See [ADR-004](appendix-a-adrs.md#adr-004--no-mediator-library).
+  > **Decision — no mediator library.** See [ADR-004](adr/ADR-004-no-mediator-library.md).
   ```
 
   The rest are a bold assertion followed by its argument —
