@@ -75,7 +75,8 @@ time.
   events`. Third-level headings are unnumbered prose titles
   (`### Handler contracts`). Appendices use `# Appendix A — <title>`; an ADR
   is its own file under `adr/`, titled `# ADR-001 — <title>` and listed in
-  Appendix A's table; `docs/pr-decision-log.md` follows the ADR form.
+  Appendix A's table; `docs/pr-decision-log.md` is one file of
+  `## PR-01 — <title>` entries.
 - **Cross-references use the section sign**: `§9.3`, and link the first mention
   in a passage — `[§9.3](09-messaging.md)`. Within a chapter, `(§6.5)` bare is
   fine. Cite the section that actually states the claim; a reference to a

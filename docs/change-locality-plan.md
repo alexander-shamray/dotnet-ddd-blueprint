@@ -108,9 +108,9 @@ when both need the same one.
 **Why `.claude/**` is one agent.** `settings.json` self-locks and `ship.md`
 is one file.
 
-**Why two of the mutexes are temporary.** `CLAUDE.md` is a mutex until step 2
-rewrites it and `appendix-a-adrs.md` until step 3 splits it; the contract
-marks both.
+**Why two of the mutexes were temporary.** `CLAUDE.md` was a mutex until
+step 2 rewrote it and `appendix-a-adrs.md` until step 3 split it; the
+contract marked both while they stood, and lists neither now.
 
 ## 4. The work, in order
 

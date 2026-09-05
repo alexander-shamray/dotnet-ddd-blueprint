@@ -121,8 +121,9 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │   └── k8s/                            Raw manifests where Helm is overkill
 │
 ├── docs/
-│   ├── backend-architecture/           This document, one file
-│   │                                   per chapter; ADRs in Appendix A
+│   ├── backend-architecture/           This document, one file per chapter;
+│   │                                   one per ADR under adr/, indexed by
+│   │                                   Appendix A
 │   ├── runbooks/                       One per alert (§13.9), plus a README
 │   │                                   that is excluded from the pairing by
 │   │                                   name
