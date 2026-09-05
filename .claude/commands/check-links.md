@@ -10,11 +10,11 @@ of content is `/validate-blueprint`.
 ## Checks
 
 1. **Relative links resolve.** Every `](*.md)` and `](*.md#anchor)` target
-   exists. Every `#anchor` matches a real heading slug in the target file. An
-   ADR file sits one directory down, so its links to a chapter start with
-   `../`, and a link from anywhere to an ADR names the file —
-   `adr/ADR-0NN-<slug>.md` — rather than an anchor in Appendix A, which has
-   none left to hit.
+   exists. Every `#anchor` matches a real heading slug in the target file. A
+   link to an ADR names the ADR's file rather than an anchor in Appendix A,
+   which has none left to hit; the path is relative to the linking file, so
+   a chapter writes `adr/ADR-0NN-<slug>.md`, a sibling ADR writes
+   `ADR-0NN-<slug>.md`, and an ADR's links to a chapter start with `../`.
 2. **Section references resolve.** Every `§n` and `§n.m` corresponds to a
    heading that exists. Flag references to sections that were renumbered away.
 3. **Link text agrees with target.** `[§9.3](09-messaging.md)` must point at
@@ -35,8 +35,10 @@ of content is `/validate-blueprint`.
    Appendix A's table instead: every file there appears in it exactly once,
    every row points at a file that exists, the row's `ADR-NNN` matches the
    file's, **no two files and no two rows carry the same `ADR-NNN`**, and
-   Appendix A carries no `##` heading — an ADR body written there is in the
-   wrong file. The uniqueness check is the one a per-file layout needs and a
+   Appendix A holds nothing but its H1, the intro, the table and the nav
+   footer: no further heading at any level and no `**Decision.**` line — an
+   ADR body written there, with or without its heading, is in the wrong
+   file. The uniqueness check is the one a per-file layout needs and a
    per-row match cannot give: two `/new-adr` runs on two branches each take
    `highest + 1` under different slugs, each row matches its own file, and
    the duplicate number exists only after the merge — so it is caught here,

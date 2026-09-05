@@ -23,7 +23,7 @@ A lower layer cites a higher one by name. It never copies the value.
    symbol.
 3. **ADRs** — one file each under `docs/backend-architecture/adr/`, indexed
    by `appendix-a-adrs.md`. Append-only, next free number, never rewritten.
-   The only document that changes a rule.
+   The only documents that change a rule.
 4. **Chapters** — `docs/backend-architecture/01`–`15`. The rule and the
    reason. Not an inventory, a changelog, a count, or a copy of a constant.
 5. **Git.** The commit body argues the change, the PR body is the house form,
