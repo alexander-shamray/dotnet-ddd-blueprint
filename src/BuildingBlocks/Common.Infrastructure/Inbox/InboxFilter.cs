@@ -14,8 +14,9 @@ namespace Common.Infrastructure.Inbox;
 /// <remarks>
 /// <b>Common, not per-service, and §9.5's sample says so.</b> It prints
 /// <c>DbContext</c> rather than <c>OrderingDbContext</c> and argues the point at
-/// the constructor: the filter reaches the entity through <c>Set&lt;T&gt;()</c>,
-/// so one implementation serves every service. Nothing in this filter is
+/// the constructor: the filter reaches its entity through
+/// <c>Set&lt;InboxMessage&gt;()</c> — <c>T</c> is the message contract, never the
+/// row — so one implementation serves every service. Nothing in this filter is
 /// per-service, so six copies would be six places for the ordering below to be
 /// got wrong.
 /// <para>

@@ -2178,7 +2178,7 @@ namespace Common.Infrastructure.Inbox;
 // The service DbContext — not a separate one. Same database, one migration
 // history, and EF-based handlers can share its transaction. `DbContext` rather
 // than `OrderingDbContext`, because this filter is common code: it reaches the
-// entity through Set<T>() so one implementation serves every service.
+// entity through Set<InboxMessage>() so one implementation serves every service.
 public sealed class InboxFilter<T>(
     DbContext db,
     TimeProvider clock,
@@ -2803,10 +2803,11 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             });
 
         // The only wait whose far end is this same service, so its floor is
-        // §9.8's retry budget on ordering-commands rather than a peer: five
-        // retries over roughly seventy seconds — six deliveries counting the
-        // first — and a bound inside that would fire while the command was
-        // still being legitimately retried.
+        // §9.8's retry budget on ordering-commands rather than a peer: the
+        // whole of that envelope, every retry and its backoff, and a
+        // bound inside it would fire while the command was still being
+        // legitimately retried. The numbers are the endpoint's (§9.8), not
+        // this comment's to repeat.
         // It escalates rather than compensating, on the despatch timeout's
         // argument below — the card is authorised by the time this wait
         // begins, and §3.2 gives Ordering no refund command.
