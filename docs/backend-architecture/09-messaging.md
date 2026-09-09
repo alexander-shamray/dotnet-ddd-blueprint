@@ -103,11 +103,11 @@ public sealed record PriceChanged : IIntegrationEvent
 }
 
 // ProductPublished and ProductDiscontinued repeat the same three envelope
-// members and add their own — listed in Appendix D.5, because §6.6's
-// projections read them and a member no declaration and no inventory covers
-// is how a sample stops being checkable. The envelope is written out on every
-// contract rather than inherited from a base record: a shared base is a shared
-// versioning fate (§9.2), and three properties is a cheaper price than that.
+// members and add their own — declared in Common.Contracts, where §6.6's
+// projections read them and the compiler answers for every member a sample
+// names. The envelope is written out on every contract rather than inherited
+// from a base record: a shared base is a shared versioning fate (§9.2), and
+// three properties is a cheaper price than that.
 ```
 
 > **The constraint is the enforcement, and no test is needed for it.** A new
@@ -566,7 +566,7 @@ local reactions.
 rows through EF Core; the dispatcher reads a narrow projection of the columns
 its claim returns. Collapsing them into one type produces a class whose
 `ProcessedAt` is always null on the read path and whose `LastError` is never
-populated on the write path — see [Appendix D](appendix-d-type-inventory.md):
+populated on the write path:
 
 | Type | Used by | Shape |
 |---|---|---|
@@ -1301,7 +1301,7 @@ public sealed class OutboxDispatcher : BackgroundService
             claimScope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
 
         // OutboxClaim, not OutboxMessage — the claim projects only the columns
-        // the OUTPUT clause returns. See Appendix D. CommandDefinition, so the
+        // the OUTPUT clause returns. CommandDefinition, so the
         // token reaches the command: with the plain overload a shutdown cannot
         // interrupt a blocked claim and the host waits out the SQL timeout.
         List<OutboxClaim> claimed =

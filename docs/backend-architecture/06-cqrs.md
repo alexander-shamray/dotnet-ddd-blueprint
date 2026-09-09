@@ -1800,7 +1800,7 @@ public sealed class OrderSummaryProjection(IDbConnectionFactory connections, Ord
         // back — non-null only because the MERGE above writes all three in one
         // statement. Keep them in one statement: a future split that sets
         // PlacedAt earlier would hand this a NULL decimal, and PlacedFact has
-        // nowhere to put it (Appendix D.5).
+        // nowhere to put it (Appendix D).
         PlacedFact? placed = await connection.QuerySingleOrDefaultAsync<PlacedFact>(
             """
             UPDATE ordering.OrderSummaries

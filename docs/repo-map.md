@@ -58,14 +58,16 @@ full below, and this file is the master copy of every one of them.
 ## The tree
 
 **One line per entry, because the inventory lives elsewhere.** What each
-project *holds* is the job of `appendix-d-type-inventory.md` and §4.1; a second
-copy here would be a second thing to reconcile, which `CLAUDE.md`'s one
-rule forbids. This tree says where things are, not what is in them.
+project *holds* is the job of §4.1 and of the project itself — one `rg` over
+`src/` answers whether a type exists; a second copy here would be a second
+thing to reconcile, which `CLAUDE.md`'s one rule forbids. This tree says where
+things are, not what is in them.
 
 ```
 docs/backend-architecture/   the blueprint — README index, 01-purpose ..
                              15-cicd-deployment, appendix A (the ADR index),
-                             B (licences), C (delivery plan), D (type inventory)
+                             B (licences), C (delivery plan), D (names the
+                             samples elide)
 docs/backend-architecture/adr/  one file per ADR, so two agents appending
                              one each meet only in Appendix A's table
 docs/roadmap.md              estimates and a calendar laid over Appendix C
