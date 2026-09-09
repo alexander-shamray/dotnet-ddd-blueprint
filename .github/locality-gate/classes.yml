@@ -1,0 +1,99 @@
+# The class -> tree-set map of docs/change-locality.md section 3, held once.
+#
+# This file is the owner of which paths each change class may touch. The
+# contract's table states each class's rule in words and cites this file for
+# the paths; the locality gate reads this file and nothing else for them, so
+# a set that moves, moves here and in no prose.
+#
+# It is read by locality_gate.py with a parser that accepts exactly this
+# shape and refuses anything else: a comment or blank line; a class line, one
+# capital letter A to E followed by a colon; an item line, two spaces, a
+# dash, a space and one single-quoted path token. Every class must appear
+# once and carry at least one item. There is no stdlib YAML parser, and a
+# gate that needs a `pip install` is a gate that gets skipped, so the file is
+# YAML by construction rather than by library -- the quotes are what keep a
+# token beginning with `*` from reading as a YAML alias.
+#
+# A token is a repository-relative path or glob: `**` crosses directories,
+# `*` and `?` do not, `{a,b}` is an alternation, and a token also covers
+# everything beneath the directory it names. The grammar is the one
+# .claude/scripts/pr-locality.sh reads a PR body's touch-set row with, so a
+# token that is legal in a PR body is legal here.
+#
+# The map is deliberately coarse. It says what a class may reach in this
+# repository; it cannot say "one service" or "one building block", because
+# that is a property of the change and not of the tree. The PR body's own
+# `| Touch set |` row is the second, sharper check the gate makes, and a
+# Class A change that edits two services is inside this map and outside its
+# own declared set. Both checks have to pass.
+
+# A -- local. The owning slice, one building block and its tests, a
+# migration in the slice, the runbook an alert maps to, and tools/new-service
+# when a Catalog file was added or removed (section 3's edge-case notes). The
+# gateway and the BFF are hosts and not services, and the contract's table
+# names neither; they are here because a change inside one of them is the
+# local class by every other measure, and leaving them out would give a
+# gateway fix no class at all.
+A:
+  - 'src/Services/**'
+  - 'src/BuildingBlocks/**'
+  - 'src/Gateway/**'
+  - 'src/BFF/**'
+  - 'tests/**'
+  - 'tools/new-service/**'
+  - 'docs/runbooks/**'
+
+# B -- shared mechanism. The building block and its tests, the one service
+# test that proves the wiring, one service's copy when the scaffold template
+# is the subject, tools/new-service, the one chapter paragraph that states
+# the rule, and a runbook as in A.
+B:
+  - 'src/BuildingBlocks/**'
+  - 'src/Services/**'
+  - 'src/Gateway/**'
+  - 'src/BFF/**'
+  - 'tests/**'
+  - 'tools/new-service/**'
+  - 'docs/backend-architecture/**'
+  - 'docs/runbooks/**'
+
+# C -- a rule moved. Code and tests, one new ADR under adr/ with its row in
+# Appendix A, and the single chapter section the ADR amends. A rule that
+# brings a package is `C+E`, and the union is what the gate reads.
+C:
+  - 'src/**'
+  - 'tests/**'
+  - 'tools/new-service/**'
+  - 'docs/backend-architecture/**'
+
+# D -- docs or harness. The docs/, .claude/, .github/, deploy/ or tools/
+# tree the issue names, CLAUDE.md, and the repository's own configuration
+# files at the root. Never src/**: that absence is the load-bearing half of
+# this class, and the gate enforces it by this list having no code entry.
+D:
+  - 'docs/**'
+  - '.claude/**'
+  - '.github/**'
+  - 'deploy/**'
+  - 'tools/**'
+  - 'CLAUDE.md'
+  - 'README.md'
+  - '.editorconfig'
+  - '.gitattributes'
+  - '.gitignore'
+  - '.dockerignore'
+  - 'Directory.Build.props'
+  - 'coverage.runsettings'
+
+# E -- dependency graph. The exact pin, the project file that references it,
+# Appendix B for identity and licence, the SDK and tool pins, the solution
+# file, and the licence register the gate under .github/licence-gate reads
+# when a package arrives under a licence the register does not yet name.
+E:
+  - 'Directory.Packages.props'
+  - '**/*.csproj'
+  - 'global.json'
+  - '.config/dotnet-tools.json'
+  - 'Platform.slnx'
+  - 'docs/backend-architecture/appendix-b-licences.md'
+  - '.github/licence-gate/allowed-licences.txt'

@@ -94,3 +94,10 @@ deploy/observability/** text eol=lf
 # Linux runner and from a Windows checkout, which is the property the .cs
 # paragraph above spent a PR discovering.
 deploy/keycloak/** text eol=lf
+
+# .github/locality-gate/ joins on .github/secret-scan/'s argument: a gate read
+# on a Linux runner and edited on Windows. The .py pair is covered above; this
+# is for classes.yml beside them, which the gate parses line by line, so the
+# directory is one thing and the map's bytes do not depend on who checked it
+# out.
+.github/locality-gate/** text eol=lf

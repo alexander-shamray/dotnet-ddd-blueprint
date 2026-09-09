@@ -76,17 +76,31 @@ which case the class is wrong, so change the class, not the set. A change
 that genuinely needs two classes names both — `C+E` for a rule that brings
 a package — and its touch set is the union.
 
+The paths each class may reach are held once, in
+[`.github/locality-gate/classes.yml`](../.github/locality-gate/classes.yml),
+and CI's locality gate reads them from there and from nowhere else. The gate
+judges every changed path twice — against that class's set, and against the
+PR body's own `| Touch set |` row — and fails the PR on a path outside
+either, named; a body without exactly one of each row is refused rather than
+judged. The table states each class's rule in words. Where a cell and the
+file seem to disagree about a path, the file is the owner, and a set that
+moves, moves there.
+
 | Class | Examples | May touch | Never touches |
 |---|---|---|---|
-| **A — local** | fix a handler, tighten a test, add a validator rule, add a command field the aggregate already has | the owning slice `src/Services/<Svc>/**` and `tests/<Svc>.*`; **or** one project under `src/BuildingBlocks/` and its `tests/Common.<That>.Tests`; a migration if that service's schema moved; the runbook the alert maps to, if the change alters what an operator does for it — `docs/runbooks/<alert>.md`, or the file `SHARED_RUNBOOKS` in `deploy/observability/check.py` maps it to, which is then a mutex between the alerts that share it | any other `docs/**`; `CLAUDE.md`; a second service "to keep the sample in sync"; `.claude/**` |
-| **B — shared mechanism** | change `IdempotencyBehavior`, outbox retention, a `Common.Web` middleware, a MassTransit registration helper | the building block and its tests; the *one* service test that proves the wiring; `tools/new-service` if a Catalog file was added or removed; the one chapter paragraph that states the rule; a runbook as in A | every chapter that *mentions* the mechanism; Appendix D; both services' copies unless the scaffold template is the subject; the decision log, lessons, repo map, style guide |
+| **A — local** | fix a handler, tighten a test, add a validator rule, add a command field the aggregate already has | the owning slice and its tests; **or** one building block and its tests; a migration if that service's schema moved; the runbook the alert maps to, if the change alters what an operator does for it — or the file `SHARED_RUNBOOKS` in `deploy/observability/check.py` maps it to, which is then a mutex between the alerts that share it | any other document; `CLAUDE.md`; a second service "to keep the sample in sync"; the harness |
+| **B — shared mechanism** | change `IdempotencyBehavior`, outbox retention, a `Common.Web` middleware, a MassTransit registration helper | the building block and its tests; the *one* service test that proves the wiring; the scaffold if a Catalog file was added or removed; the one chapter paragraph that states the rule; a runbook as in A | every chapter that *mentions* the mechanism; Appendix D; both services' copies unless the scaffold template is the subject; the decision log, lessons, repo map, style guide |
 | **C — a rule moved** | a floor changes meaning; a host must refuse a token above a bound; a prohibition gains an exception | code and tests; one new ADR; the single chapter section the ADR amends; Class E's set beside it, as `C+E`, when the rule brings a package | every historical paragraph describing the old rule (the ADR is the correction, and chapters point at it); `docs/pr-decision-log.md`; `CLAUDE.md` |
-| **D — docs or harness** | a new `/command`, a style pass, a chapter split, a runbook for an alert that already fires, this contract | only the `docs/`, `.claude/`, `.github/` or `deploy/` tree the issue names, and `CLAUDE.md` — or, when no issue was filed, the paths the touch-set row declares | inventories "while we are here"; `src/**` |
-| **E — dependency graph** | add a package, raise a pin, add a project | `Directory.Packages.props` (exact pin, no `Version=` on the reference); the `.csproj`; `appendix-b-licences.md` — identity and licence, not the version unless the version is the decision; `global.json` or `.config/dotnet-tools.json`; `Platform.slnx` | the chapters that use the package |
+| **D — docs or harness** | a new `/command`, a style pass, a chapter split, a runbook for an alert that already fires, this contract | only the documents, harness, workflow, deploy or tools tree the issue names, `CLAUDE.md`, and the repository's own configuration files at the root — or, when no issue was filed, the paths the touch-set row declares | inventories "while we are here"; code |
+| **E — dependency graph** | add a package, raise a pin, add a project | the pin (exact, no `Version=` on the reference); the project file; Appendix B — identity and licence, not the version unless the version is the decision; the SDK and tool pins; the solution file; the licence register, when the licence is one it does not yet name | the chapters that use the package |
 
 Notes that decide the edge cases:
 
 - Crossing two building-block projects in one PR is Class B, not A.
+- The gateway and the BFF are hosts, not services, and the table's rows
+  name neither. A change inside one of them is Class A for its own tree,
+  and `classes.yml` says so; leaving them out would give a gateway fix no
+  class at all.
 - Catalog is the scaffold's template and the script reads it at run time, so
   a Catalog change that adds or removes a file reconciles `tools/new-service`
   in the same PR. That is the one extra shared surface Class A and B get.
@@ -156,7 +170,10 @@ What an agent does instead of touring the corpus:
 1. Read the issue. Name the class and the touch set before the first edit
    — in the issue, or in the first commit's body when there is none — and
    copy them into the PR body's `| Class |` and `| Touch set |` rows when
-   `/pr` opens it, with any file added mid-work and its reason (§3).
+   `/pr` opens it, with any file added mid-work and its reason (§3). CI's
+   locality gate reads the pair on every push and every edit to the body,
+   so a row that is missing or a path outside either set is a red check
+   and not only a review finding.
 2. Search **code** for the symbol: `rg` over `src/` and `tests/`.
 3. Open the owning chapter section only for Class B or C, and only the
    paragraph that states the rule. Open an ADR only to cite it or, in Class
