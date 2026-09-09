@@ -129,9 +129,13 @@ jobs:
       # The file list comes from the REST files endpoint with `--paginate`
       # rather than from `gh pr view --json files`, because the latter is one
       # page and a prefix of a long diff looks exactly like a complete one —
-      # the shape closure_gate.py refuses for commits. Each name arrives
-      # JSON-encoded on its own line and `jq -s` collects them, so a newline
-      # inside a path cannot be a second path.
+      # the shape closure_gate.py refuses for commits. Paginated, the endpoint
+      # still stops at 3,000 entries, so `changedFiles` — GitHub's own count
+      # of the same list — travels with the body and the gate refuses a list
+      # shorter than it. Each entry arrives as one JSON object on its own
+      # line, `filename` and `previous_filename` together, so a rename is
+      # judged at both ends and a newline inside a path cannot be a second
+      # path; `jq -s` collects them.
       #
       # `shell: bash` rather than the default, and it is not cosmetic: the
       # default `run` shell is `bash -e` with NO pipefail, so a `gh` that
@@ -144,7 +148,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          pr_json=$(gh pr view "$PR" --repo "$REPO" --json number,body)
-          gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename | @json' |
+          pr_json=$(gh pr view "$PR" --repo "$REPO" --json number,body,changedFiles)
+          gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[] | {filename, previous_filename}' |
             jq -s --argjson pr "$pr_json" '$pr + {files: .}' |
             python "$RUNNER_TEMP/locality-gate/locality_gate.py" --map "$RUNNER_TEMP/locality-gate/classes.yml"

@@ -341,9 +341,60 @@ class Verdicts(unittest.TestCase):
         with self.assertRaisesRegex(InputRefused, "not a plain path"):
             check(payload(["src/../CLAUDE.md"]), self.map)
 
-    def test_a_non_string_file_entry_refuses_the_run(self) -> None:
+    def test_a_file_entry_that_is_neither_a_path_nor_an_endpoint_object_refuses_the_run(self) -> None:
         with self.assertRaisesRegex(InputRefused, "not a plain path"):
-            check(payload([{"filename": "docs/x.md"}]), self.map)
+            check(payload([42]), self.map)
+        with self.assertRaisesRegex(InputRefused, "not a plain path"):
+            check(payload([{"path": "docs/x.md"}]), self.map)
+
+    def test_an_endpoint_object_is_judged_by_its_filename(self) -> None:
+        entries = [{"filename": "src/Services/Catalog/X.cs", "previous_filename": None}]
+        self.assertEqual(check(payload(entries), self.map), [])
+        problems = check(payload([{"filename": "CLAUDE.md"}]), self.map)
+        self.assertEqual(len(problems), 2)
+
+    def test_a_rename_is_judged_at_both_ends(self) -> None:
+        # Class D moving a code file into docs/: the destination is inside D
+        # and the source is not, and only the source says a code path went.
+        entries = [{"filename": "docs/X.cs", "previous_filename": "src/Services/Catalog/X.cs"}]
+        problems = check(payload(entries, class_cell="D", touch_cell="`docs/**`"), self.map)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all("src/Services/Catalog/X.cs" in p for p in problems))
+        # And a rename inside the set passes on both ends.
+        entries = [{"filename": "docs/b.md", "previous_filename": "docs/a.md"}]
+        self.assertEqual(check(payload(entries, class_cell="D", touch_cell="`docs/**`"), self.map), [])
+
+    def test_a_rename_source_that_is_not_a_plain_path_refuses_the_run(self) -> None:
+        entries = [{"filename": "docs/b.md", "previous_filename": "docs/../CLAUDE.md"}]
+        with self.assertRaisesRegex(InputRefused, "not a plain path"):
+            check(payload(entries, class_cell="D", touch_cell="`docs/**`"), self.map)
+
+    def test_a_file_list_shorter_than_changed_files_is_refused_as_a_prefix(self) -> None:
+        # The endpoint returns at most 3,000 entries; a prefix of a longer diff
+        # is the fail-open shape and is refused, not judged.
+        data = payload(["src/Services/Catalog/X.cs"])
+        data["changedFiles"] = 3001
+        with self.assertRaisesRegex(InputRefused, "prefix"):
+            check(data, self.map)
+
+    def test_a_file_list_matching_changed_files_is_judged(self) -> None:
+        data = payload(["src/Services/Catalog/X.cs", "src/Services/Catalog/Y.cs"])
+        data["changedFiles"] = 2
+        self.assertEqual(check(data, self.map), [])
+
+    def test_a_rename_counts_once_against_changed_files(self) -> None:
+        # GitHub counts a rename as one changed file and the endpoint returns
+        # one entry for it, so the comparison is over entries, not paths.
+        data = payload([{"filename": "docs/b.md", "previous_filename": "docs/a.md"}],
+                       class_cell="D", touch_cell="`docs/**`")
+        data["changedFiles"] = 1
+        self.assertEqual(check(data, self.map), [])
+
+    def test_a_changed_files_that_is_not_a_number_is_refused(self) -> None:
+        data = payload(["docs/x.md"], class_cell="D", touch_cell="`docs/**`")
+        data["changedFiles"] = "9"
+        with self.assertRaisesRegex(InputRefused, "changedFiles"):
+            check(data, self.map)
 
 
 class Main(unittest.TestCase):

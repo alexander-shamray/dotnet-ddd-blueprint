@@ -228,10 +228,14 @@ list, and the file list comes from the paginated files endpoint rather than
 from `gh pr view --json files`, which is one page:
 
 ```bash
-gh api "repos/{owner}/{repo}/pulls/<n>/files" --paginate --jq '.[].filename | @json' |
-    jq -s --argjson pr "$(gh pr view <n> --json number,body)" '$pr + {files: .}' |
+gh api "repos/{owner}/{repo}/pulls/<n>/files" --paginate --jq '.[] | {filename, previous_filename}' |
+    jq -s --argjson pr "$(gh pr view <n> --json number,body,changedFiles)" '$pr + {files: .}' |
     py -3.12 .github/locality-gate/locality_gate.py
 ```
+
+`changedFiles` rides along because the files endpoint stops at 3,000 entries
+however it is paginated, and the gate refuses a shorter list as a prefix;
+`previous_filename` rides along because a rename is judged at both ends.
 
 Its suite reads the map it ships, `.github/locality-gate/classes.yml`, as
 well as fixtures, because a gate whose tests only ever see a fixture map has

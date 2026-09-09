@@ -52,14 +52,26 @@ changed path is the author's text too -- git permits a newline inside a name
 that is not refuses the run rather than being skipped, because a verdict list
 with one line withheld is a list a reader would read as complete.
 
+**The file list can be short in two ways the diff's own paths do not show,
+and both are refused rather than judged.** The files endpoint returns at
+most 3,000 entries however it is paginated, so a longer pull request hands
+this gate a non-empty prefix that looks exactly like a complete list; the
+payload therefore carries GitHub's own `changedFiles` count and a list
+shorter than it is refused. And a renamed file arrives as one entry with the
+destination in `filename` and the source in `previous_filename`, so a Class D
+change that moved `src/X.cs` to `docs/X.cs` would pass on the destination
+alone; both ends of a rename are judged.
+
 Stdlib only, on the licence gate's terms, and the network is not in here:
 the deciding takes JSON on stdin and the fetching is two `gh` calls in the
-workflow. That is `deploy/canary/canary.py`'s split, for its reason.
+workflow. That is `deploy/canary/canary.py`'s split, for its reason. A file
+entry is a plain path or the endpoint's own `{filename, previous_filename}`.
 
-    {"number": 190, "body": "<the PR body>", "files": ["<path>", ...]}
+    {"number": 190, "body": "<the PR body>", "changedFiles": 2,
+     "files": [{"filename": "<path>", "previous_filename": null}, ...]}
 
-    gh api "repos/{owner}/{repo}/pulls/<n>/files" --paginate --jq '.[].filename | @json' |
-        jq -s --argjson pr "$(gh pr view <n> --json number,body)" '$pr + {files: .}' |
+    gh api "repos/{owner}/{repo}/pulls/<n>/files" --paginate --jq '.[] | {filename, previous_filename}' |
+        jq -s --argjson pr "$(gh pr view <n> --json number,body,changedFiles)" '$pr + {files: .}' |
         py -3.12 .github/locality-gate/locality_gate.py
 """
 
@@ -279,6 +291,19 @@ def _plain_path(entry: object) -> str:
 # the verdict
 # --------------------------------------------------------------------------
 
+def _names(entry: object) -> list[str]:
+    """The paths one file entry names: a string is one path, and an object is
+    the endpoint's own shape, where a rename carries the source as
+    `previous_filename` beside the destination. Both ends are judged, because
+    a move out of `src/` removes a code path whatever the destination is."""
+    if isinstance(entry, str):
+        return [entry]
+    if isinstance(entry, dict) and isinstance(entry.get("filename"), str):
+        previous = entry.get("previous_filename")
+        return [entry["filename"]] + ([previous] if isinstance(previous, str) and previous else [])
+    raise InputRefused("a changed path is not a plain path, so the run is refused rather than judged short")
+
+
 def check(payload: dict, class_map: dict[str, list[str]]) -> list[str]:
     """Every problem with the diff against both sets; empty when it passes."""
     if not isinstance(payload.get("body"), str):
@@ -286,9 +311,24 @@ def check(payload: dict, class_map: dict[str, list[str]]) -> list[str]:
     if not isinstance(payload.get("files"), list):
         raise InputRefused("the payload carries no `files` list")
     members, declared = read_rows(payload["body"])
-    paths = [_plain_path(entry) for entry in payload["files"]]
-    if not paths:
+    entries = payload["files"]
+    if not entries:
         raise InputRefused("the pull request has no changed files, which is an empty subject rather than a pass")
+    # The files endpoint returns at most 3,000 entries however it is paginated,
+    # so a longer pull request hands this gate a non-empty prefix that looks
+    # exactly like a complete list. `changedFiles` is GitHub's own count of the
+    # same list, and a list shorter than it is refused rather than judged.
+    expected = payload.get("changedFiles")
+    if expected is not None:
+        if not isinstance(expected, int) or isinstance(expected, bool):
+            raise InputRefused("the payload's `changedFiles` is not a number")
+        if expected != len(entries):
+            raise InputRefused(
+                f"the file list carries {len(entries)} entries against the pull request's changedFiles "
+                f"of {expected}; the files endpoint returns at most 3,000, so a shorter list is a prefix "
+                f"and is refused rather than judged"
+            )
+    paths = [_plain_path(name) for entry in entries for name in _names(entry)]
 
     allowed = [matcher(token) for member in members for token in class_map[member]]
     own = [matcher(token) for token in declared]
