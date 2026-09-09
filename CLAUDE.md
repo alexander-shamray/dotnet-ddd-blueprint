@@ -44,8 +44,8 @@ docs/roadmap.md              a calendar laid over Appendix C — closed
 docs/runbooks/               NOT one per alert — the one sharer is declared
 global.json, .config/        SDK pin (§4.4); dotnet-ef, pinned to the EF Core version
 Directory.*.props            shared MSBuild settings and ADR-019's analyser policy; exact package pins
-.github/workflows/           ci, compose, helm, observability, deploy, closure-gate, broker-permissions, realm
-.github/<gate>/              licence-gate, secret-scan, closure-gate, pipeline-gate, coverage — a directory each
+.github/workflows/           ci, compose, helm, observability, deploy, closure-gate, locality-gate, broker-permissions, realm
+.github/<gate>/              licence-gate, secret-scan, closure-gate, locality-gate, pipeline-gate, coverage — a directory each
 deploy/canary/               §15.5's ladder, its arithmetic and its verdict
 deploy/keycloak/             §11's realm obligations, over any realm
 deploy/compose/              §14.1's infrastructure, one pair per service
