@@ -117,21 +117,13 @@ jobs:
   # NAIVE MIGRATION — a deliberately narrowed filter, which four of them fail
   # against — and #60's is a tree removed from the deny list.
   #
-  # **The count that used to open this paragraph is gone, and its removal is
-  # the fourth correction rather than the first.** It said four, then five,
-  # then six — each time because a reviewer counted it against the suite — and
-  # then six again while this pull request added two more subjects. A number
-  # restated in three files goes stale in all three at once; what a reviewer
-  # can actually check is whether the ENUMERATION here matches the one in
-  # `docs/testing.md`, and that check does not need a numeral in front of it.
-  # This repository has already dropped a total for this exact reason three
-  # times: its callout counts, its residual-grant count, and its own line
-  # count.
-  #
-  # `CLAUDE.md` was a third holder of this list and no longer is: the
-  # extraction folded its commands section into `docs/testing.md`, which now
-  # carries the issue-by-issue subjects alone. One fewer copy to drift, and one
-  # fewer place a reader is sent to look for a list that is not there.
+  # **No count opens this paragraph.** A number restated in several files
+  # goes stale in all of them at once; what a reviewer can actually check is
+  # whether the ENUMERATION here matches the suite's own docstring in
+  # `.claude/scripts/test_grok_helpers.py`, and that check does not need a
+  # numeral in front of it. Those two are the holders: `docs/testing.md`
+  # points at this workflow for what runs and at the docstring for what the
+  # suite covers, and carries no copy of either.
   #
   # Beside the licence gate rather than inside `build`, on its argument: stdlib
   # Python over text and a few `bash` fragments, so it needs no restore, no

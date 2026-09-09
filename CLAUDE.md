@@ -15,7 +15,7 @@ anything — is owned elsewhere and cited from here by name, never restated.
 | [`docs/harness-boundaries.md`](docs/harness-boundaries.md) | What the harness grants these commands, and refuses |
 | [`docs/repo-map.md`](docs/repo-map.md) | What each entry in the tree is, and why it is shaped that way |
 | [`docs/style-guide.md`](docs/style-guide.md) | The prose, C# and SQL dialect, and which rules the build enforces |
-| [`docs/testing.md`](docs/testing.md) | How to run every suite and every gate, and what each needs |
+| [`docs/testing.md`](docs/testing.md) | What a checkout needs that the solution and the workflows cannot say: Docker, the Python floor, a gate run on its own, the coverage filter |
 
 ## What this repo is
 
@@ -97,7 +97,8 @@ dotnet ef migrations add <Name> --project src/Services/Catalog/Catalog.Infrastru
     --startup-project src/Services/Catalog/Catalog.Migrator --output-dir Persistence/Migrations
 ```
 
-`docs/testing.md` carries every other runner and what each needs. Three things
+`Platform.slnx` is the list of test projects and the workflows are the list of
+every other suite; `docs/testing.md` carries what neither can say. Three things
 hold first: **`py -3.12`, not `python`**, because CI pins 3.12 and the local
 default is newer; **container tests are never skipped when Docker is absent**,
 because a skip fails open, so without a daemon they fail on `Failed to connect

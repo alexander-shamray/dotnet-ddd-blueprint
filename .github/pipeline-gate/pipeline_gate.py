@@ -21,9 +21,9 @@ check is the one neither direction can see — a matrix entry reading
 the empty string rather than erroring, so the step is skipped and the job
 reports success having built nothing.
 
-`stages` is the one docs/testing.md names: "whoever writes the staged pipeline
-should assert a floor on each stage's count rather than trusting a green exit."
-The trap it closes is §12.1's oldest one wearing different clothes — a missing
+`stages` is the one docs/testing.md's gate-run section is written around: a
+check on each stage's count rather than trust in a green exit. The trap it
+closes is §12.1's oldest one wearing different clothes — a missing
 test adapter makes `dotnet test` report no tests and exit **zero**, and a
 mistyped `--filter` does exactly the same. Splitting one run into three is
 three new ways to select nothing and be congratulated for it.
@@ -68,14 +68,14 @@ SOLUTION = ROOT / "Platform.slnx"
 # make" a figure it makes exactly, which is the arithmetic error the sentence
 # was written to warn about.
 #
-# **So this comment no longer says what CLAUDE.md and docs/testing.md carry**,
-# and the removal is the point rather than tidying. It used to, and the sentence
-# went stale the first time a PR added a test — silently, because nothing here
-# reads those files and no floor moves when they change. A cross-reference a
-# gate cannot check is a third copy of a number, which is what the paragraph
-# above is about. The suite's live totals are those two files' to state; what
-# this comment owes is the run these floors were derived from, and that run is
-# in the past and stays where it is.
+# **So this comment restates no live total**, and the removal is the point
+# rather than tidying. It used to, and the sentence went stale the first time
+# a PR added a test — silently, because nothing here reads a document and no
+# floor moves when a count changes. A cross-reference a gate cannot check is a
+# third copy of a number, which is what the paragraph above is about. The
+# suite's live totals are a run's to state and no file's; what this comment
+# owes is the run these floors were derived from, and that run is in the past
+# and stays where it is.
 #
 # THE NUMBERS BELOW ARE NOT THOSE COUNTS, and the gap is deliberate. A floor
 # set at the measurement is a ratchet: it fails on the day somebody legitimately
