@@ -237,9 +237,10 @@ public class OrderFulfilmentSagaTests
                     context.CorrelationId = integrationEvent.CorrelationId;
                 }
 
-                // A scheduled expiry is not a contract (Appendix D) and has no
-                // envelope, so the send context is what both kinds have. That
-                // — not a second identity — is why the wait reads it.
+                // A scheduled expiry is not a contract and has no envelope —
+                // the remarks on StockReservationExpired, which its siblings
+                // inherit, say why — so the send context is what both kinds
+                // have. That, not a second identity, is why the wait reads it.
                 messageId = context.MessageId;
             },
             TestContext.Current.CancellationToken);
@@ -275,9 +276,10 @@ public class OrderFulfilmentSagaTests
     /// <b>For a contract this is the envelope's own value</b>, because
     /// <see cref="Publish"/> writes it there — §9.1's body, row, header and
     /// inbox key are one GUID, and nothing here is entitled to a second. The
-    /// send context is read rather than the payload because the saga's five
-    /// scheduled expiries are not contracts (Appendix D) and have no envelope;
-    /// it is the one handle both kinds carry, not a different id.
+    /// send context is read rather than the payload because the saga's
+    /// scheduled expiries are not contracts and have no envelope — the remarks
+    /// on <see cref="StockReservationExpired"/>, which its siblings inherit,
+    /// say why; it is the one handle both kinds carry, not a different id.
     /// </remarks>
     private static Task<bool> ConsumedWithId<T>(ITestHarness harness, Guid? messageId)
         where T : class =>

@@ -75,11 +75,11 @@ public enum CommandOrigin
     /// applies.
     /// </summary>
     /// <remarks>
-    /// <b>The zero value, deliberately (Appendix D).</b> An origin nobody set
-    /// therefore fails closed: it means "check the owner", which is the
-    /// answer that refuses rather than the one that admits. Declaring
-    /// <c>System</c> first, or starting the members at 1, would both make the
-    /// safe default an accident of declaration order.
+    /// <b>The zero value, deliberately.</b> An origin nobody set therefore
+    /// fails closed: it means "check the owner", which is the answer that
+    /// refuses rather than the one that admits. Declaring <c>System</c>
+    /// first, or starting the members at 1, would both make the safe default
+    /// an accident of declaration order.
     /// </remarks>
     User,
 

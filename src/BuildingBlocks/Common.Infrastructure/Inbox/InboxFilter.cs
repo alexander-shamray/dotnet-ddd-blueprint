@@ -136,10 +136,9 @@ public sealed class InboxFilter<T>(
     }
 
     /// <summary>
-    /// MassTransit's diagnostic probe. Required by <see cref="IFilter{T}"/> and
-    /// absent from §9.5's sample, which is an excerpt rather than a compilable
-    /// unit (Appendix D) — the scope name is what identifies this filter in
-    /// <c>bus.GetProbeResult()</c>.
+    /// MassTransit's diagnostic probe. Required by <see cref="IFilter{T}"/>,
+    /// which is why §9.5's sample carries it — the scope name is what
+    /// identifies this filter in <c>bus.GetProbeResult()</c>.
     /// </summary>
     public void Probe(ProbeContext context) => context.CreateFilterScope("inbox");
 }

@@ -160,7 +160,8 @@ public sealed class OutboxDispatcher : BackgroundService
             claimScope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
 
         // OutboxClaim, not OutboxMessage — the claim projects only the columns
-        // the OUTPUT clause returns. See Appendix D.
+        // the OUTPUT clause returns, and its own summary says what a mismatch
+        // costs.
         //
         // CommandDefinition, so the token reaches the database command: with
         // the plain overload a shutdown cannot interrupt a blocked claim, and
