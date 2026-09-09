@@ -292,7 +292,7 @@ public class MessagingRegistrationTests
 
         services.ShouldContain(
             d => d.ServiceType == typeof(IMessageScheduler),
-            "§9.6's four Schedule declarations need one, and nothing resolves a scheduler at startup — " +
+            "§9.6's Schedule declarations need one, and nothing resolves a scheduler at startup — " +
             "without this line the first OrderPlaced faults onto the error queue (ADR-021)");
 
         services.ShouldContain(
