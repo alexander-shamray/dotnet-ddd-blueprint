@@ -52,7 +52,8 @@ argued out in ~10,500 lines of prose — the blueprint's size when these
 estimates were quoted. The figure here is deliberately the historical one,
 because it is what the estimates were made against; no file carries a live
 count, because [`change-locality.md`](change-locality.md) §2 forbids one, and
-`wc -l` over `docs/backend-architecture/` is the measurement.
+the measurement is a line count over the Markdown files under
+`docs/backend-architecture/`, taken when it is wanted rather than recorded.
 
 It is also the trap. A specification this precise makes an estimate feel
 measured when it is still a guess, and the numbers below have the same standing

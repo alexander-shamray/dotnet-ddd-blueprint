@@ -85,13 +85,13 @@ delivery record on its own duplicate-detection window, and it exists so the
 outbox filter knows which of the committed messages it has already sent.
 Retiring either one costs a guarantee the other never made.
 
-> **The section the paragraph above cites is §9.5's, and the sentence stands
-> as written.** §9.4 keeps the outbox for a few days and names no figure; the
-> window `InboxFilter` is pruned on is `RetentionPolicy`'s, and the purge that
-> applies it is the one §9.5 specifies — so the two consequences below that
-> call that purge §9.4's name the same service by the wrong section. An ADR is
-> never rewritten, so a mis-citation is corrected beside its sentence rather
-> than in it.
+> **The paragraph above cites §9.4 for the retention, and the citation
+> should read §9.5; the sentence itself stands as written.** §9.4 keeps the
+> outbox for a few days and names no figure; the window `InboxFilter` is
+> pruned on is `RetentionPolicy`'s, and the purge that applies it is the one
+> §9.5 specifies — so the two consequences below that call that purge §9.4's
+> carry the same slip. An ADR is never rewritten, so a mis-citation is
+> corrected beside its sentence rather than in it.
 
 **Consequences.**
 
