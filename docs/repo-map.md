@@ -158,13 +158,16 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              because a gate cannot see a read it was never told
                              about. A test over the reads is what closes that,
                              not a more careful list
-.github/workflows/closure-gate.yml  one of the two workflows with no path
-                             filter — locality-gate.yml below is the other —
-                             and that is the design rather than an omission:
-                             what it judges is a property of every pull
-                             request, so a filter could only make it skippable
-                             — and with nothing read out of the checkout there
-                             is no SOURCE_INPUTS list to drift. The same two
+.github/workflows/closure-gate.yml  one of the two standalone PR-metadata
+                             gates that read no tree and so declare no path
+                             filter — locality-gate.yml below is the other;
+                             ci.yml is unfiltered at its trigger too, but
+                             filters per job inside — and that is the design
+                             rather than an omission: what it judges is a
+                             property of every pull request, so a filter could
+                             only make it skippable — and with nothing read
+                             out of the checkout there is no SOURCE_INPUTS
+                             list to drift. The same two
                              are the only workflows taking `edited`, because
                              the defect this one exists for was introduced by
                              an edit to a PR body with no push behind it, and
@@ -296,6 +299,7 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              with their positive controls, plus reads of the
                              shipped map, so the gate has been observed
                              looking at the file CI hands it
+.github/pipeline-gate/       PR-25's quality gates, and all three are
                              inventories: every deployable under src/ is
                              matched by a path filter, every Dockerfile is
                              built by some matrix entry, and every test stage

@@ -59,8 +59,11 @@ def body(class_cell: str | None = "A", touch_cell: str | None = "`src/Services/C
     return "Some prose first.\n\n" + "\n".join(rows) + "\n\nMore prose after.\n"
 
 
-def payload(files: list[str], **kwargs) -> dict:
-    return {"number": 999, "body": body(**kwargs), "files": files}
+def payload(files: list, **kwargs) -> dict:
+    # `changedFiles` is GitHub's count of the same list and the gate requires
+    # it, so the helper supplies a matching one; a test about the count sets
+    # its own afterwards.
+    return {"number": 999, "body": body(**kwargs), "files": files, "changedFiles": len(files)}
 
 
 class TouchSetGrammar(unittest.TestCase):
@@ -345,11 +348,19 @@ class Verdicts(unittest.TestCase):
 
     def test_a_missing_files_key_is_refused(self) -> None:
         with self.assertRaisesRegex(InputRefused, "files"):
-            check({"number": 1, "body": body()}, self.map)
+            check({"number": 1, "body": body(), "changedFiles": 1}, self.map)
 
     def test_a_missing_body_is_refused(self) -> None:
         with self.assertRaisesRegex(InputRefused, "body"):
-            check({"number": 1, "files": ["docs/x.md"]}, self.map)
+            check({"number": 1, "files": ["docs/x.md"], "changedFiles": 1}, self.map)
+
+    def test_a_missing_changed_files_is_refused_not_judged(self) -> None:
+        # Optional would be fail-open: a workflow that stopped sending the
+        # count would hand a possible prefix to a gate that judged it whole.
+        data = payload(["src/Services/Catalog/X.cs"])
+        del data["changedFiles"]
+        with self.assertRaisesRegex(InputRefused, "changedFiles"):
+            check(data, self.map)
 
     def test_a_changed_path_that_is_not_a_plain_path_refuses_the_run(self) -> None:
         with self.assertRaisesRegex(InputRefused, "not a plain path"):
@@ -477,9 +488,22 @@ class TheShippedMap(unittest.TestCase):
             self.assertTrue(self.map[klass], klass)
 
     def test_class_d_reaches_no_code(self) -> None:
-        for token in self.map["D"]:
-            self.assertFalse(matcher(token)("src/Services/Catalog/Catalog.Api/Program.cs"), token)
-            self.assertFalse(matcher(token)("tests/Catalog.Api.Tests/X.cs"), token)
+        # Every file actually under src/ and tests/ in this checkout, against
+        # every Class D token: a probe of two Catalog paths would stay green
+        # with `src/Gateway/**` added to D. Build output is skipped because it
+        # is not in the tree the gate judges, and the walk must find something
+        # or the assertion is over an empty subject.
+        skipped = {"bin", "obj", "TestResults"}
+        code = [
+            path.relative_to(ROOT).as_posix()
+            for top in ("src", "tests")
+            for path in (ROOT / top).rglob("*")
+            if path.is_file() and not (skipped & set(path.relative_to(ROOT).parts))
+        ]
+        self.assertGreater(len(code), 100, "the walk over src/ and tests/ found almost nothing")
+        matchers = [(token, matcher(token)) for token in self.map["D"]]
+        reached = sorted({f"{token} -> {path}" for path in code for token, match in matchers if match(path)})
+        self.assertEqual(reached, [])
 
     def test_a_class_a_change_to_claude_md_is_caught(self) -> None:
         problems = check(payload(["src/Services/Catalog/X.cs", "CLAUDE.md"],

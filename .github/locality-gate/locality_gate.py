@@ -334,17 +334,22 @@ def check(payload: dict, class_map: dict[str, list[str]]) -> list[str]:
     # The files endpoint returns at most 3,000 entries however it is paginated,
     # so a longer pull request hands this gate a non-empty prefix that looks
     # exactly like a complete list. `changedFiles` is GitHub's own count of the
-    # same list, and a list shorter than it is refused rather than judged.
+    # same list, and a list shorter than it is refused rather than judged. The
+    # count is required, not optional: a payload without it is a workflow
+    # that stopped sending it, and judging the list anyway is the fail-open
+    # the field exists to close.
     expected = payload.get("changedFiles")
-    if expected is not None:
-        if not isinstance(expected, int) or isinstance(expected, bool):
-            raise InputRefused("the payload's `changedFiles` is not a number")
-        if expected != len(entries):
-            raise InputRefused(
-                f"the file list carries {len(entries)} entries against the pull request's changedFiles "
-                f"of {expected}; the files endpoint returns at most 3,000, so a shorter list is a prefix "
-                f"and is refused rather than judged"
-            )
+    if not isinstance(expected, int) or isinstance(expected, bool):
+        raise InputRefused(
+            "the payload carries no numeric `changedFiles`; without GitHub's own count a file list "
+            "cannot be told from a prefix of one, so it is refused rather than judged"
+        )
+    if expected != len(entries):
+        raise InputRefused(
+            f"the file list carries {len(entries)} entries against the pull request's changedFiles "
+            f"of {expected}; the files endpoint returns at most 3,000, so a shorter list is a prefix "
+            f"and is refused rather than judged"
+        )
     paths = [_plain_path(name) for entry in entries for name in _names(entry)]
 
     allowed = [matcher(token) for member in members for token in class_map[member]]
