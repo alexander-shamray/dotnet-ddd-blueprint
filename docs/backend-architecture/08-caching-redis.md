@@ -327,8 +327,11 @@ registration: Ordering caches nothing through `HybridCache` today, so its one
 price table the write path reads. The first cached projection of Catalog data
 brings the second handler with it — in `Ordering.Infrastructure` beside the
 projection, registered by the same §6.2 scan, and run through the same
-`IntegrationEventConsumer<PriceChanged>` ([§9.4](09-messaging.md)) sequentially
-after it — and this is that handler:
+`IntegrationEventConsumer<PriceChanged>` ([§9.4](09-messaging.md)). The scan
+pins no order between the two, and the consumer runs handlers in registration
+order, so whether the cache is emptied before or after the table is updated is
+a decision that reader takes with its handler, not one this chapter can
+promise. This is that handler:
 
 ```csharp
 namespace Ordering.Infrastructure.Caching;
