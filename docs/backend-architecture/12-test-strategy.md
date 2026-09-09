@@ -919,10 +919,9 @@ internal static class Contracts
 }
 ```
 
-The builders those tests use are ordinary factories over `OutboxMessage`
-([Appendix D](appendix-d-type-inventory.md)), one class rather than one per
-case — they differ only in which event they stage, and three classes with a
-`Row` method each said that three times:
+The builders those tests use are ordinary factories over `OutboxMessage`, one
+class rather than one per case — they differ only in which event they stage,
+and three classes with a `Row` method each said that three times:
 
 ```csharp
 // The map and the payload format are the real ones, resolved from the
@@ -2050,9 +2049,9 @@ public async Task Commands_are_sent_and_events_are_published()
 > correlation as the second identity the rule is about. A message with no
 > envelope — a scheduled timeout, or any bare record — needs no such write,
 > which is why the rule is about contracts rather than about publishes. A
-> saga's scheduled timeouts are not contracts
-> (Appendix D) and have no envelope, which is the case the send context covers
-> and the payload cannot.
+> saga's scheduled timeouts are not contracts — `StockReservationExpired`'s
+> own doc comment argues why — and have no envelope, which is the case the
+> send context covers and the payload cannot.
 >
 > **Letting MassTransit mint the header instead is the trap `IIntegrationEvent`
 > names**, and it was written here before this was noticed: every event gets two

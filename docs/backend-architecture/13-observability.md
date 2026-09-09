@@ -483,8 +483,7 @@ public sealed class RequestMetrics
 // next two with the consumers that record them, and Suppressed when §9.5's
 // silent drop was given a signal. An instrument nothing writes to would be an
 // empty series on a dashboard rather than a signal — which is the rule for
-// when one may be added, not a claim that four is the number. See Appendix D,
-// which records where the code is.
+// when one may be added, not a claim that four is the number.
 public sealed class MessagingMetrics
 {
     private readonly Histogram<double> _deliveryLag;

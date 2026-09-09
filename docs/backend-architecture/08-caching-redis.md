@@ -582,11 +582,12 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     // ConcurrentRequestException for a day. This is valid JSON and unambiguous.
     private const string NoValue = "null";
 
-    // Result and Result<T> are the whole universe (Appendix D.5), and the two
-    // members after this one depend on that. A static field on a generic type
-    // has one instance per CLOSED type, so all three are resolved once per
-    // (TCommand, TResult) pair rather than once per command, and they run in
-    // declaration order.
+    // Result and Result<T> are the whole universe — Result's summary rules
+    // out Unit and Result<void>, and its private protected constructor rules
+    // out a third shape — and the two members after this one depend on that.
+    // A static field on a generic type has one instance per CLOSED type, so
+    // all three are resolved once per (TCommand, TResult) pair rather than
+    // once per command, and they run in declaration order.
     private static readonly Type? ValueType = ValueTypeOf();
 
     private static readonly PropertyInfo? ValueProperty =
@@ -597,9 +598,9 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     // is INTERNAL and this behaviour is in the same assembly, so it is
     // reachable, and Success<T> guards nothing the constructor does not: it is
     // `=> new(value, null)`. What it is, is the type's stated construction API
-    // (Appendix D.5), and that is the whole of the reason. The state invariant
-    // needs neither: IsSuccess is defined as the absence of an error, so
-    // success-carrying-an-error is unreachable by any route.
+    // (Result<T>'s own summary), and that is the whole of the reason. The state
+    // invariant needs neither: IsSuccess is defined as the absence of an error,
+    // so success-carrying-an-error is unreachable by any route.
     private static readonly MethodInfo? SuccessOfValue = ValueType is null
         ? null
         : typeof(Result)
@@ -687,10 +688,10 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 
     // The claim belongs to one subject, bound from the principal and never from
     // the command (§11.4). IsAuthenticated is false for BOTH a message-borne
-    // command and an anonymous HTTP request (Appendix D.1), so this segment is
-    // shared rather than unique — which is a residual, argued below, not a
-    // detail. It cannot collide with an authenticated subject: the alternative
-    // is a Guid rendered "D", and no Guid spells a word.
+    // command and an anonymous HTTP request (its own summary), so this
+    // segment is shared rather than unique — which is a residual, argued
+    // below, not a detail. It cannot collide with an authenticated subject:
+    // the alternative is a Guid rendered "D", and no Guid spells a word.
     private string Subject() => currentUser.IsAuthenticated ? currentUser.Id.ToString() : "system";
 
     // Only a success is ever stored, and what is stored is its VALUE — never
@@ -773,7 +774,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 > **The invariant holds for authenticated callers and for nobody else, and that
 > is this section's largest residual.** `ICurrentUser.IsAuthenticated` is false
 > for a message-borne command *and* for an anonymous HTTP request — the port
-> says so in as many words (Appendix D.1), and §11.4's
+> says so in as many words, on `IsAuthenticated`'s own summary, and §11.4's
 > `IsAuthenticated => Caller is not null` is what implements it. So `"system"`
 > is not one caller: it is every caller who is not one. Two consequences, and
 > the first is a rule rather than an observation:
@@ -812,7 +813,7 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 > both halves and it cannot work in either direction. `System.Text.Json`
 > serialises public get-only properties by default (`IgnoreReadOnlyProperties`
 > is false), so it reads every accessor a `Result` has — and on a success
-> `Error` throws by design (Appendix D.5) while on a failure `Value` does.
+> `Error` throws by design (its own summary) while on a failure `Value` does.
 > Coming back is worse: `Result`'s constructor is `private protected` and
 > `Result<T>`'s is `internal`, so there is nothing for the serialiser to call
 > and it raises `NotSupportedException`.
@@ -841,8 +842,8 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 > `Value` on a failure from a loud error into a silent `default`, which is
 > §5.3's always-valid argument giving way at the one place it is load-bearing,
 > and a serialiser-constructible `Result` is one any consumer may assemble by
-> hand. The throwing accessors are the contract (Appendix D.5), not an
-> obstacle to route around.
+> hand. The throwing accessors are the contract — `Result.Error`'s summary
+> argues it, and `Value` mirrors it — not an obstacle to route around.
 
 > **The value is serialised with default options and no converters, which is a
 > constraint on what an idempotent command may return.** §4.2 registers
@@ -1034,7 +1035,7 @@ precisely because nothing commits.
 > command from inside a **command** handler, so the case is **unreached rather
 > than handled**.
 >
-> `StockReservedHandler` (Appendix D.4) is the near miss, and naming it is
+> `StockReservedHandler` (§9.6) is the near miss, and naming it is
 > cheaper than letting a reader find it: it does dispatch
 > `ConfirmStockCommand`, but it is an `IIntegrationEventHandler`, and §9.5's
 > inbox filter opens no `IUnitOfWork` transaction — it writes its row on the

@@ -334,6 +334,19 @@ read would be a registration standing in for a control, which is the shape
 ADR-033 was written to withdraw — and that was right while the number was only
 ever asserted. What changed is the condition, not the taste.
 
+**The declaration's shape is a gate input, which is a constraint on
+refactoring it.** `deploy/keycloak/realm_check.py` is another reader of that
+field, and the one that reads the file's text rather than the compiled
+assembly ([ADR-042](adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md)):
+it anchors on the member's modifier, type and initialiser, and it stops
+rather than defaulting unless it finds exactly one. Spelling the lifetime as a
+`const int`, moving it into an options record, deriving it from
+`RevocationBound`, or dropping the `readonly` therefore leaves every compiler
+silent, `realm.yml` red on the pull request that made the change, and
+`deploy.yml` refusing every rollout, until the pattern is reconciled in the
+same change. The stop is the honest outcome rather than a fragility: a gate
+that has lost the number cannot say what a realm owes.
+
 **The revocation window is 330 seconds, and it is the lifetime plus the skew
 rather than the lifetime.** `ClockSkew` is 30 seconds here, and a lifetime
 check accepts a token until `exp` **plus** the skew — so logging a user out,
