@@ -158,15 +158,22 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              because a gate cannot see a read it was never told
                              about. A test over the reads is what closes that,
                              not a more careful list
-.github/workflows/closure-gate.yml  the ONE workflow with no path filter, and
-                             that is the design rather than an omission: what
-                             it judges is a property of every pull request, so
-                             a filter could only make it skippable — and with
-                             nothing read out of the checkout there is no
-                             SOURCE_INPUTS list to drift. It is also the only
-                             workflow taking `edited`, because the defect it
-                             exists for was introduced by an edit to a PR body
-                             with no push behind it. **Proposal and enforcement
+.github/workflows/closure-gate.yml  one of the two standalone PR-metadata
+                             gates, and neither declares a path filter —
+                             locality-gate.yml below is the other; ci.yml is
+                             unfiltered at its trigger too, but filters per
+                             job inside. That is the design rather than an
+                             omission: what each judges is a property of
+                             every pull request, so a filter could only make
+                             it skippable. This one reads nothing out of the
+                             checkout, so there is no SOURCE_INPUTS list to
+                             drift; the other reads its own gate and map from
+                             the base commit and nothing else. The same two
+                             are the only workflows taking `edited`, because
+                             the defect this one exists for was introduced by
+                             an edit to a PR body with no push behind it, and
+                             half of what the other judges is the body.
+                             **Proposal and enforcement
                              are two executions**: the suite runs the branch's
                              gate, and the gate that JUDGES is read out of the
                              base commit with `git show`, so a pull request
@@ -179,6 +186,25 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              base one, at a price this repo refuses. Closing
                              that needs a required status check, and `main` is
                              not protected today
+.github/workflows/locality-gate.yml  the other workflow with no path filter
+                             and with `edited` in its trigger list, on the
+                             closure gate's argument: what it judges is a
+                             property of every pull request, and half of it —
+                             the `| Class |` and `| Touch set |` rows — is the
+                             body, which is edited without a push. Its own
+                             rather than a job in ci.yml because `edited`
+                             there would rebuild the solution on every typo
+                             fix in a description. Proposal and enforcement
+                             are two executions here too, gate AND map read
+                             out of the base commit, with one bootstrap
+                             branch the closure gate does not have: a base
+                             with no gate directory at all is judged by the
+                             head copy under a warning, because the PR that
+                             lands the gate has no base copy by definition,
+                             and after that merge the branch is reachable
+                             only from a stale base. The residual is the same
+                             one: this file is the branch's own copy, and
+                             `main` is not protected
 .github/workflows/broker-permissions.yml  ADR-036's broker ACL, and the
                              FOURTH workflow to reach outside its own
                              tree: src/Services/**, Common.Contracts and
@@ -253,6 +279,27 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              #112 red on three counts, PR #116 on the two it
                              disclaimed — and it went red on its own branch,
                              over test fixtures a commit body quoted
+.github/locality-gate/       where a pull request's diff lands, against the
+                             class and touch set its body declares — the
+                             contract's section 3, enforced. classes.yml is
+                             the ONE place the class → tree-set map lives;
+                             the contract's table states each class in words
+                             and cites the file. The gate judges every changed
+                             path twice, against the class's set and against
+                             the declared row, because the map cannot say
+                             "one service" and the row can: a Catalog change
+                             that also edits Ordering is inside Class A and
+                             outside its own row, and only the second check
+                             sees it. A body without exactly one of each row
+                             is refused, not passed. The map is read by a
+                             parser that accepts one shape and refuses the
+                             rest, on pipeline_gate.py's stdlib-only
+                             argument, and the glob dialect is
+                             pr-locality.sh's so a row reads the same in the
+                             harness and in CI. The suite is negative cases
+                             with their positive controls, plus reads of the
+                             shipped map, so the gate has been observed
+                             looking at the file CI hands it
 .github/pipeline-gate/       PR-25's quality gates, and all three are
                              inventories: every deployable under src/ is
                              matched by a path filter, every Dockerfile is

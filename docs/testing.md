@@ -68,6 +68,7 @@ py -3.12 -m unittest discover -s .github/pipeline-gate   # PR-25's quality gates
 py -3.12 -m unittest discover -s .github/coverage        # the coverage merge
 py -3.12 -m unittest discover -s deploy/canary           # §15.5's rollout
 py -3.12 -m unittest discover -s .github/closure-gate    # what a PR closes
+py -3.12 -m unittest discover -s .github/locality-gate   # where a PR's diff lands
 py -3.12 -m unittest discover -s .claude/scripts         # the review loop's helpers
 ```
 
@@ -219,6 +220,26 @@ and in `/pr` rather than in this block:
 gh pr view <n> --json number,url,body,commits,closingIssuesReferences,headRefOid |
     py -3.12 .github/closure-gate/closure_gate.py
 ```
+
+**The locality gate's suite is in the block for the same reason, and its live
+run is the same shape.** It judges a pull request's changed paths against the
+class and touch set the body declares, so it needs the body and the file
+list, and the file list comes from the paginated files endpoint rather than
+from `gh pr view --json files`, which is one page:
+
+```bash
+gh api "repos/{owner}/{repo}/pulls/<n>/files" --paginate --jq '.[] | {filename, previous_filename}' |
+    jq -s --argjson pr "$(gh pr view <n> --json number,body,changedFiles)" '$pr + {files: .}' |
+    py -3.12 .github/locality-gate/locality_gate.py
+```
+
+`changedFiles` rides along because the files endpoint stops at 3,000 entries
+however it is paginated, and the gate refuses a shorter list as a prefix;
+`previous_filename` rides along because a rename is judged at both ends.
+
+Its suite reads the map it ships, `.github/locality-gate/classes.yml`, as
+well as fixtures, because a gate whose tests only ever see a fixture map has
+not been observed looking at the file CI hands it.
 
 Each has its own reference for what it asserts and — more usefully — what it
 does not: `deploy/helm/README.md`, since that gate reaches no cluster;
