@@ -159,15 +159,16 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              about. A test over the reads is what closes that,
                              not a more careful list
 .github/workflows/closure-gate.yml  one of the two standalone PR-metadata
-                             gates that read no tree and so declare no path
-                             filter — locality-gate.yml below is the other;
-                             ci.yml is unfiltered at its trigger too, but
-                             filters per job inside — and that is the design
-                             rather than an omission: what it judges is a
-                             property of every pull request, so a filter could
-                             only make it skippable — and with nothing read
-                             out of the checkout there is no SOURCE_INPUTS
-                             list to drift. The same two
+                             gates, and neither declares a path filter —
+                             locality-gate.yml below is the other; ci.yml is
+                             unfiltered at its trigger too, but filters per
+                             job inside. That is the design rather than an
+                             omission: what each judges is a property of
+                             every pull request, so a filter could only make
+                             it skippable. This one reads nothing out of the
+                             checkout, so there is no SOURCE_INPUTS list to
+                             drift; the other reads its own gate and map from
+                             the base commit and nothing else. The same two
                              are the only workflows taking `edited`, because
                              the defect this one exists for was introduced by
                              an edit to a PR body with no push behind it, and

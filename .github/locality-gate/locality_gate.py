@@ -228,7 +228,9 @@ def _split_outside_braces(cell: str) -> list[str]:
 
 def _normalise_token(token: str, *, where: str) -> str:
     """One path-or-glob token, checked and with a trailing slash dropped."""
-    if not _TOKEN.match(token) or not re.search(r"[/.]", token):
+    # fullmatch, because `$` matches before a final newline and a token
+    # ending in one would pass as its newline-free spelling.
+    if not _TOKEN.fullmatch(token) or not re.search(r"[/.]", token):
         raise InputRefused(f"{where} is not a path list")
     # Braces are walked, not counted. A count accepts `docs/}a{` and, worse,
     # `docs/a,docs/b` — a comma outside any brace, which the touch-set row
@@ -249,7 +251,12 @@ def _normalise_token(token: str, *, where: str) -> str:
             raise InputRefused(f"{where} has a comma outside a brace alternation")
     if depth != 0:
         raise InputRefused(f"{where} has an unbalanced brace")
-    token = token.rstrip("/")
+    # At most one trailing slash, as pr-locality.sh drops one with `${t%/}`:
+    # `docs/` names the directory, and `docs//` keeps an empty segment for
+    # the boundary check below to refuse. Stripping every slash would read
+    # the malformed token as the whole tree.
+    if token.endswith("/"):
+        token = token[:-1]
     # A brace alternative is a segment start too: `{../outside,docs/x.md}`
     # expands to a path that leaves the checkout, so the boundary is judged
     # over the token with its braces dropped and its alternatives joined as
@@ -270,7 +277,8 @@ def matcher(token: str) -> Callable[[str], bool]:
     `**` crosses directories, `*` and `?` do not, braces are alternation, and
     a token also covers everything beneath the directory it names.
     """
-    token = token.rstrip("/")
+    if token.endswith("/"):
+        token = token[:-1]
     out = []
     index = 0
     while index < len(token):
@@ -297,7 +305,10 @@ def matcher(token: str) -> Callable[[str], bool]:
 
 
 def _plain_path(entry: object) -> str:
-    if not isinstance(entry, str) or not _PLAIN_PATH.match(entry) or not re.search(r"[/.]", entry):
+    # fullmatch rather than match: `$` matches before a final newline, and
+    # git permits a name ending in one, so `docs/x.md\n` would otherwise pass
+    # as `docs/x.md` and be judged as the path it is not.
+    if not isinstance(entry, str) or not _PLAIN_PATH.fullmatch(entry) or not re.search(r"[/.]", entry):
         raise InputRefused("a changed path is not a plain path, so the run is refused rather than judged short")
     if re.search(r"(^|/)(\.{1,2})?(/|$)", entry):
         raise InputRefused("a changed path is not a plain path, so the run is refused rather than judged short")

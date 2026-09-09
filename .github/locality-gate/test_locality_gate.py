@@ -160,6 +160,21 @@ class TouchSetGrammar(unittest.TestCase):
         with self.assertRaisesRegex(InputRefused, "not one cell"):
             read_rows(body("A", "`src/**` | and more"))
 
+    def test_a_doubled_trailing_slash_is_refused_not_read_as_the_directory(self) -> None:
+        # pr-locality.sh drops one slash and refuses the empty segment left;
+        # stripping every slash would read `docs//` as `docs`.
+        with self.assertRaisesRegex(InputRefused, "outside the repository"):
+            read_rows(body("D", "`docs//`"))
+        with self.assertRaisesRegex(InputRefused, "outside the repository"):
+            read_map(MAP.replace("'docs/**'", "'docs//'"))
+
+    def test_a_token_ending_in_a_newline_is_refused(self) -> None:
+        # Neither the row nor the map can deliver one, since both are read
+        # line by line and the map's grammar refuses the broken line first,
+        # so the normaliser is asked directly: `$` would have accepted it.
+        with self.assertRaisesRegex(InputRefused, "not a path list"):
+            locality_gate._normalise_token("docs/**\n", where="the Touch set row")
+
 
 class Matching(unittest.TestCase):
     """The glob dialect is pr-locality.sh's, and each rule is pinned on its own."""
@@ -365,6 +380,12 @@ class Verdicts(unittest.TestCase):
     def test_a_changed_path_that_is_not_a_plain_path_refuses_the_run(self) -> None:
         with self.assertRaisesRegex(InputRefused, "not a plain path"):
             check(payload(["src/Services/Catalog/ok.cs", "docs/evil\nname.md"]), self.map)
+
+    def test_a_changed_path_ending_in_a_newline_refuses_the_run(self) -> None:
+        # `$` matches before a final newline, so a match() would accept this
+        # as `docs/x.md`; git permits the name and JSON delivers it intact.
+        with self.assertRaisesRegex(InputRefused, "not a plain path"):
+            check(payload(["docs/x.md\n"], class_cell="D", touch_cell="`docs/**`"), self.map)
 
     def test_a_changed_path_with_a_dot_dot_segment_refuses_the_run(self) -> None:
         with self.assertRaisesRegex(InputRefused, "not a plain path"):
