@@ -554,9 +554,13 @@ name the callout below is about. This block registered a third over
 endpoint — the class sample and the registration have to lose an entry
 together, and they did not.
 
-`RequirePermission` is a one-line extension in `Common.Web` over
-`RequireClaim(PermissionClaim.Type, permission)`. It exists so that **no host
-ever spells the claim type**: four things have to agree on `"permission"` and
+`RequirePermission` is an extension in `Common.Web` over
+`RequireAuthenticatedUser()` and then `RequireClaim(PermissionClaim.Type,
+permission)` — the first because `RequireClaim` alone evaluates whatever claims
+the principal carries and asks nothing about whether anything authenticated
+it, so without it a principal that happens to carry the claim would be
+authorised unauthenticated. It exists so that **no host ever spells the claim
+type**: four things have to agree on `"permission"` and
 only three of them are code — the policies here, `ICurrentUser.HasPermission`
 below, the test authentication scheme ([§12.4](12-test-strategy.md)), and the
 realm's protocol mapper, which is configuration and cannot reference a
@@ -763,6 +767,11 @@ namespace Ordering.Api.Endpoints;
 
 public sealed record CancelOrderRequest(string Reason);
 
+// Ordering.Application/Orders/CancelOrder/CancelOrderCommand.cs — the request
+// type above is the HTTP transport's and stays in the host; the command and
+// its vocabulary are the slice's, and Application never references Api.
+namespace Ordering.Application.Orders.CancelOrder;
+
 /// <summary>
 /// Which path a command arrived on, stated rather than inferred. A handler
 /// reachable both by HTTP and by <c>CommandConsumer</c> (§9.4) must not read
@@ -796,6 +805,9 @@ public sealed record CancelOrderCommand(
 {
     public bool IsSystemInitiated => InitiatedBy is CommandOrigin.System;
 }
+
+// Ordering.Application/Orders/CancellationReasons.cs
+namespace Ordering.Application.Orders;
 
 /// <summary>
 /// The one place a wire code becomes a domain enum. Both entry points call it:

@@ -12,13 +12,13 @@ namespace Common.Infrastructure.Inbox;
 /// otherwise the consumer runs and the id is recorded <em>afterwards</em>.
 /// </summary>
 /// <remarks>
-/// <b>Common, not per-service, and the chapter's sample says otherwise for the
-/// reason PR-14 already corrected once.</b> §9.5 writes
-/// <c>InboxFilter&lt;T&gt;(OrderingDbContext db)</c> because that chapter is
-/// written from Ordering's point of view — the same viewpoint that had §9.4
-/// writing <c>ordering.OutboxMessages</c> into code every service shares.
-/// Nothing in this filter is per-service, so six copies would be six places for
-/// the ordering below to be got wrong.
+/// <b>Common, not per-service, and §9.5's sample says so.</b> It prints
+/// <c>DbContext</c> rather than <c>OrderingDbContext</c> and argues the point at
+/// the constructor: the filter reaches its entity through
+/// <c>Set&lt;InboxMessage&gt;()</c> — <c>T</c> is the message contract, never the
+/// row — so one implementation serves every service. Nothing in this filter is
+/// per-service, so six copies would be six places for the ordering below to be
+/// got wrong.
 /// <para>
 /// <b>The <c>DbContext</c> must be the service's own, resolved and not
 /// constructed.</b> Sharing the handler's transaction is the entire reason this

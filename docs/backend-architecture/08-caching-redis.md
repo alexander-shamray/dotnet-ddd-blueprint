@@ -140,8 +140,9 @@ same key execute the factory once rather than N times.
 
 Registered inside `AddRedisConnections` — the same helper that supplies the two
 connections of §8.1 — rather than as a separate call somebody has to remember.
-`PriceChangedCacheInvalidator` (§8.4) injects `HybridCache` and is registered by
-the [§6.2](06-cqrs.md) scan, so an unregistered cache is a service that will not start:
+Nothing in either service reads `HybridCache` yet; the first handler that
+injects it — §8.4 names the shape — is registered by the [§6.2](06-cqrs.md)
+scan, so from that day an unregistered cache is a service that will not start:
 
 ```csharp
 // Common.Infrastructure — called by each AddXInfrastructure (§4.2).
@@ -320,11 +321,17 @@ event. Both are needed — the local row keeps the writing service consistent
 with itself, the event keeps every other service consistent shortly after — and
 now both are the same mechanism.
 
-This one lives in **Ordering** — a consumer of Catalog's event, invalidating
-its own cached projections of Catalog data. It is the second of two handlers
-Ordering registers for `PriceChanged`; the other is `ProductPriceProjection`
-(§6.6), which updates the price table the write path reads. Both run through
-the same `IntegrationEventConsumer<PriceChanged>` ([§9.4](09-messaging.md)), sequentially:
+The consumer's side is **Ordering's**, and it is a shape rather than a
+registration: Ordering caches nothing through `HybridCache` today, so its one
+`PriceChanged` handler is `ProductPriceProjection` (§6.6), which updates the
+price table the write path reads. The first cached projection of Catalog data
+brings the second handler with it — in `Ordering.Infrastructure` beside the
+projection, registered by the same §6.2 scan, and run through the same
+`IntegrationEventConsumer<PriceChanged>` ([§9.4](09-messaging.md)). The scan
+pins no order between the two, and the consumer runs handlers in registration
+order, so whether the cache is emptied before or after the table is updated is
+a decision that reader takes with its handler, not one this chapter can
+promise. This is that handler:
 
 ```csharp
 namespace Ordering.Infrastructure.Caching;

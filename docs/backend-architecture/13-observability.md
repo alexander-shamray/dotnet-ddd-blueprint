@@ -1396,11 +1396,11 @@ services
     .AddHealthChecks()
     .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"])
     .AddRedis(configuration.GetConnectionString("RedisCache")!, name: "redis-cache", tags: ["ready"])
-    .AddRedis(configuration.GetConnectionString("RedisCoordination")!, name: "redis-coordination", tags: ["ready"])
     // No RabbitMQ line, deliberately: AddMassTransit registers the bus health
     // check itself — "masstransit-bus", tagged ready — see below.
-    // Observed, not gating — see the note below.
-    .AddCheck<OutboxBacklogHealthCheck>("outbox", tags: ["observe"]);
+    // No outbox line either: the backlog is observed through §13.6's gauges
+    // and alerts, and the note below says why it must not be a check.
+    .AddRedis(configuration.GetConnectionString("RedisCoordination")!, name: "redis-coordination", tags: ["ready"]);
 ```
 
 **The broker's readiness check rides in with the bus registration, not with
@@ -1530,8 +1530,8 @@ events are not being *delivered*; the service can still accept commands and
 serve queries perfectly well. Gating readiness on it means a RabbitMQ blip pulls
 every pod out of the load balancer and converts a delivery delay into a total
 outage — the failure amplifying exactly when the system is already degraded.
-The outbox is tagged `observe`, scraped for metrics and alerted on (§13.6), and
-deliberately not part of any probe.
+The outbox is a set of gauges, scraped and alerted on (§13.6), and deliberately
+not a health check at all — nothing registers one, so no probe can select it.
 
 ## 13.6 What to alert on
 
@@ -1832,7 +1832,7 @@ container is happy without it (§6.2):
 string metricsConnectionString =
     new SqlConnectionStringBuilder(configuration.GetConnectionString("Ordering"))
     {
-        ConnectTimeout = 2
+        ConnectTimeout = OutboxStats.ConnectTimeoutSeconds
     }.ConnectionString;
 
 services.AddSingleton<IOutboxStats>(sp => new OutboxStats(
@@ -2264,10 +2264,12 @@ useful before its pager is.
 
 **The pairing is a gate, not a convention.** `deploy/observability/check.py`
 fails the build on an alert whose `runbook_url` names a file that is not there,
-on a runbook no alert points at, and on a runbook claimed by two alerts. Both
-directions were observed red before the gate was trusted, which is this
-repository's rule for any gate: the failure it exists to catch has to have been
-seen.
+on a runbook no alert points at, and on a runbook claimed by two alerts that
+its `SHARED_RUNBOOKS` does not declare — §13.8's error-rate pair is the one
+declared sharer, with its reason beside it, so a second is argued for in that
+file rather than added. Both directions were observed red before the gate was
+trusted, which is this repository's rule for any gate: the failure it exists to
+catch has to have been seen.
 
 `docs/runbooks/README.md` is the index and is excluded from the pairing by
 name — one declared exception, so a second non-runbook file in that directory

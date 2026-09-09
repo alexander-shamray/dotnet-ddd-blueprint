@@ -218,7 +218,7 @@ public static class DependencyInjection
                 o.IsolationLevel = IsolationLevel.Serializable;
             });
 
-            // The scheduler §9.6's four Schedule declarations need, and the
+            // The scheduler §9.6's Schedule declarations need, and the
             // thing no chapter specified until ADR-021. This half registers
             // IMessageScheduler; the UseDelayedMessageScheduler line inside
             // the transport callback is what puts MessageSchedulerContext on

@@ -177,7 +177,7 @@ Api ──────────► Application ──────────
 | Project | May reference | Must never reference |
 |---|---|---|
 | `*.Domain` | `Common.Domain` and nothing else | EF Core, ASP.NET, Redis, MassTransit, `System.Text.Json` |
-| `*.Application` | its own Domain, `Common.Application`, `Common.Contracts` | EF Core, ASP.NET, any concrete infrastructure |
+| `*.Application` | its own Domain, `Common.Application`, `Common.Contracts`; `Dapper`, for §6.5's query handlers alone ([ADR-005](adr/ADR-005-ef-core-for-writes-dapper-for-reads.md)) | EF Core, ASP.NET, any other concrete infrastructure |
 | `*.Infrastructure` | Domain, Application, any package | another service's projects |
 | `*.Migrator` | Infrastructure, for the `DbContext` it migrates | another service's projects; anything it does not need to apply a migration |
 | `*.Api` | Application, Infrastructure (**composition root only**) | another service's projects |
@@ -595,7 +595,15 @@ public static IServiceCollection AddOrderingInfrastructure(
     services.AddScoped<IDomainEventCollector, EfDomainEventCollector>(); // §7.5
     services.AddScoped<IIntegrationEventPublisher, OutboxPublisher>();   // §9.3
     services.AddScoped<IOrderRepository, OrderRepository>();
-    services.AddSingleton<IDbConnectionFactory, SqlConnectionFactory>();
+
+    // §6.5's read side. Singleton, holding the runtime connection string and
+    // constructing per call — the connections it hands out are the caller's
+    // to dispose, so there is no scoped state to capture. An instance, not a
+    // type: SqlConnectionFactory takes the string, so a type registration has
+    // no constructor the container can satisfy, and the ValidateOnBuild in
+    // Program.cs below refuses the host before it serves a request.
+    services.AddSingleton<IDbConnectionFactory>(
+        new SqlConnectionFactory(configuration.GetConnectionString("Ordering")!));
 
     // The outbox's persisted type names (§9.4). Singleton and built here, so a
     // duplicate name fails this host at startup rather than one message at
@@ -710,8 +718,19 @@ public static IServiceCollection AddOrderingInfrastructure(
 
     // Outbox metrics (§13.6) read the database, so they belong here.
     // OrderMetrics does not — it is an Application type (§13.3) and is
-    // registered by AddOrderingApplication above.
-    services.AddSingleton<IOutboxStats, OutboxStats>();
+    // registered by AddOrderingApplication above. OutboxStats gets its OWN
+    // connection factory, bounded by OutboxStats.ConnectTimeoutSeconds: the
+    // shared IDbConnectionFactory would leave SqlClient's default on the open,
+    // and §13.6 argues why its two bounds only work together.
+    string metricsConnectionString =
+        new SqlConnectionStringBuilder(configuration.GetConnectionString("Ordering"))
+        {
+            ConnectTimeout = OutboxStats.ConnectTimeoutSeconds
+        }.ConnectionString;
+
+    services.AddSingleton<IOutboxStats>(sp => new OutboxStats(
+        new SqlConnectionFactory(metricsConnectionString),
+        sp.GetRequiredService<OutboxTable>()));
     services.AddSingleton<OutboxMetrics>();
 
     // The two delivery lags, the rejection counter and the inbox suppression
@@ -744,10 +763,11 @@ public static IServiceCollection AddOrderingInfrastructure(
         .AddHealthChecks()
         .AddSqlServer(configuration.GetConnectionString("Ordering")!, name: "sql", tags: ["ready"])
         .AddRedis(configuration.GetConnectionString("RedisCache")!, name: "redis-cache", tags: ["ready"])
-        .AddRedis(configuration.GetConnectionString("RedisCoordination")!, name: "redis-coordination", tags: ["ready"])
         // No RabbitMQ line, deliberately: AddMassTransit above registers the
         // bus health check itself — "masstransit-bus", tagged ready (§13.5).
-        .AddCheck<OutboxBacklogHealthCheck>("outbox", tags: ["observe"]);
+        // No outbox line either: the backlog is §13.6's gauges and alerts, and
+        // §13.5 says why it must not be a check.
+        .AddRedis(configuration.GetConnectionString("RedisCoordination")!, name: "redis-coordination", tags: ["ready"]);
 
     return services;
 }
