@@ -78,9 +78,10 @@ jobs:
           python-version: '3.12'
 
       # The HEAD copy, deliberately: this step's subject is the gate this
-      # pull request PROPOSES. Every test in the suite is a negative case or
-      # a read of the shipped map, so a proposal that fails its own suite
-      # belongs red here.
+      # pull request PROPOSES. The suite is negative cases with the positive
+      # controls beside them — a clean diff that must pass, a matcher that
+      # must match — plus reads of the shipped map, so a proposal that fails
+      # its own suite belongs red here.
       - name: Test the proposed gate
         working-directory: .github/locality-gate
         run: python -m unittest

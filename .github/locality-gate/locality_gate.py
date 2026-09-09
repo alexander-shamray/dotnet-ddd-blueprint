@@ -230,7 +230,24 @@ def _normalise_token(token: str, *, where: str) -> str:
     """One path-or-glob token, checked and with a trailing slash dropped."""
     if not _TOKEN.match(token) or not re.search(r"[/.]", token):
         raise InputRefused(f"{where} is not a path list")
-    if token.count("{") != token.count("}"):
+    # Braces are walked, not counted. A count accepts `docs/}a{` and, worse,
+    # `docs/a,docs/b` — a comma outside any brace, which the touch-set row
+    # can never carry because it is split on that comma first, but which a
+    # single-quoted map item hands straight here. `matcher()` turns that
+    # comma into an ungrouped `|`, and `^docs/a|docs/b(/.*)?$` matches
+    # `docs/admin` — a malformed map silently widening a class rather than
+    # being refused.
+    depth = 0
+    for character in token:
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth < 0:
+                raise InputRefused(f"{where} has an unbalanced brace")
+        elif character == "," and depth == 0:
+            raise InputRefused(f"{where} has a comma outside a brace alternation")
+    if depth != 0:
         raise InputRefused(f"{where} has an unbalanced brace")
     token = token.rstrip("/")
     # A brace alternative is a segment start too: `{../outside,docs/x.md}`

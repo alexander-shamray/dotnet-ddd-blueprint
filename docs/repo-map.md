@@ -293,8 +293,9 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              argument, and the glob dialect is
                              pr-locality.sh's so a row reads the same in the
                              harness and in CI. The suite is negative cases
-                             plus reads of the shipped map, so the gate has
-                             been observed looking at the file CI hands it
+                             with their positive controls, plus reads of the
+                             shipped map, so the gate has been observed
+                             looking at the file CI hands it
                              inventories: every deployable under src/ is
                              matched by a path filter, every Dockerfile is
                              built by some matrix entry, and every test stage

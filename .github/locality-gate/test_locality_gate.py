@@ -253,6 +253,24 @@ class MapGrammar(unittest.TestCase):
         with self.assertRaisesRegex(InputRefused, "outside the repository"):
             read_map(MAP.replace("'tests/**'", "'../tests/**'"))
 
+    def test_an_item_with_a_comma_outside_braces_is_refused_not_widened(self) -> None:
+        # A count of braces accepts `docs/a,docs/b`; matcher() would turn the
+        # comma into an ungrouped `|` and `docs/a|docs/b(/.*)?` matches
+        # `docs/admin`. The map is the one route such a token can take,
+        # because the touch-set row is split on that comma first.
+        with self.assertRaisesRegex(InputRefused, "comma outside a brace"):
+            read_map(MAP.replace("'docs/**'", "'docs/a,docs/b'"))
+
+    def test_an_item_with_reversed_braces_is_refused(self) -> None:
+        with self.assertRaisesRegex(InputRefused, "unbalanced brace"):
+            read_map(MAP.replace("'docs/**'", "'docs/}a{'"))
+
+    def test_an_item_with_a_brace_alternation_is_still_read(self) -> None:
+        loaded = read_map(MAP.replace("'docs/**'", "'docs/{a,b}/**'"))
+        self.assertIn("docs/{a,b}/**", loaded["D"])
+        self.assertTrue(matcher("docs/{a,b}/**")("docs/a/x.md"))
+        self.assertFalse(matcher("docs/{a,b}/**")("docs/admin/x.md"))
+
     def test_an_empty_map_is_refused(self) -> None:
         with self.assertRaisesRegex(InputRefused, "no entry for class A"):
             read_map("# nothing but a comment\n")
