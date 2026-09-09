@@ -85,11 +85,12 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     // ConcurrentRequestException for a day. This is valid JSON and unambiguous.
     private const string NoValue = "null";
 
-    // Result and Result<T> are the whole universe (Appendix D.5), and the two
-    // members after this one depend on that. A static field on a generic type
-    // has one instance per CLOSED type, so all three are resolved once per
-    // (TCommand, TResult) pair rather than once per command, and they run in
-    // declaration order.
+    // Result and Result<T> are the whole universe — Result's summary rules
+    // out Unit and Result<void>, and its private protected constructor rules
+    // out a third shape — and the two members after this one depend on that.
+    // A static field on a generic type has one instance per CLOSED type, so
+    // all three are resolved once per (TCommand, TResult) pair rather than
+    // once per command, and they run in declaration order.
     private static readonly Type? ValueType = ValueTypeOf();
 
     private static readonly PropertyInfo? ValueProperty =
@@ -100,9 +101,9 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     // is INTERNAL and this behaviour is in the same assembly, so it is
     // reachable, and Success<T> guards nothing the constructor does not: it is
     // `=> new(value, null)`. What it is, is the type's stated construction API
-    // (Appendix D.5), and that is the whole of the reason. The state invariant
-    // needs neither: IsSuccess is defined as the absence of an error, so
-    // success-carrying-an-error is unreachable by any route.
+    // (Result<T>'s own summary), and that is the whole of the reason. The state
+    // invariant needs neither: IsSuccess is defined as the absence of an error,
+    // so success-carrying-an-error is unreachable by any route.
     private static readonly MethodInfo? SuccessOfValue = ValueType is null
         ? null
         : typeof(Result)
@@ -204,10 +205,10 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
 
     // The claim belongs to one subject, bound from the principal and never from
     // the command (§11.4). IsAuthenticated is false for BOTH a message-borne
-    // command and an anonymous HTTP request (Appendix D.1), so this segment is
-    // shared rather than unique — which is a residual, argued in §8.5, not a
-    // detail. It cannot collide with an authenticated subject: the alternative
-    // is a Guid rendered "D", and no Guid spells a word.
+    // command and an anonymous HTTP request (its own summary), so this
+    // segment is shared rather than unique — which is a residual, argued in
+    // §8.5, not a detail. It cannot collide with an authenticated subject: the
+    // alternative is a Guid rendered "D", and no Guid spells a word.
     private string Subject() => currentUser.IsAuthenticated ? currentUser.Id.ToString() : "system";
 
     // Only a success is ever stored, and what is stored is its VALUE — never

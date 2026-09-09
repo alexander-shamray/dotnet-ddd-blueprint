@@ -6,9 +6,9 @@ namespace Catalog.Domain.Products;
 /// <summary>
 /// Catalog's Product — a marketing object, which is not Inventory's SKU-and-a-
 /// number and must not share a class with it (§3.1). The first slice carries
-/// exactly what the <c>ProductPublished</c> contract needs (Appendix D.5);
-/// categories, richer media and the discontinue lifecycle arrive with the PRs
-/// whose contracts need them.
+/// exactly what the <c>ProductPublished</c> contract declares in
+/// <c>Common.Contracts.Catalog.V1</c>; categories, richer media and the
+/// discontinue lifecycle arrive with the PRs whose contracts need them.
 /// </summary>
 /// <remarks>
 /// The §5.4 shape: no public setters, no parameterless public constructor, no
