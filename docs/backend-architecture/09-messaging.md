@@ -2804,8 +2804,9 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
 
         // The only wait whose far end is this same service, so its floor is
         // §9.8's retry budget on ordering-commands rather than a peer: five
-        // attempts backing off to a minute apiece, and a bound inside that
-        // would fire while the command was still being legitimately retried.
+        // retries over roughly seventy seconds — six deliveries counting the
+        // first — and a bound inside that would fire while the command was
+        // still being legitimately retried.
         // It escalates rather than compensating, on the despatch timeout's
         // argument below — the card is authorised by the time this wait
         // begins, and §3.2 gives Ordering no refund command.
@@ -4884,10 +4885,10 @@ cfg.ReceiveEndpoint(
 > it would stage a third time on a path that has no dual write.
 >
 > **Both inboxes stay.** `InboxFilter<>` is §9.5's long-window duplicate
-> suppressor on §9.4's retention; MassTransit's `InboxState` is a short-window
-> delivery record on its own, and it is how the outbox filter knows which of
-> the committed messages it has already sent. Retiring either costs a guarantee
-> the other never made.
+> suppressor on `RetentionPolicy`'s window; MassTransit's `InboxState` is a
+> short-window delivery record on its own, and it is how the outbox filter
+> knows which of the committed messages it has already sent. Retiring either
+> costs a guarantee the other never made.
 
 > **The saga's exemption was wrong in both halves, and PR-21 removed it.** It
 > read: no `InboxFilter` here, because a state machine's state is its
