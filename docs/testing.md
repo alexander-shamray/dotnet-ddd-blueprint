@@ -42,8 +42,8 @@ the pull request correcting the sentence around it. What a reader can check is
 whether this block matches the workflows that run them, which needs no
 numeral. **Workflows, plural, and not `ci.yml`
 alone** — ADR-036's broker ACL runs in `broker-permissions.yml`, so a check
-aimed at the one file misses a suite that is in this block and was, until
-recently, missing from `CLAUDE.md`'s enumeration as well.
+aimed at the one file misses a suite that is in this block and was, for a
+while, missing from the enumeration `CLAUDE.md` then carried as well.
 
 ```bash
 dotnet tool restore                # dotnet-ef, pinned in .config/
@@ -103,12 +103,15 @@ helpers under `.claude/scripts/`. None
 is in `Platform.slnx`, so a green solution says nothing about any of them,
 which is exactly why a person needs to be told they exist.
 
-**ADR-036's broker ACL was missing from that list until this change**, and
-`CLAUDE.md`'s enumeration already carried it — which is what made the gap here
-visible at all, since the paragraph above the block tells a reader to compare
-the two. A prose list of what each suite covers is a second enumeration of
-the block above it, so it goes stale on the block's clock and nothing
-structural reads either.
+**ADR-036's broker ACL was once missing from that list**, and the gap was
+caught because a second enumeration in `CLAUDE.md` carried it. That
+enumeration no longer exists — it was folded into this file, as the paragraph
+below beginning *`CLAUDE.md` was the third holder* records — so the
+comparison that caught it is gone, and what replaces it is the check the
+paragraph above the block names: this block against the workflows that run
+it. A prose list of what each suite covers is a second enumeration of the
+block above it, so it goes stale on the block's clock and nothing structural
+reads either.
 
 **The review helpers' suite needs `bash`, `grep`, `git` and `jq`, and no
 network** — the `gh` its
@@ -515,7 +518,7 @@ dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests&Catego
 dotnet test Platform.slnx --filter "Category=Integration" \
     --collect:"Code Coverage" --settings coverage.runsettings \
     --results-directory ./TestResults/integration
-python .github/coverage/domain_coverage.py ./TestResults/unit ./TestResults/integration
+py -3.12 .github/coverage/domain_coverage.py ./TestResults/unit ./TestResults/integration
 ```
 
 **Both stages, because the figure is the union and not either half.** §12.9

@@ -19,6 +19,7 @@
 | Application | One handler end to end | Real DB and Redis (containers), fakes for other services | < 500 ms | Tens | `*.Application.Tests` |
 | API contract | HTTP in, HTTP out | `WebApplicationFactory` + containers | < 1 s | Tens | `*.Api.Tests` |
 | Host building block | One middleware or host extension | `TestServer` — no containers, no entry point | < 50 ms | Tens | `Common.Web.Tests` |
+| Infrastructure building block | One §9 or §8 mechanism — a consumer wrapper, the outbox's table and type map, the idempotency store, the lock, the retention policy | Recording fakes for most; a real Redis (container) for the classes in its `Integration` collection, where the mechanism under test is Redis's | < 10 ms, and < 500 ms against Redis | Tens | `Common.Infrastructure.Tests` |
 | Edge configuration | The route file of §10.2 against the host that loaded it, and §10.1's edge behaviours — compression and the body ceiling | `WebApplicationFactory` + a stub destination on loopback — no containers, and `UseKestrel` where the property under test is the server's own | < 1 s | One suite | `Gateway.Api.Tests` |
 | Outbound hop | §9.7's one synchronous call: the timeout hierarchy read off the built host, the credential handler's position inside the resilience pipeline, and §11.5's realm | `WebApplicationFactory` + a real gRPC server on loopback; one class also runs a real Keycloak | < 1 s, and seconds for the Keycloak class | One suite | `Web.Bff.Tests` |
 | Pipeline behaviour | One §6.3 behaviour against recording fakes — the branches its handler-level tests cannot reach | None | < 10 ms | One suite per behaviour | `Common.Application.Tests` |
@@ -77,9 +78,12 @@ about the pyramid. Where they disagree, this chapter wins.
 > `xunit.runner.visualstudio` is a separate package ([Appendix B](appendix-b-licences.md)).
 > Leave it off a test project and the build succeeds, the run reports no tests,
 > and the process exits **zero** — green CI over a suite nothing executed. Every
-> project under `tests/` references all three of `xunit.v3`, the adapter and
-> `Microsoft.NET.Test.Sdk`, and the one that goes missing is the one nothing
-> turns red about.
+> test project under `tests/` references all three of `xunit.v3`, the adapter
+> and `Microsoft.NET.Test.Sdk`, and the one that goes missing is the one
+> nothing turns red about. The `*.TestSupport` libraries reference none of the
+> three: they are not test projects (§4.1), hold no `[Fact]`, and take the
+> fixture contract from `xunit.v3.extensibility.core` instead, which is what
+> lets a library share a fixture without becoming a suite.
 
 ## 12.2 The TDD cycle applied
 
@@ -1778,9 +1782,9 @@ public async Task The_service_receives_the_path_with_the_namespace_prefix_remove
 
 ### The outbound hop
 
-The pyramid's last row is `Web.Bff.Tests`, and it exists because §9.7's one
-synchronous call has three properties no other suite can reach: a timeout
-hierarchy, a credential handler's *position*, and a realm that nothing
+The pyramid's outbound-hop row is `Web.Bff.Tests`, and it exists because
+§9.7's one synchronous call has three properties no other suite can reach: a
+timeout hierarchy, a credential handler's *position*, and a realm that nothing
 compiles against.
 
 The hierarchy is read off the **built host** rather than recomputed from the
@@ -2633,17 +2637,23 @@ That last sentence is an instruction until something measures it, so
 `coverage.runsettings` does:
 
 ```bash
-dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests" \
+dotnet test Platform.slnx --filter "FullyQualifiedName!~ArchitectureTests&Category!=Integration" \
     --collect:"Code Coverage" --settings coverage.runsettings \
-    --results-directory ./TestResults
+    --results-directory ./TestResults/unit
+dotnet test Platform.slnx --filter "Category=Integration" \
+    --collect:"Code Coverage" --settings coverage.runsettings \
+    --results-directory ./TestResults/integration
+py -3.12 .github/coverage/domain_coverage.py ./TestResults/unit ./TestResults/integration
 ```
 
 **Both flags after the settings file are load-bearing.** Without
 `--results-directory` the collector writes under each test project's own
 `TestResults/` rather than the repo root, so the reporter finds nothing; the
 filter is what keeps §4.2's gates out of the instrumented run, for the reason
-the callout below gives. `docs/testing.md` carries the reporting command that
-follows it.
+the callout below gives. Two invocations rather than one, because the figure
+is a union across §15.1's stages — the paragraph on the union below says why
+— and `docs/testing.md` carries the same three lines beside every other
+runner.
 
 The file filters the report to `.*\.Domain\.dll$` and emits Cobertura, and CI
 prints the figure to the job summary. **Reported, never gated** — a diagnostic

@@ -49,9 +49,10 @@ that was already finished — an unusually good position to estimate from. The
 blueprint names the types, the tests, the failure modes and the migration
 shapes, so most of what normally hides inside an estimate has already been
 argued out in ~10,500 lines of prose — the blueprint's size when these
-estimates were quoted, against ~24,600 today. The figure here is deliberately
-the historical one, because it is what the estimates were made against;
-`CLAUDE.md` carries the live count.
+estimates were quoted. The figure here is deliberately the historical one,
+because it is what the estimates were made against; no file carries a live
+count, because [`change-locality.md`](change-locality.md) §2 forbids one, and
+`wc -l` over `docs/backend-architecture/` is the measurement.
 
 It is also the trap. A specification this precise makes an estimate feel
 measured when it is still a guess, and the numbers below have the same standing
