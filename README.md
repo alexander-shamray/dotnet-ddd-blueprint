@@ -15,4 +15,4 @@ Covers bounded contexts and service decomposition, solution structure, tactical 
 CQRS, persistence, Redis caching, messaging and the outbox pattern, API gateway,
 identity and authorization, test strategy, observability, local development, and
 CI/CD — plus appendices with architecture decision records, a dependency licence
-register, a delivery plan and the names the samples elide.
+register, a delivery plan and the names the solution does not declare.

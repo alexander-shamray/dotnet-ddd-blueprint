@@ -1,4 +1,4 @@
-# Appendix D — Names the samples elide
+# Appendix D — Names the solution does not declare
 
 Code samples in this document are excerpts, not compilable units, and most of
 what they name is code. A type or member declared under `src/` or `tests/` is
@@ -42,7 +42,8 @@ NSubstitute, Testcontainers, Respawn, Scrutor, FluentValidation, NetArchTest
 and Aspire types are assumed — including the ones the samples name outright,
 such as `TestResult` (§4.2), `IProxyStateLookup` ([§12.4](12-test-strategy.md))
 and `IResourceBuilder<ProjectResource>` (§14.2). A library type a sample names
-is a row in [Appendix B](appendix-b-licences.md), and nothing here.
+belongs to a package with a row in [Appendix B](appendix-b-licences.md), and
+nothing here.
 
 **The base class library and `Microsoft.Extensions.*` are assumed on the same
 terms**, and the family is named here rather than left implicit because a rule
