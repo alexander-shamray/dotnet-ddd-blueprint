@@ -238,9 +238,9 @@ public class OrderFulfilmentSagaTests
                 }
 
                 // A scheduled expiry is not a contract and has no envelope —
-                // the remarks on FulfilmentTimeouts.cs's records say why — so
-                // the send context is what both kinds have. That, not a second
-                // identity, is why the wait reads it.
+                // the remarks on StockReservationExpired, which its siblings
+                // inherit, say why — so the send context is what both kinds
+                // have. That, not a second identity, is why the wait reads it.
                 messageId = context.MessageId;
             },
             TestContext.Current.CancellationToken);
