@@ -238,7 +238,7 @@ public class OrderFulfilmentSagaTests
                 }
 
                 // A scheduled expiry is not a contract and has no envelope —
-                // the summary on FulfilmentTimeouts.cs's records says why — so
+                // the remarks on FulfilmentTimeouts.cs's records say why — so
                 // the send context is what both kinds have. That, not a second
                 // identity, is why the wait reads it.
                 messageId = context.MessageId;
@@ -277,9 +277,9 @@ public class OrderFulfilmentSagaTests
     /// <see cref="Publish"/> writes it there — §9.1's body, row, header and
     /// inbox key are one GUID, and nothing here is entitled to a second. The
     /// send context is read rather than the payload because the saga's
-    /// scheduled expiries are not contracts and have no envelope — the summary
-    /// on <see cref="StockReservationExpired"/> and its siblings says why; it
-    /// is the one handle both kinds carry, not a different id.
+    /// scheduled expiries are not contracts and have no envelope — the remarks
+    /// on <see cref="StockReservationExpired"/>, which its siblings inherit,
+    /// say why; it is the one handle both kinds carry, not a different id.
     /// </remarks>
     private static Task<bool> ConsumedWithId<T>(ITestHarness harness, Guid? messageId)
         where T : class =>

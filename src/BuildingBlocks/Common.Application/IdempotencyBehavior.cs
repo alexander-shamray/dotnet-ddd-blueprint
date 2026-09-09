@@ -86,11 +86,12 @@ public sealed class IdempotencyBehavior<TCommand, TResult>(
     private const string NoValue = "null";
 
     // Result and Result<T> are the whole universe — Result's summary rules
-    // out Unit and Result<void>, and its private protected constructor rules
-    // out a third shape — and the two members after this one depend on that.
-    // A static field on a generic type has one instance per CLOSED type, so
-    // all three are resolved once per (TCommand, TResult) pair rather than
-    // once per command, and they run in declaration order.
+    // out Unit and Result<void>, and its private protected constructor
+    // confines a third shape to this assembly, where ValueTypeOf refuses it
+    // — and the two members after this one depend on that. A static field
+    // on a generic type has one instance per CLOSED type, so all three are
+    // resolved once per (TCommand, TResult) pair rather than once per
+    // command, and they run in declaration order.
     private static readonly Type? ValueType = ValueTypeOf();
 
     private static readonly PropertyInfo? ValueProperty =
