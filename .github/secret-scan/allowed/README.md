@@ -38,10 +38,12 @@ somebody looks at it twice. A per-tree file sitting *beside* the code it
 suppresses would be the inline pragma this gate refuses, spelt as a path
 instead of a comment.
 
-A file that declares no `covers:` may hold no entry, and says so per entry
-rather than passing them through unscoped — an undeclared file that suppressed
-anything would be the single shared list back again, one missing line at a
-time.
+A file that declares no `covers:` is refused outright, entries or not. Judging
+it per entry let an empty or comment-only `.txt` through in silence, which is
+an ownerless file somebody meant to fill in — and the moment they do, it
+inherits whatever the reader assumed it covered. The directive also has to sit
+above the first entry, because below one it reads as though the lines over it
+were covered by something else.
 
 ## What an entry may say
 

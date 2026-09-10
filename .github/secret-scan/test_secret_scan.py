@@ -33,11 +33,11 @@ def found(rule_id: str, text: str) -> list[str]:
     return [finding.secret for finding in secret_scan.scan_text("probe.txt", text, [rule])]
 
 
-# Every synthetic entry in this file names `a.txt`, so that is the tree these
-# fixtures declare. A `covers:` prefix may be as narrow as one path — the check
-# is `startswith`, and narrower is strictly safer — and the alternative here
-# would be a fixture that covers everything, which is the one shape the
-# directive exists to make unwritable.
+# Every synthetic entry in this file names `a.txt`, so that is what these
+# fixtures declare — and a declaration without a trailing slash names one exact
+# path rather than a tree, which is precisely the shape wanted here. The
+# alternative would be a fixture covering everything, which is the one thing
+# the directive exists to make unwritable.
 COVERS = "a.txt"
 
 
@@ -501,6 +501,44 @@ class AllowList(unittest.TestCase):
             covers=None)
         self.assertEqual(len(problems), 1)
         self.assertIn("declares no `# covers:", problems[0])
+
+    def test_rejects_a_file_that_declares_no_tree_even_with_no_entries(self):
+        # An empty or comment-only `.txt` has no entry to complain about, so
+        # judging the rule per entry let it through in silence — while the
+        # grammar says every file declares exactly one tree. An ownerless file
+        # is one somebody meant to fill in, and the moment they do it inherits
+        # whatever the reader assumed it covered.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ownerless.txt"
+            path.write_text("# a header and nothing else\n", encoding="utf-8")
+            entries, problems = secret_scan.read_allowed(path)
+
+        self.assertEqual([], entries)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("declares no `# covers:", problems[0])
+
+    def test_an_ownerless_file_is_one_complaint_and_not_one_per_entry(self):
+        # The same refusal, from the other side: three entries in a file that
+        # declares nothing is one thing wrong with the FILE.
+        entry = "a.txt | credential-assignment | abc123def456 | A perfectly good reason."
+        entries, problems = parse_with(entry, entry, entry, covers=None)
+        self.assertEqual([], entries)
+        self.assertEqual(len(problems), 1)
+
+    def test_rejects_a_directive_below_the_first_entry(self):
+        # The grammar says the directive comes before the first entry, so it is
+        # enforced rather than trusted: below one, it reads to anyone scanning
+        # the file as though the lines above were covered by something else.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "late.txt"
+            path.write_text(
+                "a.txt | credential-assignment | abc123def456 | Above the directive.\n"
+                "# covers: a.txt\n",
+                encoding="utf-8")
+            _, problems = secret_scan.read_allowed(path)
+
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is below the entry on line 1", problems[0])
 
     def test_rejects_a_second_covers_directive(self):
         with tempfile.TemporaryDirectory() as directory:

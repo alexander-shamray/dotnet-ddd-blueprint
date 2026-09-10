@@ -498,20 +498,53 @@ def read_allowed_file(
     entries: list[Suppression] = []
     problems: list[str] = []
     covers: str | None = None
+    declared_at: int | None = None
+    first_entry: int | None = None
+    lines = path.read_text(encoding="utf-8").splitlines()
 
-    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    # **The directive gets its own pass, and a file without one is refused as a
+    # FILE.** Judging it per entry let an empty or comment-only `.txt` through
+    # in silence — no entries, so nothing to complain about — while the grammar
+    # says every allow-list file declares exactly one tree. An ownerless file
+    # sitting in the directory is a file somebody meant to fill in, and the
+    # moment they do it inherits whatever the reader assumed.
+    for number, raw in enumerate(lines, start=1):
         line = raw.strip()
         if not line:
             continue
-        if line.startswith("#"):
-            if (declaration := COVERS.fullmatch(line)) is not None:
-                if covers is not None:
-                    problems.append(
-                        f"{path.name}:{number}: a second `covers:` directive. One "
-                        f"file speaks for one tree, or the prefix below it means "
-                        f"nothing")
-                    continue
-                covers = declaration.group(1)
+        if not line.startswith("#"):
+            if first_entry is None:
+                first_entry = number
+            continue
+        if (declaration := COVERS.fullmatch(line)) is None:
+            continue
+        if covers is not None:
+            problems.append(
+                f"{path.name}:{number}: a second `covers:` directive. One "
+                f"file speaks for one tree, or the prefix below it means "
+                f"nothing")
+            continue
+        covers, declared_at = declaration.group(1), number
+
+    if covers is None:
+        problems.append(
+            f"{path.name}: declares no `# covers: <prefix>`, so it speaks for no "
+            f"tree. Every allow-list file declares exactly one, before its first "
+            f"entry")
+        return [], problems, None
+
+    # Stated in the grammar, so enforced rather than trusted: a directive below
+    # an entry reads, to anyone scanning the file, as though the lines above it
+    # were covered by something else.
+    if first_entry is not None and declared_at > first_entry:
+        problems.append(
+            f"{path.name}:{declared_at}: the `covers:` directive is below the entry "
+            f"on line {first_entry}. It declares the whole file, so it goes above "
+            f"the first entry where a reader will find it")
+
+    for number, raw in enumerate(lines, start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
             continue
 
         fields = [field.strip() for field in line.split("|")]
@@ -540,15 +573,7 @@ def read_allowed_file(
 
         # The prefix, before the reason, because an entry in the wrong file is
         # the failure this directive exists for and the reason it carries has
-        # no bearing on it. A file with no directive at all refuses every entry
-        # rather than accepting them unscoped: an undeclared file that
-        # suppressed anything would be the single shared list back again, one
-        # missing line at a time.
-        if covers is None:
-            problems.append(
-                f"{path.name}:{number}: the file declares no `# covers: <prefix>`, "
-                f"so it speaks for no tree and may hold no entry")
-            continue
+        # no bearing on it.
         if not covers_path(covers, entry_path):
             problems.append(
                 f"{path.name}:{number}: `{entry_path}` is outside `{covers}`, which "
