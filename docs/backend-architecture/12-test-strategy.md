@@ -502,30 +502,40 @@ public sealed class ServiceFixture : IAsyncLifetime
             .QueryAsync(query, ct);
     }
 
-    public IDbConnection CreateConnection() => new SqlConnection(_sql.GetConnectionString());
+    /// <summary>
+    /// Runs a statement outside any unit of work, for arranging. Placeholders
+    /// are {0}-style and EF turns each into a real SQL parameter — a formatted
+    /// string here would be both an injection shape and a CA1305.
+    /// </summary>
+    public async Task ExecuteAsync(string sql, params object[] parameters)
+    {
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+
+        await db.Database.ExecuteSqlRawAsync(sql, parameters, TestContext.Current.CancellationToken);
+    }
 
     /// <summary>
     /// Seeds the price projection (§6.6). Required before any PlaceOrder test:
     /// the handler reads prices locally, so an unseeded projection makes every
     /// order fail ProductsUnavailable rather than erroring visibly.
     /// </summary>
-    public async Task SeedPriceAsync(Guid productId, decimal amount, string currency = "EUR")
-    {
-        using IDbConnection connection = CreateConnection();
-        await connection.ExecuteAsync(
+    public Task SeedPriceAsync(Guid productId, decimal amount, string currency = "EUR") =>
+        ExecuteAsync(
             """
             MERGE ordering.ProductPrices AS t
-            USING (SELECT ProductId = @productId, Currency = @currency) AS s
+            USING (SELECT ProductId = {0}, Currency = {1}) AS s
                 ON t.ProductId = s.ProductId
                 AND t.Currency = s.Currency
             WHEN NOT MATCHED THEN
                 INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
-                VALUES (@productId, @currency, @amount, 1, SYSDATETIMEOFFSET())
+                VALUES ({0}, {1}, {2}, 1, SYSDATETIMEOFFSET())
             WHEN MATCHED THEN
-                UPDATE SET Amount = @amount, IsAvailable = 1, UpdatedAt = SYSDATETIMEOFFSET();
+                UPDATE SET Amount = {2}, IsAvailable = 1, UpdatedAt = SYSDATETIMEOFFSET();
             """,
-            new { productId, amount, currency });
-    }
+            productId,
+            currency,
+            amount);
 
     /// <summary>
     /// Persists a real aggregate through the DbContext, so the row satisfies
@@ -566,25 +576,19 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// writes. Explicit rather than hidden in a builder, so no state carries
     /// between tests (§12.8).
     /// </summary>
-    public async Task SetOutboxAttemptsAsync(Guid messageId, int attempts)
-    {
-        using IDbConnection connection = CreateConnection();
-        await connection.ExecuteAsync(
-            "UPDATE ordering.OutboxMessages SET Attempts = @attempts WHERE MessageId = @messageId;",
-            new { attempts, messageId });
-    }
+    public Task SetOutboxAttemptsAsync(Guid messageId, int attempts) =>
+        ExecuteAsync(
+            "UPDATE ordering.OutboxMessages SET Attempts = {0} WHERE MessageId = {1};",
+            attempts,
+            messageId);
 
     /// <summary>
     /// Clears retry backoff leases so the next pass is gated only by the
     /// attempt cap. Lets a test distinguish "backed off" from "abandoned"
     /// without sleeping.
     /// </summary>
-    public async Task ExpireOutboxLeasesAsync()
-    {
-        using IDbConnection connection = CreateConnection();
-        await connection.ExecuteAsync(
-            "UPDATE ordering.OutboxMessages SET LockedUntil = NULL WHERE ProcessedAt IS NULL;");
-    }
+    public Task ExpireOutboxLeasesAsync() =>
+        ExecuteAsync("UPDATE ordering.OutboxMessages SET LockedUntil = NULL WHERE ProcessedAt IS NULL;");
 
     public async ValueTask DisposeAsync()
     {
@@ -986,13 +990,14 @@ single-identity rule of [§9.1](09-messaging.md), and it takes no fixture at all
 can regress is a pure function:
 
 ```csharp
-// Same project (Ordering.Application.Tests), no [Collection] and no fixture:
-// Stage touches nothing. It is not a §12.3 test either — that level is
-// *.Domain.Tests, and OutboxMessage is Common.Infrastructure. A fast test does
-// not have to be a domain test, and moving it to reach a container it does not
-// use is how a suite acquires a minute of startup for one assertion.
+// Common.Infrastructure.Tests, no [Collection] and no fixture: Stage touches
+// nothing. It is not a §12.3 test either — that level is *.Domain.Tests, and
+// OutboxMessage is Common.Infrastructure, which is where §12.1's table homes
+// the outbox's table and type map. A fast test does not have to be a domain
+// test, and moving it to reach a container it does not use is how a suite
+// acquires a minute of startup for one assertion.
 [Fact]
-public void Stage_takes_the_message_id_from_the_envelope()
+public void Stage_takes_both_identities_from_the_envelope()
 {
     V1.OrderPlaced placed = Contracts.OrderPlaced(SeedData.OrderId);
 
@@ -1692,8 +1697,9 @@ public void An_unknown_reason_code_never_becomes_a_command()
 ```
 
 No `[Collection]` and no fixture: the mapper is a pure function, so this sits
-beside `Stage_takes_the_message_id_from_the_envelope` above — same project, same
-absence of infrastructure — rather than inside the container-backed class. It is
+beside `Stage_takes_both_identities_from_the_envelope` above — a different
+project, the same absence of infrastructure — rather than inside the
+container-backed class. It is
 the second half of a boundary whose first half is the endpoint's literal, and
 that half is already covered: the API-contract tests reach the handler through
 HTTP, so they fail if `User` stops being stamped.
