@@ -430,7 +430,12 @@ class WhatItWrites(Stubbed):
                        "standardFlowEnabled": True,
                        "implicitFlowEnabled": False,
                        "directAccessGrantsEnabled": False,
-                       "attributes": {"use.refresh.tokens": "true"}}])
+                       "publicClient": True,
+                       "redirectUris": ["blueprint://auth/callback"],
+                       "defaultClientScopes": ["web-origins", "acr", "profile", "roles",
+                                               "basic", "commerce-api", "email"],
+                       "attributes": {"use.refresh.tokens": "true",
+                                      "pkce.code.challenge.method": "S256"}}])
         self.assertEqual(self.run_main(), 0)
 
         # Read back through the deploy path's own two calls, not through json.
@@ -457,7 +462,12 @@ class WhatItWrites(Stubbed):
                        "standardFlowEnabled": True,
                        "implicitFlowEnabled": False,
                        "directAccessGrantsEnabled": False,
-                       "attributes": {"use.refresh.tokens": "true"}}])
+                       "publicClient": True,
+                       "redirectUris": ["blueprint://auth/callback"],
+                       "defaultClientScopes": ["web-origins", "acr", "profile", "roles",
+                                               "basic", "commerce-api", "email"],
+                       "attributes": {"use.refresh.tokens": "true",
+                                      "pkce.code.challenge.method": "S256"}}])
         self.run_main()
         found = realm_check.check_realm(
             realm_check.load_realm(self.out), realm_check.DEPLOYED, 300)

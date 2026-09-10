@@ -179,17 +179,32 @@ REDACTED = "<redacted by realm_check>"
 # A projection inverts that. `judged` builds a new document out of the named
 # fields below, so what the checks hold has no credential in it to leak — not a
 # redacted one, none — and a Keycloak version that adds a new secret-bearing
-# field changes nothing here. An allow-list of eight keys is also the honest
+# field changes nothing here. An allow-list of twelve keys is also the honest
 # statement of what this gate reads.
 #
 # `revokeRefreshToken` and `refreshTokenMaxReuse` joined the realm fields with
 # the mobile client rather than before it: a realm that issues no refresh
 # token has nothing for either setting to bound, so the two were not this
 # gate's business until a client existed whose refresh token they rotate.
+#
+# `redirectUris`, `publicClient`, `defaultClientScopes` and
+# `pkce.code.challenge.method` joined on the same terms and for the same
+# client: this is an extension point, not a closed set — the six keys that
+# were here before `mobile-app` existed were never a ceiling, only what the
+# checks read up to that point. On a secretless public client whose redirect
+# target is a custom URI scheme any app on the device can register, these
+# four are not incidental configuration: a widened `redirectUris` is direct
+# token exfiltration, a `pkce.code.challenge.method` weakened to `plain` is
+# the authorization-code interception attack PKCE exists to prevent, a
+# `publicClient` flipped to `false` is a confidential-client posture the app
+# cannot actually keep (it ships with no secret it can hide), and a dropped
+# `commerce-api` scope is a token with no audience or permission claim.
 REALM_FIELDS = ("accessTokenLifespan", "revokeRefreshToken", "refreshTokenMaxReuse")
 CLIENT_FIELDS = ("clientId", "standardFlowEnabled", "implicitFlowEnabled",
-                 "directAccessGrantsEnabled")
-CLIENT_ATTRIBUTES = ("use.refresh.tokens", "access.token.lifespan")
+                 "directAccessGrantsEnabled", "publicClient", "redirectUris",
+                 "defaultClientScopes")
+CLIENT_ATTRIBUTES = ("use.refresh.tokens", "access.token.lifespan",
+                     "pkce.code.challenge.method")
 
 LOCAL = "local"
 DEPLOYED = "deployed"
@@ -639,7 +654,7 @@ def check_browser_client(client: dict, kind: str) -> list[str]:
 
 
 def check_mobile_client(client: dict) -> list[str]:
-    """The native client's refresh-token obligation, `check_browser_client`'s mirror.
+    """The native client's whole shape, not only the refresh-token half of it.
 
     `web-app` runs in a browser, where a refresh token is reachable by any
     script on the origin — ADR-034's reason to withhold one. `mobile-app` runs
@@ -654,6 +669,27 @@ def check_mobile_client(client: dict) -> list[str]:
     `directAccessGrantsEnabled` to `false` unconditionally, because nothing
     documents a password-grant login for the native client in either realm —
     §14.1's curl recipe is `web-app`'s alone.
+
+    The four checks below this function's first draft omitted are not a
+    second tier of the obligation — on a secretless public client a wrong
+    answer to any one of them is a live exploit, not a configuration
+    preference, in ascending severity:
+
+    - `pkce.code.challenge.method` weakened from `S256` to `plain` (or
+      dropped) reopens the authorization-code interception attack PKCE
+      exists to close, on the one client in this realm with no secret to
+      fall back on.
+    - `redirectUris` widened — a second entry, a wildcard, an `http://`
+      scheme alongside the custom one — is a code (and, given the refresh
+      token this client holds, ultimately a token) delivered to whatever
+      app or page the widened pattern also matches.
+    - `defaultClientScopes` missing `commerce-api` mints a token with no
+      audience and no permission claim, silently, for the one caller this
+      realm expects to carry both.
+    - `publicClient` flipped to `false` claims a confidential-client posture
+      this app cannot keep: it ships with no secret it could hide, so
+      Keycloak's client-secret authentication would be satisfied by a value
+      baked into every install of it.
     """
     problems: list[str] = []
     attributes = client.get("attributes")
@@ -691,6 +727,41 @@ def check_mobile_client(client: dict) -> list[str]:
             f"{grants!r}. The native client authenticates through the "
             "authorization-code flow with PKCE; nothing documents a password "
             "grant for it, in either realm kind")
+
+    method = attributes.get("pkce.code.challenge.method")
+    if method != "S256":
+        problems.append(
+            f"client {MOBILE_CLIENT!r} sets pkce.code.challenge.method to "
+            f"{method!r}, not \"S256\". This client holds no secret, so PKCE "
+            "is the only thing standing between an intercepted authorization "
+            "code and the attacker who intercepted it — 'plain' or absent "
+            "both leave that door open")
+
+    if client.get("publicClient") is not True:
+        problems.append(
+            f"client {MOBILE_CLIENT!r} has publicClient="
+            f"{client.get('publicClient')!r}. It ships with no secret it "
+            "could keep confidential — every install of the app carries the "
+            "same one — so a client-secret posture is a credential baked "
+            "into the binary rather than a real one")
+
+    redirects = client.get("redirectUris")
+    if redirects != ["blueprint://auth/callback"]:
+        problems.append(
+            f"client {MOBILE_CLIENT!r} has redirectUris={redirects!r}, not "
+            "exactly [\"blueprint://auth/callback\"]. Widening this — a second "
+            "entry, a wildcard, an http(s) scheme beside the custom one — is "
+            "a code, and through it a refresh token, delivered wherever the "
+            "wider pattern also matches")
+
+    scopes = client.get("defaultClientScopes")
+    if not isinstance(scopes, list) or "commerce-api" not in scopes:
+        problems.append(
+            f"client {MOBILE_CLIENT!r} does not hold commerce-api as a "
+            "default client scope. A client-issued token with this scope "
+            "missing carries no audience and no permission claim, and every "
+            "request it makes is refused with nothing in this file's own "
+            "checks to say why")
     return problems
 
 
@@ -701,9 +772,22 @@ def check_refresh_token_rotation(realm: dict) -> list[str]:
     per-client override in Keycloak, so they are checked once here rather than
     folded into `check_mobile_client` — a realm that got rotation right for
     one client and wrong for another is not a shape Keycloak can produce.
-    `web-app` is untouched by either: ADR-034 leaves it no refresh token to
-    rotate, so a realm-wide setting is not a second exposure for the client
-    the setting was never written for.
+
+    Every client in this realm holds a refresh token to rotate except one, and
+    the one is not `web-app` — ADR-034 already leaves the browser none, which
+    makes it an easy exception. It is `web-bff`: a confidential, server-side
+    client with a secret worth protecting, which is exactly where
+    `refreshTokenMaxReuse: 0` would bite hardest on a pair of concurrent
+    requests racing to refresh the same token. `web-bff` is out of range on a
+    narrower fact than "it is not the browser" — `standardFlowEnabled: false`
+    (`RealmClientTests.No_flow_can_obtain_a_token_as_a_person_through_it`)
+    means it runs no authorization-code flow and so is issued no refresh
+    token of that kind to rotate in the first place; its own tokens come from
+    the client-credentials grant, which mints none. Every other standard-flow
+    client in the shipped realm is one of Keycloak's own built-in consoles
+    (`account`, `security-admin-console`, and the rest), which are built to
+    tolerate rotation — so realm-wide is not a second exposure for anything
+    that is actually exposed by it.
 
     Called only once a mobile client has been found (`check_realm`'s `if
     mobile:` guard), on the same reasoning `check_browser_client` is guarded

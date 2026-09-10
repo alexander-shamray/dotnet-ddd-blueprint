@@ -46,14 +46,18 @@ def browser(**overrides) -> dict:
 
 
 def mobile(**overrides) -> dict:
-    """A compliant `mobile-app`: refresh token, standard flow, no password grant."""
+    """A compliant `mobile-app`: refresh token, standard flow, no password grant,
+    PKCE-only authentication, and the fixed redirect URI and default scope."""
     client = {
         "clientId": realm_check.MOBILE_CLIENT,
         "standardFlowEnabled": True,
         "implicitFlowEnabled": False,
         "directAccessGrantsEnabled": False,
         "publicClient": True,
-        "attributes": {"use.refresh.tokens": "true"},
+        "redirectUris": ["blueprint://auth/callback"],
+        "defaultClientScopes": [
+            "web-origins", "acr", "profile", "roles", "basic", "commerce-api", "email"],
+        "attributes": {"use.refresh.tokens": "true", "pkce.code.challenge.method": "S256"},
     }
     client.update(overrides)
     return client
@@ -303,12 +307,16 @@ class TheMobileClient(Fixture):
     `ThePasswordGrant`'s with the polarity `mobile-app` carries instead."""
 
     def test_a_missing_refresh_token_attribute_is_caught(self):
-        client = mobile(attributes={})
+        # pkce.code.challenge.method is kept alongside the one attribute this
+        # case is about — `attributes` replaces the whole map on override, and
+        # dropping it here would report two problems for one mutation.
+        client = mobile(attributes={"pkce.code.challenge.method": "S256"})
         self.assertIn("declares no use.refresh.tokens", self.one(realm(browser(), client)))
 
     def test_a_refresh_token_attribute_set_to_false_is_caught(self):
         """The obligation runs the opposite way from the browser's: mobile is issued one."""
-        client = mobile(attributes={"use.refresh.tokens": "false"})
+        client = mobile(attributes={"use.refresh.tokens": "false",
+                                    "pkce.code.challenge.method": "S256"})
         self.assertIn("use.refresh.tokens", self.one(realm(browser(), client)))
 
     def test_the_standard_flow_has_to_be_on_here_too(self):
@@ -331,6 +339,37 @@ class TheMobileClient(Fixture):
         self.assertEqual(len(local), 1, local)
         self.assertIn("directAccessGrantsEnabled", deployed[0])
         self.assertIn("directAccessGrantsEnabled", local[0])
+
+    def test_pkce_weakened_to_plain_is_caught(self):
+        """The one thing standing between an intercepted code and the attacker
+        who intercepted it, on a client with no secret to fall back on."""
+        client = mobile(attributes={"use.refresh.tokens": "true",
+                                    "pkce.code.challenge.method": "plain"})
+        self.assertIn("pkce.code.challenge.method", self.one(realm(browser(), client)))
+
+    def test_a_missing_pkce_attribute_is_caught_rather_than_defaulted(self):
+        client = mobile(attributes={"use.refresh.tokens": "true"})
+        self.assertIn("pkce.code.challenge.method", self.one(realm(browser(), client)))
+
+    def test_a_widened_redirect_uri_is_caught(self):
+        """A second entry, a wildcard, or an http(s) scheme beside the custom
+        one is a code — and through it a refresh token — delivered wherever
+        the wider pattern also matches."""
+        client = mobile(redirectUris=["blueprint://auth/callback", "http://localhost/*"])
+        self.assertIn("redirectUris", self.one(realm(browser(), client)))
+
+    def test_a_missing_commerce_api_scope_is_caught(self):
+        """A token with this scope missing carries no audience and no
+        permission claim, silently."""
+        client = mobile(defaultClientScopes=["web-origins", "acr", "profile", "roles", "basic", "email"])
+        self.assertIn("commerce-api", self.one(realm(browser(), client)))
+
+    def test_public_client_flipped_to_false_is_caught(self):
+        """This app ships with no secret it could keep confidential — every
+        install carries the same one — so a confidential posture is a
+        credential baked into the binary rather than a real one."""
+        client = mobile(publicClient=False)
+        self.assertIn("publicClient", self.one(realm(browser(), client)))
 
 
 class TheRefreshTokenRotation(Fixture):
@@ -915,7 +954,7 @@ class WhatTheGateHolds(unittest.TestCase):
     Redacting the credential keys was the first answer and it was not enough:
     the object still held every other field of a realm, so the property rested
     on a deny-list staying complete as Keycloak grows fields. The projection
-    inverts it — six named keys survive and nothing else does.
+    inverts it — twelve named keys survive and nothing else does.
     """
 
     # The three fixture values live here and are REFERENCED below rather than
@@ -942,14 +981,24 @@ class WhatTheGateHolds(unittest.TestCase):
                 "directAccessGrantsEnabled": False,
                 "secret": self.MARKERS["client"],
                 "protocolMappers": [{"name": "x"}],
+                # `realm_client` is the unlisted-attribute example the test
+                # below reads — CLIENT_ATTRIBUTES now includes
+                # pkce.code.challenge.method, so that one would survive the
+                # projection and could no longer serve as its own example.
                 "attributes": {"use.refresh.tokens": "false",
-                               "pkce.code.challenge.method": "S256"},
+                               "pkce.code.challenge.method": "S256",
+                               "realm_client": "false"},
             }, {
                 "clientId": realm_check.MOBILE_CLIENT,
                 "standardFlowEnabled": True,
                 "implicitFlowEnabled": False,
                 "directAccessGrantsEnabled": False,
-                "attributes": {"use.refresh.tokens": "true"},
+                "publicClient": True,
+                "redirectUris": ["blueprint://auth/callback"],
+                "defaultClientScopes": [
+                    "web-origins", "acr", "profile", "roles", "basic", "commerce-api", "email"],
+                "attributes": {"use.refresh.tokens": "true",
+                               "pkce.code.challenge.method": "S256"},
             }],
         }
 
@@ -987,9 +1036,9 @@ class WhatTheGateHolds(unittest.TestCase):
                             for p in realm_check.check_realm(held, realm_check.LOCAL, 300)))
 
     def test_an_unknown_attribute_does_not_survive(self):
-        """The attribute allow-list is two keys, and the realm ships more."""
+        """The attribute allow-list is three keys, and the realm ships more."""
         held = realm_check.judged(self.realm_with_secrets())
-        self.assertNotIn("pkce.code.challenge.method", held["clients"][0]["attributes"])
+        self.assertNotIn("realm_client", held["clients"][0]["attributes"])
 
 
 def commands_of(relative: str) -> str:

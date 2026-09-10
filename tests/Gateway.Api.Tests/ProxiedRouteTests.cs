@@ -43,6 +43,66 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
     }
 
     /// <summary>
+    /// The write side's version of the test above: an authenticated POST
+    /// matches <c>catalog-write</c>, strips <c>/api</c> exactly as
+    /// <c>catalog-public</c>'s GET does, and reaches the same cluster.
+    /// </summary>
+    /// <remarks>
+    /// One assertion carries three properties at once: a route that did not
+    /// match would answer 404 or 405 here rather than reach the stub, a wrong
+    /// strip would arrive at the stub as a path <c>ProductEndpoints</c> does
+    /// not serve, and reaching the stub at all is the "not merely 405"
+    /// half — <see cref="The_catalog_namespace_matches_no_method_but_get_and_post"/>
+    /// below proves PUT is refused, which says nothing about whether POST is
+    /// actually admitted; this is the test that says so.
+    /// </remarks>
+    [Fact]
+    public async Task An_authenticated_post_reaches_catalog_write()
+    {
+        using StubbedGatewayFactory factory = new(stub.Address);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/catalog/products");
+        request.Headers.Add(TestAuthHandler.UserHeader, "018f4c2e");
+
+        HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        stub.ReceivedPaths.Last().ShouldBe("/v1/catalog/products");
+    }
+
+    /// <summary>
+    /// <c>catalog-write</c> names <c>"authenticated"</c>, so a caller with no
+    /// token is refused before the request reaches a destination — the
+    /// "nothing may make an additional path anonymous" constraint (§11.4),
+    /// asserted against the one path this PR opens.
+    /// </summary>
+    /// <remarks>
+    /// Paired with the test above on <see cref="A_wrong_method_is_challenged_before_it_is_refused"/>'s
+    /// own reasoning: a 401 alone is satisfied by a gateway with no routes at
+    /// all, so it says nothing about <c>catalog-write</c> on its own — the
+    /// 204 beside it is what establishes the route exists and admits an
+    /// authenticated caller, which is what makes this refusal a property of
+    /// the route rather than of a path nothing serves.
+    /// </remarks>
+    [Fact]
+    public async Task An_anonymous_post_to_catalog_write_is_refused()
+    {
+        using StubbedGatewayFactory factory = new(stub.Address);
+        using HttpClient client = factory.CreateClient();
+
+        int before = stub.ReceivedPaths.Count;
+
+        HttpResponseMessage response = await client.PostAsync(
+            "/api/v1/catalog/products",
+            content: null,
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        stub.ReceivedPaths.Count.ShouldBe(before);
+    }
+
+    /// <summary>
     /// The second namespace strips its own prefix and only its own — one strip
     /// per namespace, and <c>/bff</c> has exactly one.
     /// </summary>

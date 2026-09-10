@@ -46,6 +46,17 @@ public sealed class ConditionalBlockTests
         HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.Headers.GetValues("Access-Control-Allow-Origin").Single().ShouldBe(CorsFactory.Origin);
+
+        // WithExposedHeaders("Retry-After") only has an observable effect on
+        // the actual response — CORS's preflight answer carries Allow-*
+        // headers, never Expose-Headers, so this is asserted here and not
+        // against one of the OPTIONS cases below. Retry-After is not one of
+        // the CORS-safelisted response headers, so without this entry a
+        // browser client cannot read the value §10.3's rejection handler goes
+        // to the trouble of computing — it reaches the network and is dropped
+        // before script ever sees it.
+        response.Headers.GetValues("Access-Control-Expose-Headers").ShouldContain(
+            h => h.Contains("Retry-After", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

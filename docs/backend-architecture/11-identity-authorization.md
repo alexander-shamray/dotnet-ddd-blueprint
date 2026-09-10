@@ -171,6 +171,48 @@ Validation is cheap; assume the network is hostile.
 > [#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)
 > is closed rather than carried.
 
+> **A native client is different, and the difference is where the token would
+> live rather than what platform it runs on.** ADR-034's refusal is about a
+> specific storage: `localStorage`, `sessionStorage`, an in-memory variable —
+> anything on `web-app`'s origin, which is readable by any script that shares
+> it, including one that arrived through a compromised dependency rather than
+> an attacker's own code. `mobile-app` has no origin for a script to share.
+> Its refresh token is written to the Android Keystore or the iOS Keychain —
+> storage a browser has no equivalent of, backed by the device's own secure
+> element, and unreachable by anything outside the app's own sandboxed
+> process even if that process were compromised at the JavaScript layer the
+> way a browser tab can be. That is the whole of why `mobile-app`'s realm
+> attribute is `use.refresh.tokens: "true"` where `web-app`'s is `"false"`:
+> the two clients are not answering the same threat model, and giving both
+> flags the same value would apply a browser's exposure to a client that does
+> not have it, or a native app's storage guarantee to a client that has no
+> such storage.
+>
+> **Rotation is what the native client owes in return, and it binds realm-wide
+> rather than per client.** `revokeRefreshToken: true` and
+> `refreshTokenMaxReuse: 0` are realm settings with no per-client override in
+> Keycloak, so both are already true of every client the moment either is —
+> what `mobile-app` changes is not the setting but which client it is now an
+> obligation *for*. `refreshTokenMaxReuse: 0` means a refresh token is usable
+> exactly once; `revokeRefreshToken: true` means using a token that was
+> already rotated out revokes the session it belongs to rather than quietly
+> minting one more access token. A refresh token copied off a device — a
+> stale backup, a compromised app on the same OS reading another app's
+> Keystore entry through a platform bug — is a token the legitimate app has
+> already used or will use next; whichever of the two uses it second is
+> refused, and the session both were drawing from ends. `web-app` is
+> unaffected by either setting for the reason already given above: it holds
+> no refresh token for a rotation rule to bind.
+>
+> This client, and the paragraph stating it, are owed to a gap in this
+> chapter rather than a decision made here: `mobile-app` was added to the
+> realm by a backend pull request in service of the Angular/Ionic reference
+> client's native build, specified in the sibling `blueprint-frontend`
+> repository's `docs/superpowers/specs/2026-09-10-blueprint-frontend-design.md`,
+> §9 ("Backend dependency: the `mobile-app` client"), which is also where the
+> client's exact attributes are enumerated and which this paragraph exists to
+> satisfy.
+
 ## 11.3 Service configuration
 
 `AddJwtAuthentication` lives in `Common.Web` and is composed by
