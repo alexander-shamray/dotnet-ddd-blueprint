@@ -39,15 +39,13 @@ internal sealed class InboxMessageConfiguration : IEntityTypeConfiguration<Inbox
         // duplicate. The collation cannot help: it compares what was stored,
         // and the loss happens on the way in.
         //
-        // 300 is §9.5's width, and it is generous on purpose — the value is a
-        // path, so a virtual host prefixes the queue name on any broker
-        // configured with one. Unicode doubles the bytes rather than the
-        // characters; the composite key is then 616 bytes against SQL Server's
-        // 900-byte clustered-index limit, which is why the width did not have
-        // to move with the type.
+        // InboxMessage.EndpointMaxLength, not a literal 300 and not §9.5's
+        // width: the entity is what both services map, so the width is the
+        // entity's to state and the chapter's to cite. The remarks there
+        // carry why it is as generous as it is.
         builder
             .Property(m => m.Endpoint)
-            .HasMaxLength(300)
+            .HasMaxLength(InboxMessage.EndpointMaxLength)
 
             // Binary collation, because this column is half a key rather than
             // text. SQL Server's default is case-insensitive, and a broker's

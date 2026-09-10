@@ -24,6 +24,19 @@ namespace Common.Infrastructure.Inbox;
 /// </remarks>
 public sealed class InboxMessage(Guid messageId, string endpoint, DateTimeOffset handledAt)
 {
+    /// <summary>
+    /// The widest endpoint address the column holds, named here because the
+    /// entity is what both services map and so is the one thing they share.
+    /// </summary>
+    /// <remarks>
+    /// Generous on purpose: the value is a path, so a virtual host prefixes
+    /// the queue name on any broker configured with one. Unicode doubles the
+    /// bytes rather than the characters, which puts the composite key at 616
+    /// bytes against SQL Server's 900-byte clustered-index limit — so the
+    /// width did not have to move when the column became <c>nvarchar</c>.
+    /// </remarks>
+    public const int EndpointMaxLength = 300;
+
     public Guid MessageId { get; private set; } = messageId;
 
     public string Endpoint { get; private set; } = endpoint;

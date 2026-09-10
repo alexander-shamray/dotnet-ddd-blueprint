@@ -19,6 +19,24 @@ namespace Common.Infrastructure.Outbox;
 /// </remarks>
 public sealed class OutboxMessage
 {
+    /// <summary>
+    /// The widest <c>LastError</c> the column holds, named here rather than
+    /// in either service's configuration because three sites read it and they
+    /// are not independent: the dispatcher's fail statement truncates to this
+    /// width with <c>LEFT</c>, and both services map this entity. A
+    /// <c>LEFT</c> narrower than the column silently shortens the one
+    /// diagnostic an abandoned row carries; a wider one fails the update that
+    /// was recording why the delivery failed.
+    /// </summary>
+    public const int LastErrorMaxLength = 2000;
+
+    /// <summary>
+    /// The widest <see cref="OutboxLane"/> name the column holds. Both
+    /// services spell it, for the same reason above, and the value is a bound
+    /// on the enum's member names rather than on anything a caller supplies.
+    /// </summary>
+    public const int LaneMaxLength = 16;
+
     public long Id { get; private set; }
 
     public Guid MessageId { get; private set; }

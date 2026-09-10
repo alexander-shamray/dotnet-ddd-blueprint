@@ -426,9 +426,9 @@ sequenceDiagram
     H->>DB: COMMIT
     end
 
-    loop every 500 ms
+    loop every PollInterval
         Note over D,DB: Claim: CTE + UPDATE ... OUTPUT, sets LockedUntil
-        D->>DB: lease up to 100 rows (UPDLOCK, READPAST)
+        D->>DB: lease up to ClaimBatchSize rows (UPDLOCK, READPAST)
 
         Note over D,MQ: Then each row independently — one failure affects one row
         alt Lane = Broker
@@ -453,11 +453,11 @@ CREATE TABLE ordering.OutboxMessages
     CorrelationId  UNIQUEIDENTIFIER NOT NULL,
     MessageType    NVARCHAR(300)    NOT NULL,   -- MessageTypeMap.MaxNameLength; a FullName is not ASCII
     Payload        NVARCHAR(MAX)    NOT NULL,
-    Lane           VARCHAR(16)      NOT NULL,   -- 'Broker' | 'Local'
+    Lane           VARCHAR(16)      NOT NULL,   -- OutboxMessage.LaneMaxLength; 'Broker' | 'Local'
     OccurredAt     DATETIMEOFFSET   NOT NULL,
     ProcessedAt    DATETIMEOFFSET   NULL,
     Attempts       INT              NOT NULL,
-    LastError      NVARCHAR(2000)   NULL,
+    LastError      NVARCHAR(2000)   NULL,       -- OutboxMessage.LastErrorMaxLength; the fail statement truncates to it
     LockedUntil    DATETIMEOFFSET   NULL     -- lease; also carries retry backoff
 );
 
@@ -831,13 +831,20 @@ admits reserved words and a service may legitimately be called `User`, whose
 > which is exactly what the paragraph above refuses.
 
 `OutboxDispatcher` in `Common.Infrastructure/Outbox` composes its three
-statements once from the registered table. The claim selects and leases in one
-statement, so two replicas cannot take the same row, and `READPAST` skips rows
-another replica holds:
+statements once from the registered table. **No quantity the loop runs on is
+written as a number twice.** `ClaimBatchSize`, `LeaseSeconds`,
+`BackoffBaseSeconds` and `BackoffAttemptCap` are declared on that class beside
+`MaxAttempts` and interpolated into the statements below; `PollInterval` is
+declared there too and feeds the timer rather than any statement; and the one
+quantity that is not the dispatcher's — the width `LastError` is truncated to —
+belongs to `OutboxMessage`, which the fail statement names. So this section can
+cite each by name and stay true when one is tuned. The claim selects and
+leases in one statement, so two replicas cannot take the same row, and
+`READPAST` skips rows another replica holds:
 
 ```sql
 WITH claimable AS (
-    SELECT TOP (100) *
+    SELECT TOP ({ClaimBatchSize}) *
     FROM {table.QualifiedName} WITH (UPDLOCK, READPAST, ROWLOCK)
     WHERE ProcessedAt IS NULL
         AND Attempts < @MaxAttempts
@@ -845,7 +852,7 @@ WITH claimable AS (
     ORDER BY OccurredAt
 )
 UPDATE claimable
-SET LockedUntil = DATEADD(second, 60, SYSDATETIMEOFFSET())
+SET LockedUntil = DATEADD(second, {LeaseSeconds}, SYSDATETIMEOFFSET())
 OUTPUT
     inserted.Id,
     inserted.MessageId,
@@ -867,13 +874,22 @@ the abandoned-row alert reachable:
 UPDATE {table.QualifiedName}
 SET
     Attempts    = Attempts + 1,
-    LastError   = LEFT(@Error, 2000),
+    LastError   = LEFT(@Error, {OutboxMessage.LastErrorMaxLength}),
     LockedUntil = DATEADD(
         second,
-        POWER(2, CASE WHEN Attempts > 8 THEN 8 ELSE Attempts END) * 5,
+        POWER(2, CASE WHEN Attempts > {BackoffAttemptCap}
+                      THEN {BackoffAttemptCap}
+                      ELSE Attempts END) * {BackoffBaseSeconds},
         SYSDATETIMEOFFSET())
 WHERE Id = @Id;
 ```
+
+The truncation and the column are one decision read twice: `LEFT` writes what
+`LastError` holds, so `OutboxMessage` states the width, the statement above
+interpolates it and each service's entity configuration passes it to
+`HasMaxLength`. A `LEFT` narrower than the column silently shortens the one
+diagnostic an abandoned row carries, and a wider one fails the very update that
+was recording why a delivery failed.
 
 `ProcessBatchAsync` is the one claim-and-deliver pass, public so tests drive
 it directly instead of racing the timer (§12.4). Its per-row loop is the
@@ -887,7 +903,7 @@ foreach (OutboxClaim message in claimed)
         // A scope per row, and this is what makes per-row isolation
         // true rather than intended: projection handlers are scoped
         // and so is the DbContext behind them, so one scope for a
-        // hundred rows hands the next row a half-mutated tracker.
+        // whole batch hands the next row a half-mutated tracker.
         await using AsyncServiceScope delivery = _scopes.CreateAsyncScope();
 
         await DeliverAsync(delivery.ServiceProvider, message, ct);
@@ -898,7 +914,7 @@ foreach (OutboxClaim message in claimed)
     }
     catch (Exception ex) when (!ct.IsCancellationRequested)
     {
-        // One bad message does not affect the other 99.
+        // One bad message does not affect the rest of the batch.
         //
         // The filter asks the token, not the exception type. A handler
         // enforcing its own deadline throws OperationCanceledException
@@ -1239,7 +1255,10 @@ cfg.ReceiveEndpoint(
             // Domain rejections are not here because they never throw — the
             // consumer acks them (§9.8).
             r.Ignore<ContractMappingException>();
-            r.Exponential(5, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
+
+            // The ladder itself is RetryPolicy's, shared with the three
+            // endpoints that add no exclusion. §9.8 says what it holds.
+            RetryPolicy.Standard(r);
         });
         // The inbox goes OUTSIDE the in-memory outbox — a correctness rule
         // rather than a preference; §9.8's trap says what the other order costs.
@@ -1324,6 +1343,8 @@ CREATE TABLE ordering.InboxMessages
     -- differing outside the code page both store as the same run of `?` and
     -- collide in the key below — the collation compares faithfully what the
     -- column already lost.
+    -- InboxMessage.EndpointMaxLength, which both services' configurations
+    -- read; the entity states the width and this shape cites it.
     Endpoint    NVARCHAR(300) COLLATE Latin1_General_BIN2 NOT NULL,
     HandledAt   DATETIMEOFFSET   NOT NULL,
     CONSTRAINT PK_InboxMessages PRIMARY KEY (MessageId, Endpoint)
@@ -1542,6 +1563,10 @@ namespace Common.Infrastructure.Inbox;
 
 public sealed class InboxMessage(Guid messageId, string endpoint, DateTimeOffset handledAt)
 {
+    // The width both services' configurations map Endpoint to, stated here
+    // because the entity is the one thing they share.
+    public const int EndpointMaxLength = 300;
+
     public Guid MessageId { get; private set; } = messageId;
     public string Endpoint { get; private set; } = endpoint;
     public DateTimeOffset HandledAt { get; private set; } = handledAt;
@@ -1696,29 +1721,29 @@ stateDiagram-v2
 
     AwaitingStock --> AwaitingPayment : StockReserved (no cancellation observed)
     AwaitingStock --> [*] : StockReservationFailed → CancelOrder
-    AwaitingStock --> [*] : StockTimeout 5m → CancelOrder
+    AwaitingStock --> [*] : StockTimeout → CancelOrder
     AwaitingStock --> Compensating : OrderCancelled → ReleaseStock
     AwaitingStock --> AwaitingStock : StockReleased → cancellation recorded
     AwaitingStock --> AwaitingStock : StockReserved (cancellation observed) → authorisation withheld
 
     AwaitingPayment --> AwaitingConfirmation : PaymentAuthorised (no cancellation observed) → ConfirmOrder
     AwaitingPayment --> Compensating : PaymentDeclined → ReleaseStock
-    AwaitingPayment --> Compensating : PaymentTimeout 15m → ReleaseStock
+    AwaitingPayment --> Compensating : PaymentTimeout → ReleaseStock
     AwaitingPayment --> Compensating : OrderCancelled → ReleaseStock
     AwaitingPayment --> AwaitingPayment : StockReleased → cancellation recorded
     AwaitingPayment --> AwaitingPayment : PaymentAuthorised (cancellation observed) → FlagOrderForReview payment_authorised_during_compensation
 
     AwaitingConfirmation --> Confirmed : OrderConfirmed (+ FlagOrderForReview cancelled_after_confirmation if a cancellation was observed)
     AwaitingConfirmation --> Compensating : OrderCancelled → ReleaseStock
-    AwaitingConfirmation --> [*] : ConfirmationTimeout 10m → FlagOrderForReview not_confirmed
+    AwaitingConfirmation --> [*] : ConfirmationTimeout → FlagOrderForReview not_confirmed
     AwaitingConfirmation --> [*] : ShipmentDispatched → MarkOrderShipped (+ FlagOrderForReview cancelled_after_confirmation if a cancellation was observed)
     AwaitingConfirmation --> AwaitingConfirmation : StockReleased → cancellation recorded
 
     Compensating --> Compensating : StockReleased → CancelOrder (stock half settled)
-    Compensating --> Compensating : ReleaseTimeout 10m → CancelOrder + FlagOrderForReview stock_not_released (stock half settled)
+    Compensating --> Compensating : ReleaseTimeout → CancelOrder + FlagOrderForReview stock_not_released (stock half settled)
     Compensating --> Compensating : PaymentAuthorised → FlagOrderForReview payment_authorised_during_compensation (verdict in)
     Compensating --> Compensating : PaymentDeclined → verdict in
-    Compensating --> Compensating : PaymentTimeout 15m → verdict given up on
+    Compensating --> Compensating : PaymentTimeout → verdict given up on
     Compensating --> Compensating : OrderConfirmed → FlagOrderForReview cancelled_after_confirmation
     Compensating --> Compensating : OrderCancelled, StockReserved, StockReservationFailed → absorbed
     Compensating --> [*] : both halves settled
@@ -1726,9 +1751,29 @@ stateDiagram-v2
     Confirmed --> Confirmed : OrderConfirmed → absorbed
     Confirmed --> Confirmed : StockReleased → cancellation recorded
     Confirmed --> [*] : ShipmentDispatched → MarkOrderShipped (+ FlagOrderForReview cancelled_after_confirmation if a cancellation was observed)
-    Confirmed --> [*] : DespatchTimeout 3d → FlagOrderForReview
+    Confirmed --> [*] : DespatchTimeout → FlagOrderForReview
     Confirmed --> [*] : OrderCancelled → FlagOrderForReview cancelled_after_confirmation
 ```
+
+**The diagram names each wait and does not price it.** `OrderFulfilmentSaga`
+declares a delay per wait and each `Schedule` arms one, so a label here
+carrying a duration would be a second copy in the one artefact nobody
+re-derives — and a wait may be drawn on more than one transition, so the copies
+would multiply inside the drawing:
+
+| Wait | Delay | Bounds |
+|---|---|---|
+| `StockTimeout` | `StockTimeoutDelay` | Inventory answering `ReserveStock` |
+| `PaymentTimeout` | `PaymentTimeoutDelay` | Payments returning a verdict — longer, because a PSP retry is normal |
+| `ConfirmationTimeout` | `ConfirmationTimeoutDelay` | Ordering acknowledging its own `ConfirmOrder` — the one wait whose far end is this same service |
+| `ReleaseTimeout` | `ReleaseTimeoutDelay` | A `ReleaseStock` this saga sent while compensating |
+| `DespatchTimeout` | `DespatchTimeoutDelay` | Despatch, once the order is confirmed — days, because the far end is a warehouse |
+
+`ConfirmationTimeoutDelay` is the one set against this repository's own
+mechanisms rather than against a peer — `RetryPolicy`'s ladder on
+`ordering-commands` and §9.4's dispatcher backoff. Which of the two decides it,
+and why it is deliberately not long enough to outlast the second, is argued
+below and at the schedule that arms it.
 
 > **`Compensating` is the one state whose exit is a join rather than an
 > event**, which is why the diagram gives it a single unlabelled arrow to
@@ -2614,7 +2659,7 @@ regardless, and that is what carries correctness meanwhile**: a scheduled
 message is delivered with the token id its schedule was armed with, and one
 that no longer matches the instance is discarded before the machine is asked —
 so a stale timeout never reaches a transition at all. It is `Finalize`, not
-the `Unschedule` beside it, that keeps a three-day `DespatchExpired` from
+the `Unschedule` beside it, that keeps a long-delayed `DespatchExpired` from
 raising a false `not_despatched` review: the deleted instance is what makes
 the later delivery harmless.
 
@@ -2920,26 +2965,31 @@ IHttpClientBuilder pricing = builder.Services
 pricing
     .AddStandardResilienceHandler(options =>
     {
+        // Every value is PricingHop's, for the reason under this block: the
+        // budget below is arithmetic over them, so a chapter that spelled the
+        // numbers would hold a copy of every term in the sum.
+        //
         // Outermost bound. The default would breach the hierarchy.
-        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(5);
+        options.TotalRequestTimeout.Timeout = PricingHop.TotalRequestTimeout;
 
-        options.Retry.MaxRetryAttempts = 2;            // 3 attempts in total
+        // HTTP retries after the first, so one more request than this.
+        options.Retry.MaxRetryAttempts = PricingHop.MaxRetryAttempts;
         options.Retry.BackoffType = DelayBackoffType.Exponential;
         options.Retry.UseJitter = true;
-        options.Retry.Delay = TimeSpan.FromMilliseconds(150);
+        options.Retry.Delay = PricingHop.RetryDelay;
 
         // The cap that makes the budget below arithmetic rather than
         // statistical. With UseJitter the nominal delay is not an upper bound
         // — see the second trap below.
-        options.Retry.MaxDelay = TimeSpan.FromMilliseconds(300);
+        options.Retry.MaxDelay = PricingHop.MaxRetryDelay;
 
-        // 3 × 1.4 s + 2 × 300 ms = 4.8 s. The delays are part of the budget,
-        // not an extra on top of it — see the trap below.
-        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(1.4);
+        // The delays are part of the budget, not an extra on top of it —
+        // see the trap below.
+        options.AttemptTimeout.Timeout = PricingHop.AttemptTimeout;
 
-        options.CircuitBreaker.FailureRatio = 0.5;
-        options.CircuitBreaker.MinimumThroughput = 10;
-        options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(15);
+        options.CircuitBreaker.FailureRatio = PricingHop.CircuitBreakerFailureRatio;
+        options.CircuitBreaker.MinimumThroughput = PricingHop.CircuitBreakerMinimumThroughput;
+        options.CircuitBreaker.BreakDuration = PricingHop.CircuitBreakerBreakDuration;
 
         // SamplingDuration is left at its default, and the default is
         // load-bearing: a sampling window shorter than the break duration
@@ -2950,6 +3000,17 @@ pricing
 // Registered AFTER resilience, so it sits inside it (§11.5).
 pricing.AddHttpMessageHandler<ClientCredentialsHandler>();
 ```
+
+**`PricingHop` owns every number in that block, and the reason is the sum
+rather than tidiness.** The budget this section argues —
+`(MaxRetryAttempts + 1) × AttemptTimeout`, plus `MaxRetryAttempts ×
+MaxRetryDelay`, fitting inside `TotalRequestTimeout` — is arithmetic over
+several of them at once, so any second copy of a value is a term in an
+inequality that can stop holding without either side being edited. Naming them
+is what lets this section state the sum rather than compute it.
+`ResilienceHierarchyTests` in `tests/Web.Bff.Tests` asserts the relations from
+the **built options** rather than from the constants, which is what keeps the
+test a check on the registration and not a restatement of it.
 
 > **An HTTP resilience pipeline cannot retry a gRPC status, and the
 > configuration above does not say so on its face.** gRPC carries its outcome
@@ -2965,11 +3026,11 @@ pricing.AddHttpMessageHandler<ClientCredentialsHandler>();
 > **The fix is deliberately not a second retry loop.** gRPC has its own retry,
 > configured on the channel through `ServiceConfig`, and it does understand
 > status codes — but it sits *outside* the `HttpClient`, so each of its
-> attempts would get a fresh `TotalRequestTimeout` and three of them would
-> spend fifteen seconds against a five-second ceiling. Stacking the two is the
-> one change that breaks the hierarchy this section exists to protect. One
-> mechanism, and its limits written down. Measured in `UpstreamRetryTests`,
-> from both sides.
+> attempts would get a fresh `PricingHop.TotalRequestTimeout` and the retries
+> together would spend a multiple of the ceiling they are meant to fit inside.
+> Stacking the two is the one change that breaks the hierarchy this section
+> exists to protect. One mechanism, and its limits written down. Measured in
+> `UpstreamRetryTests`, from both sides.
 
 > **Trap — `TotalRequestTimeout` left at its default.** It defaults to 30
 > seconds, which is longer than most services' own operation budget and longer
@@ -3072,10 +3133,25 @@ has the mechanism, which is a linked file rather than Pact.
 | Broker down | Outbox holds messages; they flush on reconnect |
 
 Retry and idempotency are configured per receive endpoint, and Ordering has
-**four**, each declared with its own policy in
+**four**, each declaring for itself which policy it applies, in
 `Ordering.Infrastructure/Messaging/DependencyInjection.cs`. The fourth is
 the stock-events endpoint, which §9.6 argues where the transition it serves
 lives.
+
+**The ladder is `RetryPolicy` in `Ordering.Infrastructure/Messaging`**, which
+holds `RetryLimit`, `MinInterval`, `MaxInterval` and `IntervalDelta` and
+applies them through `Standard`. Declaring it once is what makes agreement
+between the endpoints structural: an endpoint that wants a different ladder has
+to say so, where a ladder written out per endpoint can only be checked by
+reading every call site and comparing them. §9.6's confirmation wait has to
+clear the ladder these produce — a floor rather than the term that decides
+it — and clears a name rather than a number.
+`RetryLimit` counts **retries**, so an endpoint makes one more attempt than it
+says. They are retries of one broker delivery and not redeliveries in §9.5's
+sense: `UseMessageRetry` holds the message and waits, so the delivery and the
+endpoint's concurrency slot are taken for the whole ladder. Releasing a message
+and having the broker bring it back is a different filter, which none of these
+endpoints uses.
 
 **Idempotency is the same on all four**: every one applies `InboxFilter<>`,
 and the callout under the saga's endpoint is the argument for there being no
@@ -3091,12 +3167,7 @@ cfg.ReceiveEndpoint(
     CatalogEventsQueue,
     e =>
     {
-        e.UseMessageRetry(r =>
-            r.Exponential(
-                retryLimit: 5,
-                minInterval: TimeSpan.FromSeconds(1),
-                maxInterval: TimeSpan.FromMinutes(1),
-                intervalDelta: TimeSpan.FromSeconds(2)));
+        e.UseMessageRetry(RetryPolicy.Standard);
 
         // Duplicate suppression — §9.5. On this endpoint, on
         // ordering-commands, on the saga's, and on any endpoint added later:
@@ -3176,12 +3247,7 @@ cfg.ReceiveEndpoint(
     StockEventsQueue,
     e =>
     {
-        e.UseMessageRetry(r =>
-            r.Exponential(
-                retryLimit: 5,
-                minInterval: TimeSpan.FromSeconds(1),
-                maxInterval: TimeSpan.FromMinutes(1),
-                intervalDelta: TimeSpan.FromSeconds(2)));
+        e.UseMessageRetry(RetryPolicy.Standard);
 
         e.UseConsumeFilter(typeof(InboxFilter<>), context);
         e.UseInMemoryOutbox(context);
@@ -3224,12 +3290,7 @@ cfg.ReceiveEndpoint(
     FulfilmentSagaQueue,
     e =>
     {
-        e.UseMessageRetry(r =>
-            r.Exponential(
-                retryLimit: 5,
-                minInterval: TimeSpan.FromSeconds(1),
-                maxInterval: TimeSpan.FromMinutes(1),
-                intervalDelta: TimeSpan.FromSeconds(2)));
+        e.UseMessageRetry(RetryPolicy.Standard);
 
         // The inbox is here too. The callout below is why there is no
         // exception for a state machine.
@@ -3321,17 +3382,23 @@ cfg.ReceiveEndpoint(
 > queue, and the inbox is keyed on message id *and* endpoint — so each reader
 > records its own delivery and neither suppresses the other's.
 
-And the **command** endpoint, `ordering-commands` (§9.4), which is the one whose
-retry policy is not the plain exponential five:
+And the **command** endpoint, `ordering-commands` (§9.4), which is the one that
+does not apply `RetryPolicy.Standard` alone:
 
 ```csharp
 e.UseMessageRetry(r =>
 {
     // A malformed contract does not become well-formed on the fourth attempt.
     r.Ignore<ContractMappingException>();
-    r.Exponential(5, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(2));
+    RetryPolicy.Standard(r);
 });
 ```
+
+The exclusion is the endpoint's and the ladder is not: which faults are
+terminal is a claim about what this queue carries, where how long to wait
+between attempts is the same answer on all four. Folding the `Ignore` into
+`RetryPolicy` would apply one endpoint's exclusion to three that never raise
+it.
 
 **A domain rejection is not on that list because it never throws.** §9.4's
 consumer acks it, counts `command.domain_rejected` and logs it at warning. The
@@ -3340,7 +3407,7 @@ careful and is a half-fix:
 
 | Position | Problem |
 |---|---|
-| Retry it | A shipped order is still shipped on the fifth attempt. Five backoffs, then the error queue anyway |
+| Retry it | A shipped order is still shipped on the last attempt. The whole ladder of backoffs, then the error queue anyway |
 | Throw, exclude from retry | Reaches the error queue **once** instead of after a minute — but a routine outcome now sits in a queue whose depth alert pages a human |
 | Ack, count, log | The queue holds only faults, so depth > 0 stays a page worth answering |
 
@@ -3375,10 +3442,10 @@ a message in a queue nobody drains is closer to it.
 
 The distinction generalises: **retry is for faults that time might fix.** A
 broker blip, a deadlock, an expired token — retry those. A message the receiver
-cannot interpret will be rejected identically five times and hold the queue open
-while it happens, so it belongs in the error queue on the first attempt. A
-command the domain refused belongs in neither: it is not a fault, and the queue
-is not where answers go.
+cannot interpret will be rejected identically on every attempt and hold the
+queue open while it happens, so it belongs in the error queue on the first
+attempt. A command the domain refused belongs in neither: it is not a fault,
+and the queue is not where answers go.
 
 **Alert on error-queue depth greater than zero.** A message in the error queue
 is a business process that stopped. It needs a human, and the alert is how they

@@ -52,4 +52,66 @@ public static class PricingHop
     /// </para>
     /// </remarks>
     public static readonly Uri Address = new("http://catalog-api:8081");
+
+    /// <summary>
+    /// §9.7's outermost bound for this hop, and the one value in the
+    /// hierarchy that must never be left at its default.
+    /// </summary>
+    /// <remarks>
+    /// <b>The resilience values are named here rather than left inline in
+    /// <c>Program.cs</c> because §9.7 does arithmetic with them.</b> Its
+    /// budget — <see cref="AttemptTimeout"/> per attempt plus
+    /// <see cref="MaxRetryDelay"/> per retry, all of it fitting inside
+    /// this — is an inequality over several of these at once, so any second
+    /// copy of one is a term that can stop holding without either side being
+    /// edited. Naming them is what lets the chapter state the sum instead of
+    /// computing it. <c>ResilienceHierarchyTests</c> asserts the
+    /// relationships from the built options rather than from these constants,
+    /// which keeps it a check on the registration.
+    /// </remarks>
+    public static readonly TimeSpan TotalRequestTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// HTTP retries after the first attempt, so the pipeline makes one more
+    /// request than this. Nothing here is a message delivery — this hop is a
+    /// gRPC call over <c>HttpClient</c>, and the broker's vocabulary does not
+    /// apply to it.
+    /// </summary>
+    /// <inheritdoc cref="TotalRequestTimeout" path="/remarks"/>
+    public const int MaxRetryAttempts = 2;
+
+    /// <summary>The nominal first backoff, before jitter.</summary>
+    /// <inheritdoc cref="TotalRequestTimeout" path="/remarks"/>
+    public static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(150);
+
+    /// <summary>
+    /// The cap applied <em>after</em> jitter, which is what makes the budget
+    /// arithmetic rather than statistical: the worst case is this times
+    /// <see cref="MaxRetryAttempts"/> whatever the draw.
+    /// </summary>
+    /// <inheritdoc cref="TotalRequestTimeout" path="/remarks"/>
+    public static readonly TimeSpan MaxRetryDelay = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>The per-attempt bound inside the total.</summary>
+    /// <inheritdoc cref="TotalRequestTimeout" path="/remarks"/>
+    public static readonly TimeSpan AttemptTimeout = TimeSpan.FromSeconds(1.4);
+
+    /// <summary>The failure share that opens the circuit.</summary>
+    /// <inheritdoc cref="TotalRequestTimeout" path="/remarks"/>
+    public const double CircuitBreakerFailureRatio = 0.5;
+
+    /// <summary>
+    /// How many calls a sampling window needs before the ratio is judged.
+    /// </summary>
+    /// <inheritdoc cref="TotalRequestTimeout" path="/remarks"/>
+    public const int CircuitBreakerMinimumThroughput = 10;
+
+    /// <summary>
+    /// How long the circuit stays open. <c>SamplingDuration</c> is left at
+    /// its default, which is longer than this — a window shorter than the
+    /// break forgets every failure while the circuit is open, so the breaker
+    /// would close onto a fresh window and reopen on the first error it saw.
+    /// </summary>
+    /// <inheritdoc cref="TotalRequestTimeout" path="/remarks"/>
+    public static readonly TimeSpan CircuitBreakerBreakDuration = TimeSpan.FromSeconds(15);
 }

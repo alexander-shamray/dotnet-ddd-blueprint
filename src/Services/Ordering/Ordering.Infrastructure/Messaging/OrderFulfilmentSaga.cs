@@ -27,6 +27,54 @@ namespace Ordering.Infrastructure.Messaging;
 /// </remarks>
 public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmentState>
 {
+    /// <summary>
+    /// How long §9.6 waits for Inventory to answer <c>ReserveStock</c>.
+    /// </summary>
+    /// <remarks>
+    /// Each wait's delay is named here and read by the <c>Schedule</c> that
+    /// arms it, so the value has one home. §9.6's state diagram names the
+    /// waits and prints no durations, because a drawing that spells a delay
+    /// is a second copy of it and the drawing is what nobody re-derives.
+    /// The argument for a value stays at the schedule that arms it, beside
+    /// the wait it bounds.
+    /// <para>
+    /// No count is stated here, for the reason <see cref="StockReservationExpired"/>
+    /// gives: one delay per wait state is the invariant, and
+    /// <c>Every_wait_state_declares_a_schedule</c> is what checks it.
+    /// </para>
+    /// </remarks>
+    public static readonly TimeSpan StockTimeoutDelay = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// How long §9.6 waits for Payments to return a verdict. Longer than
+    /// <see cref="StockTimeoutDelay"/> because a PSP retry is normal.
+    /// </summary>
+    /// <inheritdoc cref="StockTimeoutDelay" path="/remarks"/>
+    public static readonly TimeSpan PaymentTimeoutDelay = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// How long §9.6 waits for this service's own <c>ConfirmOrder</c> to be
+    /// acknowledged (#126).
+    /// </summary>
+    /// <inheritdoc cref="StockTimeoutDelay" path="/remarks"/>
+    public static readonly TimeSpan ConfirmationTimeoutDelay = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// How long §9.6 waits for a <c>ReleaseStock</c> it sent while
+    /// compensating. Matches <see cref="ConfirmationTimeoutDelay"/>, and for
+    /// the same reason: both bound a message this service has already sent
+    /// rather than a third party deciding something.
+    /// </summary>
+    /// <inheritdoc cref="StockTimeoutDelay" path="/remarks"/>
+    public static readonly TimeSpan ReleaseTimeoutDelay = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// How long §9.6 waits for despatch once an order is confirmed. Days
+    /// rather than minutes: the far end is a warehouse.
+    /// </summary>
+    /// <inheritdoc cref="StockTimeoutDelay" path="/remarks"/>
+    public static readonly TimeSpan DespatchTimeoutDelay = TimeSpan.FromDays(3);
+
     // Every state in §9.6's diagram, including the ones a saga could
     // technically skip by finalising early. Confirmed exists because the order
     // is not done at payment — it is waiting for despatch, and a wait the
@@ -351,7 +399,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             x => x.StockTimeoutTokenId,
             s =>
             {
-                s.Delay = TimeSpan.FromMinutes(5);
+                s.Delay = StockTimeoutDelay;
                 s.Received = e => e.CorrelateById(m => m.Message.OrderId);
             });
 
@@ -362,7 +410,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             x => x.PaymentTimeoutTokenId,
             s =>
             {
-                s.Delay = TimeSpan.FromMinutes(15);
+                s.Delay = PaymentTimeoutDelay;
                 s.Received = e => e.CorrelateById(m => m.Message.OrderId);
             });
 
@@ -371,30 +419,30 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // guess about a peer; it is a bound on two mechanisms in this
         // repository, and the smaller of them is not the one that decides it.
         //
-        // §9.8's retry on ordering-commands is five RETRIES at
-        // Exponential(1s, 1min, delta 2s) — six deliveries counting the first,
-        // which is what §9.6 says two thousand lines away and what this said
-        // "five attempts" for. **The waiting is about seventy seconds in
-        // total, not five minutes**: five retries are five intervals whatever
-        // the deliveries are numbered, and this comment read "five attempts
-        // backing off to a minute apiece", which prices every interval at the
-        // cap the ladder never reaches.
+        // §9.8's retry on ordering-commands is RetryPolicy.RetryLimit RETRIES
+        // — one more ATTEMPT than that counting the first, all of them inside
+        // a single broker delivery. **Their total is a floor this delay clears
+        // easily, not the term that sets it**: the retries are that many
+        // intervals however the attempts are numbered, and pricing every
+        // interval at RetryPolicy.MaxInterval overstates the ladder, which
+        // does not reach that cap in RetryLimit steps.
         //
         // **The term that actually decides this is §9.4's dispatcher**, and
-        // the earlier revision credited its 500ms POLL, which is the one
-        // quantity here that cannot matter. A failed publish backs the row off
-        // by POWER(2, MIN(Attempts, 8)) * 5 seconds, so the cumulative wait
-        // runs 5s, 15s, 35s, 75s, 155s, 315s, 635s. **A publish that only
-        // succeeds on its eighth attempt lands after this timeout has already
-        // fired**, filing a not_confirmed review for an order that then
-        // confirms.
+        // not its PollInterval, which is the one quantity here too small to
+        // matter. A failed publish backs the row off by OutboxDispatcher's
+        // BackoffBaseSeconds doubling to BackoffAttemptCap, and the cumulative
+        // wait that produces overtakes this delay within a few attempts —
+        // well inside MaxAttempts. **A publish that succeeds only late in that
+        // ladder lands after this timeout has already fired**, filing a
+        // not_confirmed review for an order that then confirms.
         //
-        // Ten minutes is chosen knowing that rather than in spite of it: seven
-        // consecutive publish failures is an outbox that is genuinely stuck,
-        // which §13.6's abandoned-row alert exists to catch and which nobody
-        // wants this saga waiting quietly through. Raising the delay past
-        // attempt ten would trade a rare false escalation for a common silent
-        // one. It matches ReleaseTimeout below, and for the same reason: both
+        // ConfirmationTimeoutDelay is chosen knowing that rather than in spite
+        // of it: that many consecutive publish failures is an outbox that is
+        // stuck, which §13.6's abandoned-row alert exists to catch and which
+        // nobody wants this saga waiting quietly through. Raising the delay to
+        // outlast the whole ladder would trade a rare false escalation for a
+        // common silent one. It matches ReleaseTimeoutDelay, and for the same
+        // reason: both
         // are waits on a message this service has already sent rather than on
         // a third party deciding something.
         //
@@ -406,7 +454,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             x => x.ConfirmationTimeoutTokenId,
             s =>
             {
-                s.Delay = TimeSpan.FromMinutes(10);
+                s.Delay = ConfirmationTimeoutDelay;
                 s.Received = e => e.CorrelateById(m => m.Message.OrderId);
             });
 
@@ -419,7 +467,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             x => x.DespatchTimeoutTokenId,
             s =>
             {
-                s.Delay = TimeSpan.FromDays(3);
+                s.Delay = DespatchTimeoutDelay;
                 s.Received = e => e.CorrelateById(m => m.Message.OrderId);
             });
 
@@ -431,7 +479,7 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
             x => x.ReleaseTimeoutTokenId,
             s =>
             {
-                s.Delay = TimeSpan.FromMinutes(10);
+                s.Delay = ReleaseTimeoutDelay;
                 s.Received = e => e.CorrelateById(m => m.Message.OrderId);
             });
 

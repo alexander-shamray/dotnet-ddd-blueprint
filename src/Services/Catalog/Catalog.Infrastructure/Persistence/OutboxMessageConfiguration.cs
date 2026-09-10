@@ -80,12 +80,16 @@ internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outb
         builder
             .Property(m => m.Lane)
             .HasConversion<string>()
-            .HasMaxLength(16)
+            .HasMaxLength(OutboxMessage.LaneMaxLength)
             .IsUnicode(false);
 
+        // OutboxMessage.LastErrorMaxLength, not a literal 2000: the
+        // dispatcher's fail statement truncates to this width, and a column
+        // that disagrees with the LEFT writing into it fails the update that
+        // was recording why a delivery failed.
         builder
             .Property(m => m.LastError)
-            .HasMaxLength(2000);
+            .HasMaxLength(OutboxMessage.LastErrorMaxLength);
 
         // Filtered: the dispatcher only ever scans unprocessed rows, so the
         // index stays small regardless of table size — which is what keeps
