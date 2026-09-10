@@ -536,24 +536,24 @@ return new OutboxMessage
     MessageType = types.NameOf(message.GetType()),
     Payload = JsonSerializer.Serialize(message, message.GetType(), json.Options),
     Lane = lane,
-
-    // The message's own timestamp, never a staging clock: §13.3 defines
-    // projection.lag as "event raised to projection applied", and §13.7
-    // sets its target.
     OccurredAt = message is IIntegrationEvent o
         ? o.OccurredAt
         : ((IDomainEvent)message).OccurredAt
 };
 ```
 
-Two more guards precede those in the file: a lane that is neither member of
-the enum is refused, because C# does not confine an enum to its declared
-members, and a type implementing both `IDomainEvent` and `IIntegrationEvent`
-is refused before either lane check, because such a type satisfies both.
-`OutboxClaim` is the read side, a Dapper projection whose members must match
-the claim's `OUTPUT` clause exactly — Dapper binds by name and leaves an
-unmatched member at its default, so a column added to one and not the other
-is a `DateTimeOffset.MinValue` nobody notices until a metric reads 55 years.
+`OccurredAt` is the message's own timestamp, never a staging clock: §13.3
+defines `projection.lag` as event raised to projection applied and §13.7 sets
+its target, and a row stamped when `Stage` ran would drop the interval between
+the two. Before the lane checks, in the same file, a lane that is neither
+member of the enum is refused, because C# does not confine an enum to its
+declared members, and a type implementing both `IDomainEvent` and
+`IIntegrationEvent` is refused before either lane check, because such a type
+satisfies both. `OutboxClaim` is the read side, a Dapper projection whose
+members must match the claim's `OUTPUT` clause exactly — Dapper binds by name
+and leaves an unmatched member at its default, so a column added to one and
+not the other is a `DateTimeOffset.MinValue` nobody notices until a metric
+reads 55 years.
 
 ### The type name is a persisted contract
 
@@ -659,7 +659,7 @@ rather than the first message.
 > drops the `Alias`, once no unprocessed row still names the old one — the
 > deletion the drain rule above is about.
 >
-> Five guards keep the pair honest, and each fails the host rather than a
+> The guards that keep the pair honest each fail the host rather than a
 > message. An alias that **shadows a live type name** is refused, on the
 > duplicate-name argument one indirection over: two types would answer to one
 > name and which resolves is not decidable. An alias **onto a type the map does
@@ -671,8 +671,8 @@ rather than the first message.
 > that instance would stage rows it could not itself deliver. And a `WriteAs`
 > naming **another type** is refused, which is the quiet one: the row is
 > written, claimed and delivered, and the payload is deserialised as something
-> it never was — a substitution rather than a failure, and the only one of the
-> five with no symptom to notice.
+> it never was — a substitution rather than a failure, and the only one of
+> them with no symptom to notice.
 
 ### The payload is a persisted format too
 
@@ -803,8 +803,9 @@ admits reserved words and a service may legitimately be called `User`, whose
 `FROM user.OutboxMessages` SQL Server cannot read.
 
 > **The check is shared, and that is the whole reason it is a separate type.**
-> §9.5's `InboxTable` is this class with one word changed, and
-> [§8.5](08-caching-redis.md)'s `IdempotencyMarkerTable` is a third with one
+> `InboxTable` in `Common.Infrastructure/Inbox` is this class with one word
+> changed, and [§8.5](08-caching-redis.md)'s marker table has a third,
+> `IdempotencyMarkerTable` in `Common.Infrastructure/Idempotency`, with one
 > more, so a reader who copies the constructor above rather than calling
 > `SqlSchema` gets several answers to one question — the 128-character bound,
 > the reserved-word argument and the bracket-quoting, maintained once per copy.
@@ -1126,8 +1127,7 @@ application command it maps to, and its `Consume` is three decisions:
 // parsed back into CancellationReason (§9.6).
 TCommand command = mapper.Map(context.Message);
 
-Result result =
-    await dispatcher.SendAsync(command, context.CancellationToken);
+Result result = await dispatcher.SendAsync(command, context.CancellationToken);
 
 // Unavailable is a fault that time might fix, arriving as a returned
 // value rather than a thrown one — §10.5 answers it over HTTP with a 503
@@ -1196,9 +1196,11 @@ public sealed class CancelOrderMapper : ICommandMessageMapper<CancelOrder, Cance
 > own code addresses** ([ADR-036](adr/ADR-036-the-broker-has-a-per-service-identity.md)).
 > `catalog-svc` has no `write` matching `ordering-commands` or
 > `Common.Contracts.Ordering.V1:*`, so a compromised Catalog can neither send
-> `ConfirmOrder` nor forge an `OrderPlaced` — verified by attempting all four
-> as that account and reading the broker's refusal, with a positive control
-> proving the credential itself works. `CommandOrigin` therefore closes §11.4's
+> `ConfirmOrder` nor forge an `OrderPlaced` — and
+> `deploy/compose/rabbitmq/check_permissions.py` asserts, from each service's
+> own source, that no service's `write` covers another's command endpoint or
+> contracts, so the property is gated rather than remembered.
+> `CommandOrigin` therefore closes §11.4's
 > failure rather than narrowing it: it stops a caller-less command inheriting
 > an owner's privileges, and the broker says who may publish.
 >
@@ -1218,14 +1220,17 @@ here. A third — an origin read from a message, a header or a request body —
 re-opens the failure §11.4 describes, because it moves the choice to the caller.
 
 The command endpoint is declared in Ordering's `AddMassTransitMessaging`
-(`Ordering.Infrastructure/Messaging/DependencyInjection.cs`), and the
-consumers it binds are §3.2's "Accepts" column, one line each:
+(`Ordering.Infrastructure/Messaging/DependencyInjection.cs`), which holds
+each queue name once as a constant, and the consumers it binds are §3.2's
+"Accepts" column, one line each:
 
 ```csharp
 // The queue name must match Endpoints.OrderingQueue in §9.6, or the saga
 // sends into a void.
+public const string CommandsQueue = "ordering-commands";
+
 cfg.ReceiveEndpoint(
-    "ordering-commands",
+    CommandsQueue,
     e =>
     {
         e.UseMessageRetry(r =>
@@ -1514,8 +1519,9 @@ to fail in for a table whose window is a correctness property.
 
 > **That ceiling is a real throughput bound, and it is below the dispatcher's.**
 > `MaxBatchesPerPass × BatchSize` rows per table per `Interval` is well under
-> what §9.4's claim can process at its full rate — `TOP (100)` twice a
-> second — so a service that sustained its full delivery rate would create
+> what §9.4's claim can process at its full rate — a full batch at every poll
+> interval, both `OutboxDispatcher`'s — so a service that sustained its full
+> delivery rate would create
 > processed rows several times faster than this reclaims them. The two
 > numbers are not in competition at any ordinary load, because a row is only
 > purgeable a window after it was processed and a window of backlog is what
@@ -1926,11 +1932,10 @@ internal static class Endpoints
 }
 ```
 
-> The alternative is `EndpointConvention.Map<ReserveStock>(...)` at startup,
-> which lets activities call `.Send(ctx => ...)` with no address. It reads more
-> cleanly and fails at runtime rather than compile time if a mapping is missed.
-> Explicit addresses are used here because a blueprint should show where the
-> message goes.
+> **Explicit addresses, not `EndpointConvention.Map`, because a blueprint
+> should show where a message goes.** The convention, mapped at startup, lets
+> activities call `.Send(ctx => ...)` with no address; it reads more cleanly
+> and fails at runtime rather than compile time if a mapping is missed.
 
 The machine is `OrderFulfilmentSaga` in
 `Ordering.Infrastructure/Messaging`, and the diagram above is its
@@ -1947,10 +1952,17 @@ expiry types are Ordering's own and deliberately not contracts: they are sent
 by this saga to itself, carry no envelope, and no peer may bind them. One
 record per wait rather than one carrying a discriminator, because MassTransit
 correlates a schedule by message *type*. The confirmation wait is the only one
-whose far end is this same service, so its bound is §9.8's retry envelope on
-`ordering-commands` rather than a peer; the despatch wait has no automatic
-compensation, so it escalates to a human instead, because a wait with no
-compensating action still needs a bound.
+whose far end is this same service, so its delay is set by two of this
+repository's own mechanisms rather than by a peer: §9.8's retry envelope on
+`ordering-commands` is a floor it must clear, because a wait inside it fires
+while the command is still legitimately being retried, and §9.4's dispatcher
+backoff is the larger term and the one that decides the delay — chosen so that
+an outbox stuck long enough for §13.6's abandoned-row alert escalates rather
+than being waited through quietly, and matching the release wait for the same
+reason, both being waits on a message this service has already sent. The
+`ConfirmationTimeout` schedule in `OrderFulfilmentSaga` argues the number. The
+despatch wait has no automatic compensation, so it escalates to a human
+instead, because a wait with no compensating action still needs a bound.
 
 **Nothing catches an unhandled event, and the missing-instance policy is
 per event.** The machine keeps MassTransit's default for an event reaching a
@@ -2231,7 +2243,10 @@ decline and timeout branches keep their literals because those transitions
 > green.
 
 > **A cancellation has two origins and the saga sees both.** The saga's own
-> `CancelOrder` is sent on branches that end the workflow.
+> `CancelOrder` is sent on the branches that cancel the order —
+> `AwaitingStock`'s exits finalise with it, and `Compensating`'s stock exits
+> send it while the instance outlives the send until the payment half is
+> settled (ADR-025).
 > [§11.4](11-identity-authorization.md)'s customer endpoint cancels the
 > *aggregate* and ends nothing — so without `Event<OrderCancelled>` the
 > machine would go on reserving stock and authorising a card for an order the
@@ -2261,11 +2276,13 @@ decline and timeout branches keep their literals because those transitions
 > correlated to. `CancellationObserved`, above, is what closes those.
 >
 > **The money is a gap the last three rows state rather than close.** Undoing
-> an authorisation is a refund, and [§3.2](03-bounded-contexts.md) closes
-> **Ordering's** Accepts column at `AuthorisePayment` — there is no refund
-> command to send. Inventing one inside a state machine would be a §3.2
-> decision taken in the wrong place, so the saga escalates and the review row
-> is what carries it. Which of the two money codes a refund reaches, and
+> an authorisation is a refund, and in [§3.2](03-bounded-contexts.md)
+> `AuthorisePayment` is the only command in **Payments'** Accepts column and
+> Ordering's holds no money command at all — no service accepts a refund
+> command, so the saga has none to send. Inventing one inside a state machine
+> would be a §3.2 decision taken in the wrong place, so the saga escalates and
+> the review row is what carries it. Which of the two money codes a refund
+> reaches, and
 > whether one has happened when the row is read, is not knowable from this
 > machine; *Where an escalation lands* below says what does separate them.
 >
@@ -2452,10 +2469,11 @@ CREATE TABLE ordering.OrderReviews
 CREATE INDEX IX_OrderReviews_RaisedAt ON ordering.OrderReviews (RaisedAt);
 ```
 
-> The audit trail of *what was escalated and when* lives in the event history,
-> not here (§9.6) — so deleting the row loses nothing. Keeping a resolved row
-> would mean building the back-office surface to set the flag, which this
-> document does not have and does not need for the escalation to work.
+> **The row is a work item, not the audit trail.** What was escalated and when
+> lives in the event history (§9.6), so deleting the row loses nothing.
+> Keeping a resolved row would mean building the back-office surface to set
+> the flag, which this document does not have and does not need for the
+> escalation to work.
 
 `FlagOrderForReviewHandler` in `Ordering.Application/Orders/FlagOrderForReview`
 is one statement, and the shape of the statement is the decision:
@@ -2656,7 +2674,7 @@ CREATE INDEX IX_OrderFulfilmentStates_StartedAt
 // In AddMassTransitMessaging (§4.2). The repository is not optional:
 // MassTransit throws at startup without one, and the in-memory repository
 // used in tests (§12.5) discards every in-flight order on restart.
-cfg
+x
     .AddSagaStateMachine<OrderFulfilmentSaga, OrderFulfilmentState>()
     .EntityFrameworkRepository(r =>
     {
@@ -2732,14 +2750,14 @@ reason is §7.5's: work done inside an integration-event handler commits through
 the inbox filter's `SaveChangesAsync`, outside the transaction the dispatcher
 stages from. Only the command pipeline puts the aggregate's events on that path.
 
-> **Putting an event on that path is not the same as staging it, and today
-> `OrderStockConfirmedDomainEvent` is not staged at all.** §7.5's dispatcher
-> writes a Local row only for an event with a registered projection handler,
-> and this one is on no Broker allow-list either — so it is collected and
-> cleared with no row of either lane. The argument above is about where the
-> handler must live for the row to appear *when a projection is registered*,
-> which is §6.6's `OrderSummaries`. An implementation that reads this as a
-> description of what happens now will look for a row that is not there.
+> **Putting an event on that path is not the same as staging it.** §7.5's
+> dispatcher writes a Local row only for an event `ProjectionRegistry` finds a
+> handler for, and a Broker row only for one §9.3's allow-list names;
+> `OrderStockConfirmedDomainEvent` is kept off the allow-list on purpose
+> (`OrderingIntegrationEventMapper` argues why), so its only row is the Local
+> one §6.6's `OrderSummaries` projection earns by registering for it. The
+> argument above is about where the handler must live for that row to appear
+> when the projection is registered.
 
 It has a receive endpoint of its own — `ordering-stock-events`, in §9.8 below
 — and the reason is retry. A consumer sharing the saga's queue would take the
@@ -2785,11 +2803,10 @@ concurrent fan-out costs only the slowest call. That is the rule; [§10.1](10-ap
 two-BFF diagram illustrates it, and is a picture of the pattern rather than of
 this platform.
 
-**Here the budget is barely spent.** The BFF makes exactly one call — the
-pricing hop to Catalog below — and Catalog calls nobody, so the deepest chain
-in the platform is `Client → Gateway → BFF → Catalog`. The allowance for
-fan-out is stated because it is the rule the next reviewer will need, not
-because anything uses it yet.
+`Web.Bff`'s pricing hop to Catalog (below) is the platform's one synchronous
+call and Catalog calls nobody, so the deepest chain is
+`Client → Gateway → BFF → Catalog`. The fan-out allowance is stated because it
+is the rule a reviewer needs.
 
 That said, fan-out is not free — each additional call adds a failure mode and
 another dependency to the caller's availability. Beyond about three, the data
@@ -2971,16 +2988,15 @@ pricing.AddHttpMessageHandler<ClientCredentialsHandler>();
 
 > **Trap — `UseJitter` with no `MaxDelay`, which makes the sum above a
 > statistic rather than a bound.** `Delay × (2ⁿ − 1)` is the *nominal* backoff,
-> and jitter is not a small perturbation of it: Polly's decorrelated jitter was
-> measured producing a 392 ms wait where the nominal was 300 ms. Over 400
-> samples the worst total stayed under the un-jittered figure — but a sample is
-> not a bound, and the strategy documents none.
+> and jitter is not a small perturbation of it: Polly's decorrelated jitter can
+> exceed the nominal on a single retry, and the strategy documents no bound. A
+> sample of draws is not one either.
 >
-> `MaxDelay` restores one, and it caps the value *after* jitter — also
-> measured, by observing delays land on the cap exactly. With it the worst case
-> is `MaxDelay × MaxRetryAttempts` whatever the draw, which is a number a
-> startup assertion can be written against. Without it the assertion is
-> checking an average.
+> `MaxDelay` restores one, and it caps the value *after* jitter. With it the
+> worst case is `MaxDelay × MaxRetryAttempts` whatever the draw, which is a
+> number a startup assertion can be written against, and the one
+> `ResilienceHierarchyTests` in `tests/Web.Bff.Tests` takes from the built
+> options. Without it the assertion is checking an average.
 
 Assert this at startup rather than trusting review. `ResilienceHierarchyTests`
 in `tests/Web.Bff.Tests` reads the options **off the built host**, by the
@@ -3072,7 +3088,7 @@ models:
 
 ```csharp
 cfg.ReceiveEndpoint(
-    "ordering-catalog-events",
+    CatalogEventsQueue,
     e =>
     {
         e.UseMessageRetry(r =>
@@ -3157,7 +3173,7 @@ is a separate queue is what it must *not* share:
 
 ```csharp
 cfg.ReceiveEndpoint(
-    "ordering-stock-events",
+    StockEventsQueue,
     e =>
     {
         e.UseMessageRetry(r =>
@@ -3205,7 +3221,7 @@ x.AddEntityFrameworkOutbox<OrderingDbContext>(o =>
 });
 
 cfg.ReceiveEndpoint(
-    "ordering-fulfilment-saga",
+    FulfilmentSagaQueue,
     e =>
     {
         e.UseMessageRetry(r =>
