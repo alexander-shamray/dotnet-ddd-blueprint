@@ -419,12 +419,23 @@ class WhatItWrites(Stubbed):
     def test_what_read_admin_writes_is_what_realm_check_accepts(self):
         import realm_check
 
-        self.answers({"realm": "commerce", "accessTokenLifespan": 300},
+        self.answers({"realm": "commerce", "accessTokenLifespan": 300,
+                      "revokeRefreshToken": True, "refreshTokenMaxReuse": 0},
                      [{"clientId": realm_check.BROWSER_CLIENT,
                        "standardFlowEnabled": True,
                        "implicitFlowEnabled": False,
                        "directAccessGrantsEnabled": False,
-                       "attributes": {"use.refresh.tokens": "false"}}])
+                       "attributes": {"use.refresh.tokens": "false"}},
+                      {"clientId": realm_check.MOBILE_CLIENT,
+                       "standardFlowEnabled": True,
+                       "implicitFlowEnabled": False,
+                       "directAccessGrantsEnabled": False,
+                       "publicClient": True,
+                       "redirectUris": ["blueprint://auth/callback"],
+                       "defaultClientScopes": ["web-origins", "acr", "profile", "roles",
+                                               "basic", "commerce-api", "email"],
+                       "attributes": {"use.refresh.tokens": "true",
+                                      "pkce.code.challenge.method": "S256"}}])
         self.assertEqual(self.run_main(), 0)
 
         # Read back through the deploy path's own two calls, not through json.
@@ -440,12 +451,23 @@ class WhatItWrites(Stubbed):
         """
         import realm_check
 
-        self.answers({"realm": "commerce", "accessTokenLifespan": 18000},
+        self.answers({"realm": "commerce", "accessTokenLifespan": 18000,
+                      "revokeRefreshToken": True, "refreshTokenMaxReuse": 0},
                      [{"clientId": realm_check.BROWSER_CLIENT,
                        "standardFlowEnabled": True,
                        "implicitFlowEnabled": False,
                        "directAccessGrantsEnabled": False,
-                       "attributes": {"use.refresh.tokens": "false"}}])
+                       "attributes": {"use.refresh.tokens": "false"}},
+                      {"clientId": realm_check.MOBILE_CLIENT,
+                       "standardFlowEnabled": True,
+                       "implicitFlowEnabled": False,
+                       "directAccessGrantsEnabled": False,
+                       "publicClient": True,
+                       "redirectUris": ["blueprint://auth/callback"],
+                       "defaultClientScopes": ["web-origins", "acr", "profile", "roles",
+                                               "basic", "commerce-api", "email"],
+                       "attributes": {"use.refresh.tokens": "true",
+                                      "pkce.code.challenge.method": "S256"}}])
         self.run_main()
         found = realm_check.check_realm(
             realm_check.load_realm(self.out), realm_check.DEPLOYED, 300)

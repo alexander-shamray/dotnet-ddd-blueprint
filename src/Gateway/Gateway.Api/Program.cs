@@ -334,6 +334,20 @@ if (corsEnabled)
                 .WithOrigins(origins)
                 .AllowAnyHeader()
                 .AllowAnyMethod()
+                // Neither header is CORS-safelisted, so without an entry here
+                // a browser client cannot read either value: Retry-After is
+                // what §10.3's rejection handler goes to the trouble of
+                // computing, and CorrelationIdExtensions.Header is written on
+                // every response, not only a problem one. The problem body
+                // carries the same ID as a `correlationId` extension member,
+                // but that body exists only where a problem does — the
+                // header is what a 200 or a 204 still carries, so the body is
+                // the fallback for whatever cannot read the header (a
+                // redaction, a proxy stripping response headers it does not
+                // recognise) and the header is the fallback for every
+                // response the body does not exist on. Neither alone covers
+                // what the other does.
+                .WithExposedHeaders("Retry-After", CorrelationIdExtensions.Header)
                 .AllowCredentials()));
 }
 

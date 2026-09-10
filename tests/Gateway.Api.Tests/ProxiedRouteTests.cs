@@ -43,6 +43,66 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
     }
 
     /// <summary>
+    /// The write side's version of the test above: an authenticated POST
+    /// matches <c>catalog-write</c>, strips <c>/api</c> exactly as
+    /// <c>catalog-public</c>'s GET does, and reaches the same cluster.
+    /// </summary>
+    /// <remarks>
+    /// One assertion carries three properties at once: a route that did not
+    /// match would answer 404 or 405 here rather than reach the stub, a wrong
+    /// strip would arrive at the stub as a path <c>ProductEndpoints</c> does
+    /// not serve, and reaching the stub at all is the "not merely 405"
+    /// half — <see cref="The_catalog_namespace_matches_no_method_but_get_and_post"/>
+    /// below proves PUT is refused, which says nothing about whether POST is
+    /// actually admitted; this is the test that says so.
+    /// </remarks>
+    [Fact]
+    public async Task An_authenticated_post_reaches_catalog_write()
+    {
+        using StubbedGatewayFactory factory = new(stub.Address);
+        using HttpClient client = factory.CreateClient();
+
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/v1/catalog/products");
+        request.Headers.Add(TestAuthHandler.UserHeader, "018f4c2e");
+
+        HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        stub.ReceivedPaths.Last().ShouldBe("/v1/catalog/products");
+    }
+
+    /// <summary>
+    /// <c>catalog-write</c> names <c>"authenticated"</c>, so a caller with no
+    /// token is refused before the request reaches a destination — the
+    /// "nothing may make an additional path anonymous" constraint (§11.4),
+    /// asserted against the one path this PR opens.
+    /// </summary>
+    /// <remarks>
+    /// Paired with the test above on <see cref="A_wrong_method_is_challenged_before_it_is_refused"/>'s
+    /// own reasoning: a 401 alone is satisfied by a gateway with no routes at
+    /// all, so it says nothing about <c>catalog-write</c> on its own — the
+    /// 204 beside it is what establishes the route exists and admits an
+    /// authenticated caller, which is what makes this refusal a property of
+    /// the route rather than of a path nothing serves.
+    /// </remarks>
+    [Fact]
+    public async Task An_anonymous_post_to_catalog_write_is_refused()
+    {
+        using StubbedGatewayFactory factory = new(stub.Address);
+        using HttpClient client = factory.CreateClient();
+
+        int before = stub.ReceivedPaths.Count;
+
+        HttpResponseMessage response = await client.PostAsync(
+            "/api/v1/catalog/products",
+            content: null,
+            TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        stub.ReceivedPaths.Count.ShouldBe(before);
+    }
+
+    /// <summary>
     /// The second namespace strips its own prefix and only its own — one strip
     /// per namespace, and <c>/bff</c> has exactly one.
     /// </summary>
@@ -101,8 +161,10 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
     }
 
     /// <summary>
-    /// The public route matches GET alone (§10.2), so the POST Catalog exposes
-    /// behind <c>catalog:write</c> is not reachable through the gateway.
+    /// Neither catalog route names PUT — <c>catalog-public</c> is GET alone
+    /// and <c>catalog-write</c> is POST alone (§10.2 and §11.2) — so PUT is
+    /// what now probes the fallback/405 boundary this test used to probe with
+    /// POST, before this PR gave POST its own route and its own destination.
     /// </summary>
     /// <remarks>
     /// <b>405, and this comment claimed 404 until the assertion was tightened
@@ -121,7 +183,7 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
     /// <c>SetFallbackPolicy</c> applies to it and an anonymous caller is
     /// challenged before the method is ever considered. An authenticated one
     /// still gets 405. Both halves are asserted below, because the anonymous
-    /// half alone would go on passing if the route stopped existing.
+    /// half alone would go on passing if both routes stopped existing.
     /// </para>
     /// <para>
     /// This is a deliberate consequence rather than a side effect: 405 tells an
@@ -130,9 +192,17 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
     /// unaffected — it names <c>anonymous</c> in the route file, so it carries
     /// metadata and the fallback never reaches it.
     /// </para>
+    /// <para>
+    /// <b>POST left this test when <c>catalog-write</c> arrived.</b> It used
+    /// to be the method that named no route in this namespace; now it is
+    /// authenticated, proxied and answered by the stub like any other matched
+    /// request, which is the whole point of the route existing. Reusing POST
+    /// here would make this test assert the defect the route was added to
+    /// fix.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task The_public_route_matches_no_method_but_get()
+    public async Task The_catalog_namespace_matches_no_method_but_get_and_post()
     {
         using StubbedGatewayFactory factory = new(stub.Address);
         using HttpClient client = factory.CreateClient();
@@ -143,7 +213,7 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
         int before = stub.ReceivedPaths.Count;
 
         using HttpRequestMessage request =
-            new(HttpMethod.Post, "/api/v1/catalog/products");
+            new(HttpMethod.Put, "/api/v1/catalog/products");
         request.Headers.Add(TestAuthHandler.UserHeader, "018f4c2e");
 
         HttpResponseMessage response =
@@ -167,8 +237,12 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
     /// <remarks>
     /// Paired with the test above rather than replacing it. On its own a 401
     /// here is satisfied by a gateway with no routes at all — every path would
-    /// answer 401 — so it says nothing about <c>catalog-public</c>; the 405
-    /// beside it is what establishes the route exists and is GET-only.
+    /// answer 401 — so it says nothing about <c>catalog-public</c> or
+    /// <c>catalog-write</c>; the 405 beside it is what establishes that both
+    /// routes exist and that PUT names neither. PUT and not POST for the same
+    /// reason the test beside it changed method: POST is <c>catalog-write</c>'s
+    /// own, and an unauthenticated POST is refused by that route's own
+    /// "authenticated" policy rather than by the fallback this test is about.
     /// </remarks>
     [Fact]
     public async Task A_wrong_method_is_challenged_before_it_is_refused()
@@ -178,7 +252,7 @@ public sealed class ProxiedRouteTests(StubDestination stub) : IClassFixture<Stub
 
         int before = stub.ReceivedPaths.Count;
 
-        HttpResponseMessage response = await client.PostAsync(
+        HttpResponseMessage response = await client.PutAsync(
             "/api/v1/catalog/products",
             content: null,
             TestContext.Current.CancellationToken);

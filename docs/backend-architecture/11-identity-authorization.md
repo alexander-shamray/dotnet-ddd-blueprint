@@ -171,6 +171,58 @@ Validation is cheap; assume the network is hostile.
 > [#176](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/176)
 > is closed rather than carried.
 
+> **A native client is different, and the difference is where the token would
+> live rather than what platform it runs on.** ADR-034's refusal is about a
+> specific storage: `localStorage`, `sessionStorage`, an in-memory variable —
+> anything on `web-app`'s origin, readable by any script that shares it (an
+> XSS, a compromised transitive dependency in the bundle) and, because a
+> browser's profile is not itself encrypted per origin, by anything with
+> filesystem or backup access to the machine it runs on. `mobile-app`'s
+> refresh token is written to the Android Keystore or the iOS Keychain
+> instead — a store neither web storage nor an in-memory variable has an
+> equivalent of, protecting against a different set of attackers: another app
+> on the same device, extraction from a filesystem image or a device backup,
+> and an attacker who has the device but not the app's own unlocked process.
+>
+> **What that storage does not protect against is the app's own JavaScript.**
+> `mobile-app` authenticates a Capacitor/Ionic hybrid, and the secure-storage
+> plugin the app reads the Keystore or Keychain through is itself a
+> JavaScript-callable bridge — so a compromised transitive dependency in the
+> Angular bundle can call it and read the refresh token out exactly as the
+> equivalent dependency could read `web-app`'s out of `localStorage`. The
+> Keystore and the Keychain are not an immunity to the threat ADR-034 names;
+> they narrow *which* attackers reach the token, from "any script on the
+> origin, or anyone with the machine" to "this app's own compromised code,
+> and nothing else." That narrower set is still real, and it is the whole of
+> why `mobile-app`'s realm attribute is `use.refresh.tokens: "true"` where
+> `web-app`'s stays `"false"`:
+> [ADR-044](adr/ADR-044-the-native-client-holds-a-refresh-token-and-the-realm-rotates-it.md)
+> records the trade in full, including the correction this paragraph carries.
+>
+> **Rotation is what the native client owes in return, and ADR-044 is where
+> the trade and the settings' literal values live — this paragraph states
+> what rotation obliges rather than repeating them.** A refresh token becomes
+> usable exactly once; presenting one that has already been used does not
+> mint another access token, it revokes the session the token belonged to. A
+> refresh token copied off a device — a stale backup, another app reading
+> this one's Keystore entry through a platform bug — is a token the
+> legitimate app has already used or will use next; whichever of the two
+> presents it second is refused, and the session both were drawing from ends.
+> The setting that does this has no per-client override in Keycloak, so it
+> was already true of every client holding a refresh token the moment
+> `mobile-app` existed; `web-app` is unaffected, for the reason already given
+> above — it holds none for a rotation rule to bind.
+>
+> This client was added to the realm by a backend pull request in service of
+> the Angular/Ionic reference client's native build, specified in the sibling
+> `blueprint-frontend` repository's
+> `docs/superpowers/specs/2026-09-10-blueprint-frontend-design.md`, §9
+> ("Backend dependency: the `mobile-app` client"), which is also where its
+> exact attributes are enumerated.
+> [ADR-044](adr/ADR-044-the-native-client-holds-a-refresh-token-and-the-realm-rotates-it.md)
+> is the decision the three paragraphs above state, and this section is the
+> one it amends.
+
 ## 11.3 Service configuration
 
 `AddJwtAuthentication` lives in `Common.Web` and is composed by
