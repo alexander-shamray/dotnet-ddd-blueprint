@@ -23,13 +23,31 @@ declares the tree it speaks for:
 ```
 
 exactly once, before its first entry, and every entry in that file must name a
-path under that prefix. No two files may declare the same prefix. Placement is
+path the prefix covers. No two files may declare the same prefix. Placement is
 therefore mechanical rather than a judgement — an entry goes in the file whose
 prefix covers its path — and two agents suppressing findings in two trees never
 edit one file. That is `docs/change-locality.md`'s rule applied to the gate's
 own paperwork: a single file every agent has to edit is a mutex, and the
 entries were already grouped by tree, so the grouping is what became the
 boundary.
+
+Two rules decide what "covers" means, and both are enforced, so an entry that
+ignores either is a red build rather than a preference:
+
+**A trailing `/` is what makes a prefix a tree.** `deploy/` covers everything
+beneath `deploy/`; a prefix without the slash names one exact path and nothing
+else. Without that rule the check is a string comparison with no path boundary
+in it — `# covers: d` would own entries from `docs/` *and* `deploy/`, and
+`# covers: deploy` would own `deployment/`, so one file could span two trees
+while satisfying every other rule here.
+
+**Where prefixes nest, the longest one owns the entry.** Splitting `deploy/`
+into a `deploy/compose/` of its own is allowed, and then an entry for
+`deploy/compose/x` belongs to the child file — the parent may not keep it, and
+the gate says so by name. Without this, an entry under a split tree would
+satisfy both files and have two homes, which is two places for a reader to fail
+to find it. `tools/new-service` routes the entries it writes by the same rule,
+asking the gate rather than reimplementing it.
 
 **What did not move is where a suppression lives.** Every file is still under
 `.github/secret-scan/`, which is the whole of the argument for having had one
