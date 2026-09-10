@@ -781,13 +781,14 @@ environment was bound at start — so without an annotation that moves with the
 values, `helm upgrade` reports success and every pod carries on serving what it
 started with. The hash covers three things — **the whole of `.Values`**, the
 ConfigMap the common template renders, and the body of every entry a chart
-declares in `extraConfigMaps` — and the third of those is the gateway: it
-renders a second ConfigMap from its own template, so a hash over `.Values`
-alone left `cors.origins` and `ingress.trustedNetworks` — the two keys most
-likely to be edited without a rebuild — changing a mounted object while the
-pod template stayed byte-identical. The cost of the wider hash is a rollout
-on a key the container never sees, such as `autoscaling.maxReplicas`, and
-that is the safe direction.
+declares in `extraConfigMaps` — and the last two are there because values
+alone miss what the *templates* do. Hashing `.Values` covers what the operator
+changes; hashing the renders covers what a chart bump changes with no values
+edit at all — a key added or renamed in `commerce.config`, or an edit to the
+gateway's own edge-config template, either of which rewrites a mounted object
+while the pod template stays byte-identical. The cost of the wider hash is a
+rollout on a key the container never sees, such as `autoscaling.maxReplicas`,
+and that is the safe direction.
 
 > **That hash covers values, and a rotated Secret is not one — this is owed.**
 > Kubernetes snapshots a `secretKeyRef` into the container's environment when

@@ -516,28 +516,6 @@ public sealed class ServiceFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Seeds the price projection (§6.6). Required before any PlaceOrder test:
-    /// the handler reads prices locally, so an unseeded projection makes every
-    /// order fail ProductsUnavailable rather than erroring visibly.
-    /// </summary>
-    public Task SeedPriceAsync(Guid productId, decimal amount, string currency = "EUR") =>
-        ExecuteAsync(
-            """
-            MERGE ordering.ProductPrices AS t
-            USING (SELECT ProductId = {0}, Currency = {1}) AS s
-                ON t.ProductId = s.ProductId
-                AND t.Currency = s.Currency
-            WHEN NOT MATCHED THEN
-                INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
-                VALUES ({0}, {1}, {2}, 1, SYSDATETIMEOFFSET())
-            WHEN MATCHED THEN
-                UPDATE SET Amount = {2}, IsAvailable = 1, UpdatedAt = SYSDATETIMEOFFSET();
-            """,
-            productId,
-            currency,
-            amount);
-
-    /// <summary>
     /// Persists a real aggregate through the DbContext, so the row satisfies
     /// every invariant §5 enforces. A raw INSERT drifts from the aggregate the
     /// first time it gains a column, and drifts silently.
@@ -678,7 +656,7 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         // prices locally (§6.4). Seed here rather than per test: an unseeded
         // projection fails a PlaceOrder with ProductsUnavailable, which reads
         // as a domain assertion failing rather than missing fixture data.
-        await fixture.SeedPriceAsync(SeedData.ProductId, 12.50m);
+        await SeedPriceAsync(SeedData.ProductId, 12.50m, "EUR");
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -804,6 +782,25 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
             scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
         (await db.Orders.CountAsync()).ShouldBe(2);
     }
+
+    /// <summary>
+    /// Seeds the price projection (§6.6). Required before any PlaceOrder test:
+    /// the handler reads prices locally, so an unseeded projection makes every
+    /// order fail ProductsUnavailable rather than erroring visibly. Private to
+    /// the suite rather than on the fixture: it is one INSERT over
+    /// ExecuteAsync, and the fixture carries what more than one suite needs.
+    /// </summary>
+    private Task SeedPriceAsync(
+        Guid product, decimal amount, string currency, bool available = true) =>
+        fixture.ExecuteAsync(
+            """
+            INSERT INTO ordering.ProductPrices (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
+            VALUES ({0}, {1}, {2}, {3}, SYSDATETIMEOFFSET());
+            """,
+            product,
+            currency,
+            amount,
+            available);
 }
 ```
 
@@ -1413,7 +1410,9 @@ public class SubjectBindingTests(ServiceFixture fixture) : IAsyncLifetime
         // prices locally (§6.4), and an unseeded projection fails every
         // PlaceOrder with ProductsUnavailable — which would read as the
         // subject assertion failing rather than as missing fixture data.
-        await fixture.SeedPriceAsync(SeedData.ProductId, 12.50m);
+        // Its own copy of the helper, for the reason given where that one is
+        // declared: seeding a price is one INSERT, not fixture surface.
+        await SeedPriceAsync(SeedData.ProductId, 12.50m, "EUR");
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
