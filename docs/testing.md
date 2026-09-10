@@ -19,8 +19,9 @@ named in that command's scope.
 `dotnet test Platform.slnx` runs every test project the solution names, and
 `Platform.slnx` is the only list of them. Everything else is stdlib Python or
 shell, kept beside the thing it checks, and **the workflow that runs it is
-the enumeration** — `ci.yml` tests each gate and then runs it, and the
-workflows beside it do the same for whatever each one watches. None
+the enumeration** — `ci.yml` tests each gate and then runs it, and each
+workflow beside it is the run of whatever it watches, with a suite in front
+where the gate has one. None
 of those suites is in `Platform.slnx`, so a green solution says nothing about
 any of them; read the workflows, not this file, for what exists.
 
@@ -117,9 +118,10 @@ runs in the fast half and fails there. What it cannot do is report a pass.
 
 ## Running a gate on its own
 
-Every gate is tested and then run, so a green suite says the gate works and
-not that this checkout passes it. Most gate runs are the workflow step
-verbatim; these are the ones a step does not show whole.
+A gate with a suite is tested and then run, so a green suite says the gate
+works and not that this checkout passes it; a gate without one is only run.
+Most gate runs are the workflow step verbatim; these are the ones a step
+does not show whole.
 
 **The stage gate needs three `dotnet test` runs first**, which is
 [§15.1](backend-architecture/15-cicd-deployment.md)'s `UT → IT` with the

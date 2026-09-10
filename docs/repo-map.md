@@ -41,8 +41,9 @@ docs/backend-architecture/adr/  one file per ADR, so two agents appending
                              one each meet only in Appendix A's table
 docs/roadmap.md              estimates and a calendar laid over Appendix C —
                              closed
-docs/pr-decision-log.md      what each PR decided — closed; the record since
-                             is commit bodies and PR bodies
+docs/pr-decision-log.md      what each PR in its range decided — closed; the
+                             header names the range, and the record since is
+                             commit bodies and PR bodies
 docs/lessons.md              the lessons that generalise past the PR that
                              found them — closed. One level up from the log:
                              the log says what a PR decided, this says what

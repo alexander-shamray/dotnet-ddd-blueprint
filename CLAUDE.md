@@ -10,7 +10,7 @@ anything — is owned elsewhere and cited from here by name, never restated.
 |---|---|
 | [`docs/change-locality.md`](docs/change-locality.md) | The operating contract: the trust order, the one rule, the change classes and their touch sets |
 | [`docs/change-locality-plan.md`](docs/change-locality-plan.md) | The PRs that make the contract fully true |
-| [`docs/pr-decision-log.md`](docs/pr-decision-log.md) | What each PR decided — closed; the record since is commit bodies and PR bodies |
+| [`docs/pr-decision-log.md`](docs/pr-decision-log.md) | What each PR in its range decided — closed; the record since is commit bodies and PR bodies |
 | [`docs/lessons.md`](docs/lessons.md) | Lessons that generalise past the PR that found them — closed |
 | [`docs/harness-boundaries.md`](docs/harness-boundaries.md) | What the harness grants these commands, and refuses |
 | [`docs/repo-map.md`](docs/repo-map.md) | What each entry in the tree is, and why it is shaped that way |
@@ -102,8 +102,9 @@ every other suite; `docs/testing.md` carries what neither can say. Three things
 hold first: **`py -3.12`, not `python`**, because CI pins 3.12 and the local
 default is newer; **container tests are never skipped when Docker is absent**,
 because a skip fails open, so without a daemon they fail on `Failed to connect
-to Docker endpoint`; and **every gate is tested and then run**, and none
-outside `dotnet test` is in `Platform.slnx`, so a green solution says nothing.
+to Docker endpoint`; and **a gate with a suite is tested and then run**, and
+none outside `dotnet test` is in `Platform.slnx`, so a green solution says
+nothing.
 
 ## Build policy
 
