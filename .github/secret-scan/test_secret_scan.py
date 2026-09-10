@@ -353,6 +353,40 @@ class Redaction(unittest.TestCase):
         self.assertIn(secret_scan.digest(AWS_ID), err)
 
 
+class TheClosingAdvice(unittest.TestCase):
+    """Where the message sends a reader has to be somewhere.
+
+    `--allowed` takes the directory or one file out of it, and the suite's own
+    `run` uses the second — so the wording every test here provokes is the
+    single-file one, and a message that always spelt a directory named
+    `one-tree.txt/` in it.
+    """
+
+    def leak(self, root: Path) -> Path:
+        root.mkdir()
+        (root / "leak.txt").write_text(f"aws_key = {AWS_ID}\n", encoding="utf-8")
+        return root
+
+    def test_a_single_file_is_named_as_a_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, _, err = run(self.leak(Path(directory) / "tree"))
+        self.assertEqual(code, 1)
+        self.assertIn("an entry in one-tree.txt,", err)
+        self.assertNotIn("one-tree.txt/", err)
+
+    def test_a_directory_is_named_as_the_file_covering_the_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.leak(Path(directory) / "tree")
+            allowed = Path(directory) / "allowed"
+            allowed.mkdir()
+            allow_file(allowed, name="a.txt")
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = secret_scan.main(["--root", str(root), "--allowed", str(allowed)])
+        self.assertEqual(code, 1)
+        self.assertIn("an entry in the allowed/ file covering its tree", err.getvalue())
+
+
 class AsciiOutput(unittest.TestCase):
     """Both streams stay ASCII even when the tree does not.
 

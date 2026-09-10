@@ -716,9 +716,18 @@ def main(argv: list[str] | None = None) -> int:
         say(f"Secret scan: {len(findings)} finding(s) across {scanned} file(s).\n", sys.stderr)
         for finding in findings:
             say(f"  {finding}", sys.stderr)
-        say(f"\nA finding is cleared by fixing it, or by an entry in the "
-            f"{args.allowed.name}/ file covering its tree, naming the path, the "
-            f"rule, the fingerprint above and the reason.", sys.stderr)
+        # Named in the shape the caller actually passed. `--allowed` takes the
+        # directory or one file out of it, and a message that always spells a
+        # directory sends the single-file caller — the documented debugging
+        # mode — to `one-tree.txt/`, which is not a place.
+        where = (
+            f"the {args.allowed.name}/ file covering its tree"
+            if args.allowed.is_dir()
+            else args.allowed.name
+        )
+        say(f"\nA finding is cleared by fixing it, or by an entry in {where}, "
+            f"naming the path, the rule, the fingerprint above and the reason.",
+            sys.stderr)
         return 1
 
     # The accepted count is printed because on this repository it is non-zero,
