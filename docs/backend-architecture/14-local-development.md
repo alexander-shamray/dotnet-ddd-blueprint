@@ -55,8 +55,9 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${SQL_PASSWORD:-Local_Dev_Pa55w0rd!}"
       MSSQL_PID: Developer
-    # Every mapping in this file publishes on 127.0.0.1 rather than on every
-    # interface, argued once here rather than per service: the credentials
+    # Every mapping in the model publishes on 127.0.0.1 rather than on every
+    # interface — infrastructure.yml's and every unit's alike — argued once
+    # here rather than per service or per file: the credentials
     # are development defaults, so the interface is what stands in front of
     # them. The callout below the endpoint table carries the argument.
     ports: [ "127.0.0.1:1433:1433" ]
