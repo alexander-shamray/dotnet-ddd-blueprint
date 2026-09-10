@@ -23,7 +23,7 @@ WHAT THIS DOES NOT DO, stated here rather than inferred from a green run.
     somebody turns off.
   * It knows nothing about whether a value is live. `not-a-real-password` and a
     production password are the same shape, which is why the accepted ones are
-    ENUMERATED in allowed-secrets.txt rather than guessed at by the patterns.
+    ENUMERATED under allowed/ rather than guessed at by the patterns.
 
 So the honest claim is narrow: a credential of a recognised shape cannot reach
 `main` through a pull request without somebody writing down why it is there.
@@ -43,7 +43,7 @@ from pathlib import Path
 GATE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = GATE_DIR.parents[1]
 
-DEFAULT_ALLOWED = GATE_DIR / "allowed-secrets.txt"
+DEFAULT_ALLOWED = GATE_DIR / "allowed"
 
 # Directories never descended into. Build output and vendored trees are not
 # reviewed, so a finding in one is a finding nobody would act on; `.git` is
@@ -86,7 +86,7 @@ REFERENCE = re.compile(
 # the tree, and the seam `docs/secrets.md` argues for — the variable in front of
 # it — is a seam against DEPLOYING the value, not against writing it down. So
 # the wrapper is peeled and the default is judged. Section 14.1's accepted
-# local-development defaults then reach allowed-secrets.txt as decisions with
+# local-development defaults then reach the allow-list as decisions with
 # reasons, which is where this repository has already said they belong, rather
 # than disappearing into a pattern nobody re-reads.
 DEFAULTED_REFERENCE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*:[-=]?(.*)\}$", re.S)
@@ -355,14 +355,23 @@ def redact(secret: str) -> str:
 
 
 class Suppression:
-    """One accepted finding: a path, a rule, a fingerprint and a reason."""
+    """One accepted finding: a path, a rule, a fingerprint and a reason.
 
-    def __init__(self, path: str, rule: str, fingerprint: str, reason: str, line: int):
+    `source` is the allow-list file it was read from, and it is required
+    rather than defaulted: there is more than one file, so a line number on its
+    own would send a reader to line 84 of whichever they opened first. A
+    default would be a filename this class guesses, printed in a diagnostic
+    about an entry it did not read.
+    """
+
+    def __init__(self, path: str, rule: str, fingerprint: str, reason: str, line: int,
+                 source: str):
         self.path = path
         self.rule = rule
         self.fingerprint = fingerprint
         self.reason = reason
         self.line = line
+        self.source = source
         self.used = False
 
     def key(self) -> tuple[str, str, str]:
@@ -379,9 +388,62 @@ MIN_REASON = 15
 # pipe in, and reading it as an entry would silently truncate what they wrote.
 FIELDS = 4
 
+# The allow-list is a directory of per-tree files; why it is one is argued in
+# `.github/secret-scan/allowed/README.md` and not restated here.
+#
+# What this file owns is the grammar: `# covers: <prefix>`, exactly once per
+# file and before its first entry, and every entry's path must start with it.
+COVERS = re.compile(r"^#\s*covers:\s*(\S+)\s*$")
+
 
 def read_allowed(path: Path, known: set[str] | None = None) -> tuple[list[Suppression], list[str]]:
-    """The allow-list, and every complaint about its own syntax.
+    """Every tree's allow-list, and every complaint about their syntax.
+
+    `path` is the directory the per-tree files live in; a single file is
+    accepted too, and reads exactly the same way, which is what keeps
+    `--allowed` usable against one file while debugging.
+
+    **An empty directory is a missing allow-list and not an empty one.** The
+    two are the same to a reader of this function's result — no entries — and
+    opposite to the build: an allow-list that is not there is a gate that
+    cannot judge what it may ignore, and reporting it as a clean empty list
+    would clear every accepted finding in the repository at once.
+    """
+    if not path.exists():
+        return [], [f"{path.name} is missing: the gate cannot judge what it may ignore"]
+
+    files = sorted(path.glob("*.txt")) if path.is_dir() else [path]
+    if not files:
+        return [], [
+            f"{path.name}/ holds no allow-list file: the gate cannot judge what it "
+            f"may ignore"
+        ]
+
+    entries: list[Suppression] = []
+    problems: list[str] = []
+    declared: dict[str, str] = {}
+
+    for source in files:
+        found, said, covers = read_allowed_file(source, known)
+        if covers is not None:
+            if (already := declared.get(covers)) is not None:
+                said.append(
+                    f"{source.name}: `{covers}` is already covered by {already}. "
+                    f"Two files covering one tree is two places an entry could go, "
+                    f"and two places to fail to find it"
+                )
+            else:
+                declared[covers] = source.name
+        entries.extend(found)
+        problems.extend(said)
+
+    return entries, problems
+
+
+def read_allowed_file(
+    path: Path, known: set[str] | None = None
+) -> tuple[list[Suppression], list[str], str | None]:
+    """One tree's entries, the tree it declares, and its own complaints.
 
     Four pipe-separated fields. Exact repository-relative paths, never globs:
     a glob is how a suppression arrives for a file nobody has written yet, and
@@ -390,13 +452,21 @@ def read_allowed(path: Path, known: set[str] | None = None) -> tuple[list[Suppre
     """
     entries: list[Suppression] = []
     problems: list[str] = []
-
-    if not path.exists():
-        return entries, [f"{path.name} is missing: the gate cannot judge what it may ignore"]
+    covers: str | None = None
 
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
-        if not line or line.startswith("#"):
+        if not line:
+            continue
+        if line.startswith("#"):
+            if (declaration := COVERS.fullmatch(line)) is not None:
+                if covers is not None:
+                    problems.append(
+                        f"{path.name}:{number}: a second `covers:` directive. One "
+                        f"file speaks for one tree, or the prefix below it means "
+                        f"nothing")
+                    continue
+                covers = declaration.group(1)
             continue
 
         fields = [field.strip() for field in line.split("|")]
@@ -422,15 +492,34 @@ def read_allowed(path: Path, known: set[str] | None = None) -> tuple[list[Suppre
                 f"{path.name}:{number}: `{entry_path}` is empty or a glob; "
                 f"an entry names one exact path")
             continue
+
+        # The prefix, before the reason, because an entry in the wrong file is
+        # the failure this directive exists for and the reason it carries has
+        # no bearing on it. A file with no directive at all refuses every entry
+        # rather than accepting them unscoped: an undeclared file that
+        # suppressed anything would be the single shared list back again, one
+        # missing line at a time.
+        if covers is None:
+            problems.append(
+                f"{path.name}:{number}: the file declares no `# covers: <prefix>`, "
+                f"so it speaks for no tree and may hold no entry")
+            continue
+        if not entry_path.startswith(covers):
+            problems.append(
+                f"{path.name}:{number}: `{entry_path}` is outside `{covers}`, which "
+                f"is the tree this file covers. The entry belongs in the file that "
+                f"covers its path")
+            continue
         if len(reason) < MIN_REASON:
             problems.append(
                 f"{path.name}:{number}: the reason is {len(reason)} character(s). "
                 f"An entry states WHY, in a sentence")
             continue
 
-        entries.append(Suppression(entry_path, rule, fingerprint, reason, number))
+        entries.append(
+            Suppression(entry_path, rule, fingerprint, reason, number, path.name))
 
-    return entries, problems
+    return entries, problems, covers
 
 
 # ---------------------------------------------------------------- scanning --
@@ -527,8 +616,8 @@ def audit(findings: list[Finding], entries: list[Suppression]) -> list[str]:
     for entry in entries:
         if entry.key() in by_key:
             problems.append(
-                f"allowed-secrets.txt:{entry.line}: duplicates the entry on line "
-                f"{by_key[entry.key()].line}")
+                f"{entry.source}:{entry.line}: duplicates the entry on "
+                f"{by_key[entry.key()].source}:{by_key[entry.key()].line}")
             continue
         by_key[entry.key()] = entry
 
@@ -541,7 +630,7 @@ def audit(findings: list[Finding], entries: list[Suppression]) -> list[str]:
         entry.used = True
 
     stale = [
-        f"allowed-secrets.txt:{entry.line}: `{entry.path}` no longer matches "
+        f"{entry.source}:{entry.line}: `{entry.path}` no longer matches "
         f"{entry.rule} with sha256:{entry.fingerprint}. The finding is gone, "
         f"or the value changed. Re-read the entry and delete it or update it"
         for entry in entries if not entry.used
@@ -600,9 +689,9 @@ def main(argv: list[str] | None = None) -> int:
         say(f"Secret scan: {len(findings)} finding(s) across {scanned} file(s).\n", sys.stderr)
         for finding in findings:
             say(f"  {finding}", sys.stderr)
-        say(f"\nA finding is cleared by fixing it, or by an entry in "
-            f"{args.allowed.name} naming the path, the rule, the fingerprint above "
-            f"and the reason.", sys.stderr)
+        say(f"\nA finding is cleared by fixing it, or by an entry in the "
+            f"{args.allowed.name}/ file covering its tree, naming the path, the "
+            f"rule, the fingerprint above and the reason.", sys.stderr)
         return 1
 
     # The accepted count is printed because on this repository it is non-zero,

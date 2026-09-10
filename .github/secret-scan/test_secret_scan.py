@@ -33,15 +33,35 @@ def found(rule_id: str, text: str) -> list[str]:
     return [finding.secret for finding in secret_scan.scan_text("probe.txt", text, [rule])]
 
 
-def allow_file(directory: Path, *lines: str) -> Path:
-    path = directory / "allowed-secrets.txt"
-    path.write_text("# header\n" + "".join(f"{line}\n" for line in lines), encoding="utf-8")
+# Every synthetic entry in this file names `a.txt`, so that is the tree these
+# fixtures declare. A `covers:` prefix may be as narrow as one path — the check
+# is `startswith`, and narrower is strictly safer — and the alternative here
+# would be a fixture that covers everything, which is the one shape the
+# directive exists to make unwritable.
+COVERS = "a.txt"
+
+
+def allow_file(directory: Path, *lines: str, covers: str | None = COVERS,
+               name: str = "one-tree.txt") -> Path:
+    path = directory / name
+    declaration = "" if covers is None else f"# covers: {covers}\n"
+    path.write_text(
+        "# header\n" + declaration + "".join(f"{line}\n" for line in lines),
+        encoding="utf-8")
     return path
 
 
 def parse(*lines: str) -> tuple[list[secret_scan.Suppression], list[str]]:
     with tempfile.TemporaryDirectory() as directory:
         return secret_scan.read_allowed(allow_file(Path(directory), *lines))
+
+
+def parse_with(*lines: str, covers: str | None = COVERS
+               ) -> tuple[list[secret_scan.Suppression], list[str]]:
+    """`parse`, with the tree the file declares under the caller's control."""
+    with tempfile.TemporaryDirectory() as directory:
+        return secret_scan.read_allowed(
+            allow_file(Path(directory), *lines, covers=covers))
 
 
 def run(root: Path, *allowed: str) -> tuple[int, str, str]:
@@ -60,7 +80,7 @@ def run(root: Path, *allowed: str) -> tuple[int, str, str]:
 
 # Fixtures assembled to the published length of each provider's key. They are
 # invented values of the right SHAPE, which is the only thing under test — and
-# they are the reason this file has entries in allowed-secrets.txt, since a
+# they are the reason this file has entries under allowed/, since a
 # positive control has to be the literal a real one would be.
 AWS_ID = "AKIAIOSFODNN7EXAMPLE"
 AWS_SECRET = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY12"
@@ -357,9 +377,10 @@ class AsciiOutput(unittest.TestCase):
 
 class AllowList(unittest.TestCase):
     def test_reads_a_well_formed_entry(self):
-        entries, problems = parse(
+        entries, problems = parse_with(
             "deploy/compose/.env.example | env-assignment | abc123def456 | "
-            "Section 14.1's documented local default.")
+            "Section 14.1's documented local default.",
+            covers="deploy/")
         self.assertEqual(problems, [])
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].rule, "env-assignment")
@@ -401,6 +422,75 @@ class AllowList(unittest.TestCase):
             _, problems = secret_scan.read_allowed(Path(directory) / "absent.txt")
         self.assertEqual(len(problems), 1)
         self.assertIn("missing", problems[0])
+
+    def test_reads_every_file_in_the_directory(self):
+        # The shape the gate actually runs in: the allow-list is a directory,
+        # and an entry is read from whichever file covers its tree.
+        with tempfile.TemporaryDirectory() as directory:
+            allowed = Path(directory)
+            allow_file(
+                allowed, "a.txt | credential-assignment | abc123def456 | The first tree's.",
+                name="one.txt")
+            allow_file(
+                allowed, "b.txt | credential-assignment | 456def123abc | The second tree's.",
+                covers="b.txt", name="two.txt")
+            entries, problems = secret_scan.read_allowed(allowed)
+
+        self.assertEqual([], problems)
+        self.assertEqual({"a.txt", "b.txt"}, {entry.path for entry in entries})
+        # And each remembers where it came from, which is what a diagnostic
+        # naming a line number needs in order to mean anything.
+        self.assertEqual({"one.txt", "two.txt"}, {entry.source for entry in entries})
+
+    def test_reports_a_directory_with_no_allow_list_in_it(self):
+        # An empty directory and a missing one are the same to a reader of the
+        # result — no entries — and opposite to the build. Reported as missing
+        # rather than as a clean empty list, which would clear every accepted
+        # finding in the repository at once.
+        with tempfile.TemporaryDirectory() as directory:
+            _, problems = secret_scan.read_allowed(Path(directory))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("no allow-list file", problems[0])
+
+    def test_rejects_an_entry_outside_the_tree_its_file_covers(self):
+        _, problems = parse_with(
+            "b.txt | credential-assignment | abc123def456 | The wrong file's tree.")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("outside `a.txt`", problems[0])
+
+    def test_rejects_every_entry_in_a_file_that_declares_no_tree(self):
+        # Fails closed per entry rather than passing them through unscoped: an
+        # undeclared file that suppressed anything would be the single shared
+        # list back again, one missing line at a time.
+        _, problems = parse_with(
+            "a.txt | credential-assignment | abc123def456 | A perfectly good reason.",
+            covers=None)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("declares no `# covers:", problems[0])
+
+    def test_rejects_a_second_covers_directive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = allow_file(
+                Path(directory),
+                "a.txt | credential-assignment | abc123def456 | A perfectly good reason.")
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "# header\n", "# header\n# covers: a.txt\n"),
+                encoding="utf-8")
+            _, problems = secret_scan.read_allowed(path)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("a second `covers:` directive", problems[0])
+
+    def test_rejects_two_files_covering_one_tree(self):
+        # Then an entry has two homes, and a reader looking for it has two
+        # places to fail to find it.
+        with tempfile.TemporaryDirectory() as directory:
+            allowed = Path(directory)
+            allow_file(allowed, name="one.txt")
+            allow_file(allowed, name="two.txt")
+            _, problems = secret_scan.read_allowed(allowed)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("already covered by", problems[0])
 
     def test_reports_a_duplicated_entry(self):
         entry = "a.txt | credential-assignment | abc123def456 | The same reason twice over."

@@ -1,0 +1,31 @@
+# One tree's share of the secret-scan allow-list:
+#
+#     path | rule-id | sha256 fingerprint | reason
+#
+# The format, what an entry may say, and why this is a directory rather than a
+# file are argued once in README.md beside this file. Do not restate them here.
+#
+# covers: .github/
+
+
+# The gate's own positive controls.
+#
+# test_secret_scan.py holds one literal of each provider's published shape,
+# because a positive control has to be the thing it controls for. Every value
+# below is invented and belongs to nobody. They are the reason this file is
+# the length it is, and they are also the demonstration that the gate works.
+
+.github/secret-scan/test_secret_scan.py | private-key-block | 8bcac7908eb9 | Positive control for the RSA PEM header. A header, not key material.
+.github/secret-scan/test_secret_scan.py | private-key-block | 3021d90eb943 | Positive control for the unqualified PEM header.
+.github/secret-scan/test_secret_scan.py | private-key-block | 03d104c669e3 | Positive control for the OpenSSH PEM header.
+.github/secret-scan/test_secret_scan.py | connection-string-password | a612e6c33089 | Invented value in the connection-string positive control.
+.github/secret-scan/test_secret_scan.py | aws-access-key-id | 1a5d44a2dca1 | Amazon's own published example identifier, which belongs to nobody.
+.github/secret-scan/test_secret_scan.py | credential-assignment | 356f5a3587ba | The AWS secret-key fixture, seen a second time by the name rule.
+.github/secret-scan/test_secret_scan.py | github-token | c2f9a2618fbd | Invented token of the published GitHub shape and length.
+.github/secret-scan/test_secret_scan.py | stripe-live-key | 65890fd39803 | Invented key of the live Stripe shape, paired with a test-mode near miss.
+.github/secret-scan/test_secret_scan.py | google-api-key | 77f903c66277 | Invented key of the published Google shape and length.
+.github/secret-scan/test_secret_scan.py | model-provider-api-key | 8eb2908e3bc4 | Invented xAI key, the provider this repository's own reviewer uses.
+.github/secret-scan/test_secret_scan.py | model-provider-api-key | dc983026fd00 | Invented Anthropic key, the provider this harness runs on.
+.github/secret-scan/test_secret_scan.py | credential-assignment | 9c56cc51b374 | The eight-character floor asserted from the passing side.
+.github/secret-scan/test_secret_scan.py | credential-assignment | 4e5f83f2e200 | A JSON-shaped positive control for the name rule.
+.github/secret-scan/test_secret_scan.py | credential-assignment | 72399361da6a | A YAML-shaped positive control for the name rule.
