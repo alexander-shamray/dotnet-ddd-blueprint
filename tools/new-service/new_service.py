@@ -1623,7 +1623,7 @@ TOOL_ROOT = Path(__file__).resolve().parents[2]
 # Everything this script calls on the module it loads. Named so a file that
 # imports cleanly and is not the gate fails here, against the path the caller
 # supplied, rather than three frames later against a symbol.
-SCAN_GATE_MEMBERS = ("COVERS", "RULES", "read_allowed", "scan_text")
+SCAN_GATE_MEMBERS = ("COVERS", "RULES", "covers_path", "read_allowed", "scan_text")
 
 # The heading width the allow-list's own section headers are padded to.
 SCAN_HEADING_WIDTH = 76
@@ -2940,8 +2940,13 @@ def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str
             # entry, one file: a finding no prefix covers is refused, because
             # the alternative is choosing a file for it, and which file a
             # suppression lives in is the whole of what makes it findable.
+            #
+            # `gate.covers_path` rather than `startswith`, because a prefix
+            # without a trailing slash is one path and not a tree — and because
+            # the gate is what will judge the entry this writes, so asking it
+            # is the only way the two cannot disagree.
             home = max(
-                (prefix for prefix in covers if finding.path.startswith(prefix)),
+                (prefix for prefix in covers if gate.covers_path(prefix, finding.path)),
                 key=len,
                 default=None,
             )

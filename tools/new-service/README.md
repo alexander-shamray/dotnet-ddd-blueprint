@@ -25,7 +25,7 @@ table matches `plan()`.
 | | |
 |---|---|
 | `Platform.slnx` | the service's project entries, in alphabetical position |
-| `deploy/compose/services/<Name>.yml` | the migrator and API pair — created, not spliced |
+| `deploy/compose/services/<name>.yml` | the migrator and API pair — created, not spliced. Lower case: the unit's file name is the service key's casing, not the PascalCase input, so `Yankee` renders `services/yankee.yml` |
 | `deploy/compose/docker-compose.yml` | one `include:` line for that file |
 | `deploy/compose/docker-compose.infra-only.yml` | both halves of that pair, excluded |
 | `deploy/compose/.env.example` | the two §7.1 connection variables |

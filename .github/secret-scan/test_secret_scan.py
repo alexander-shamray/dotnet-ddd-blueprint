@@ -559,6 +559,37 @@ class AllowList(unittest.TestCase):
             {"deploy/helm/values.yaml", "deploy/compose/x.yml"},
             {entry.path for entry in entries})
 
+    def test_a_prefix_without_a_slash_is_one_path_and_not_a_tree(self):
+        # `startswith` has no path boundary, so `# covers: d` would own entries
+        # from BOTH `docs/` and `deploy/` — one file spanning two trees while
+        # satisfying every other check, which is the invariant the whole split
+        # rests on. A prefix that does not end in `/` is one path.
+        _, problems = parse_with(
+            "docs/x.md | credential-assignment | abc123def456 | "
+            "Two trees under one letter.",
+            covers="d")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("outside `d`", problems[0])
+
+    def test_a_prefix_without_a_slash_still_covers_its_own_path(self):
+        # The other side: a declaration naming one file is legal and narrow,
+        # which is what the fixtures in this class rely on.
+        entries, problems = parse_with(
+            "a.txt | credential-assignment | abc123def456 | The one path it names.",
+            covers="a.txt")
+        self.assertEqual([], problems)
+        self.assertEqual(["a.txt"], [entry.path for entry in entries])
+
+    def test_a_tree_prefix_does_not_leak_into_a_sibling_that_shares_its_letters(self):
+        # `deploy` without the slash would own `deployment/` too. With it, the
+        # boundary is the separator rather than a character count.
+        _, problems = parse_with(
+            "deployment/x.yml | credential-assignment | abc123def456 | "
+            "A sibling that shares the first six letters.",
+            covers="deploy/")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("outside `deploy/`", problems[0])
+
     def test_rejects_two_files_covering_one_tree(self):
         # Then an entry has two homes, and a reader looking for it has two
         # places to fail to find it.

@@ -1243,6 +1243,57 @@ class TheAllowListStep(unittest.TestCase):
         keys = [entry.key() for entry in entries]
         self.assertEqual(len(set(keys)), len(keys), "the second render duplicated an entry")
 
+    def test_an_entry_goes_to_the_child_file_when_a_tree_is_split_further(self):
+        # The scaffold's own longest-prefix routing, which the gate's tests
+        # cannot reach: they exercise the gate's copy of the rule, and this is
+        # the code that decides which file a RENDER writes to. Every allow-list
+        # file in this repository declares a disjoint top-level tree, so
+        # nothing else here makes the `max` branch choose between two matches —
+        # it could regress to "first match wins" with this suite still green
+        # and produce a tree the gate then rejects.
+        #
+        # **The child file is named so that it sorts AFTER the parent**, which
+        # is what makes that regression fail here. `allow_list_trees` reads
+        # `sorted(glob(...))`, so a `deploy-compose.txt` would be read first and
+        # a first-match implementation would pick it by accident — green, and
+        # about nothing. Measured both ways before this name was chosen.
+        allowed = self.root / SCAN_ALLOW_LIST
+        deploy = allowed / "deploy.txt"
+        body = deploy.read_text(encoding="utf-8").split("\n")
+
+        header = [line for line in body if not line.strip() or line.startswith("#")]
+        entries = [line for line in body if line.strip() and not line.startswith("#")]
+        child = [line for line in entries if line.startswith("deploy/compose/")]
+        parent = [line for line in entries if not line.startswith("deploy/compose/")]
+        self.assertNotEqual([], child, "the fixture found nothing to move")
+
+        deploy.write_text(
+            "\n".join(header + parent) + "\n", encoding="utf-8", newline="\n")
+        (allowed / "deploy_compose.txt").write_text(
+            "# covers: deploy/compose/\n\n" + "\n".join(child) + "\n",
+            encoding="utf-8", newline="\n")
+
+        # The fixture has to be a tree the gate already accepts, or the render
+        # refuses for that reason instead and this test proves nothing.
+        _, problems = self.parse_all(self.allow_list())
+        self.assertEqual([], problems, "the split fixture does not itself parse")
+
+        written = allow_list_appended(plan(self.root, PROBE, PORT, MIGRATION_ID))
+
+        unit = f"deploy/compose/services/{PROBE.lower()}.yml"
+        landed = {
+            relative: [
+                line for line in body.split("\n") if line.startswith(unit)
+            ]
+            for relative, body in written.items()
+        }
+        self.assertNotEqual(
+            [], landed.get(f"{SCAN_ALLOW_LIST}/deploy_compose.txt", []),
+            f"the unit's entries did not reach the child file: {sorted(written)}")
+        self.assertEqual(
+            [], landed.get(f"{SCAN_ALLOW_LIST}/deploy.txt", []),
+            "the parent file kept entries the child tree owns")
+
     def test_a_render_never_explains_a_finding_it_did_not_introduce(self):
         # The defect #161's own fix shipped with. Ownership was decided by
         # `path == finding.path and rule == finding.rule.id and marker in

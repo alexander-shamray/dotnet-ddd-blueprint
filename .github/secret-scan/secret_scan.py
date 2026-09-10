@@ -396,6 +396,24 @@ FIELDS = 4
 COVERS = re.compile(r"^#\s*covers:\s*(\S+)\s*$")
 
 
+def covers_path(prefix: str, path: str) -> bool:
+    """Does a `covers:` declaration own this path?
+
+    **A trailing slash is what makes a prefix a tree**, and without that rule
+    `str.startswith` has no path boundary at all: `# covers: d` would own
+    entries from `docs/` AND `deploy/`, so one file could span two trees while
+    satisfying every check — the exact invariant this split exists to hold. A
+    prefix that does not end in `/` is therefore one path and not a tree, which
+    is also the narrowest and safest reading of a declaration somebody typed
+    without the slash.
+
+    `tools/new-service` asks this question too, and asks it here rather than
+    reimplementing it: the gate decides which file owns an entry, and a second
+    predicate would be a second answer that drifts.
+    """
+    return path.startswith(prefix) if prefix.endswith("/") else path == prefix
+
+
 def read_allowed(path: Path, known: set[str] | None = None) -> tuple[list[Suppression], list[str]]:
     """Every tree's allow-list, and every complaint about their syntax.
 
@@ -450,7 +468,7 @@ def read_allowed(path: Path, known: set[str] | None = None) -> tuple[list[Suppre
     # here.
     for entry in entries:
         owner = max(
-            (prefix for prefix in declared if entry.path.startswith(prefix)),
+            (prefix for prefix in declared if covers_path(prefix, entry.path)),
             key=len,
             default=None,
         )
@@ -531,7 +549,7 @@ def read_allowed_file(
                 f"{path.name}:{number}: the file declares no `# covers: <prefix>`, "
                 f"so it speaks for no tree and may hold no entry")
             continue
-        if not entry_path.startswith(covers):
+        if not covers_path(covers, entry_path):
             problems.append(
                 f"{path.name}:{number}: `{entry_path}` is outside `{covers}`, which "
                 f"is the tree this file covers. The entry belongs in the file that "
