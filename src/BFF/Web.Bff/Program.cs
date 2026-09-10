@@ -94,39 +94,43 @@ pricing
     {
         // Outermost bound. Defaults to 30 s, which would breach the hierarchy
         // against ServiceOptions.OperationTimeout — equal is not below it.
-        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(5);
+        options.TotalRequestTimeout.Timeout = PricingHop.TotalRequestTimeout;
 
-        options.Retry.MaxRetryAttempts = 2;            // 3 attempts in total
+        // Redeliveries after the first, so one more request than this.
+        options.Retry.MaxRetryAttempts = PricingHop.MaxRetryAttempts;
         options.Retry.BackoffType = DelayBackoffType.Exponential;
         options.Retry.UseJitter = true;
-        options.Retry.Delay = TimeSpan.FromMilliseconds(150);
+        options.Retry.Delay = PricingHop.RetryDelay;
 
         // The cap that makes the budget below ARITHMETIC rather than
         // statistical, and without it the stated sum is not a bound at all.
         // UseJitter randomises each delay, and Polly's decorrelated jitter can
-        // exceed the nominal for a single retry — measured at 392 ms against a
-        // 300 ms nominal over 400 samples. The observed worst TOTAL stayed
-        // under the un-jittered 450 ms, but a sample is not a bound, and the
-        // strategy documents none without this.
+        // exceed the nominal for a single retry — measured at 392 ms against
+        // this cap's own value as the nominal, over 400 samples. The observed
+        // worst TOTAL stayed under the un-jittered sum, but a sample is not a
+        // bound, and the strategy documents none without this.
         //
-        // Capped, the worst case is 2 × 300 ms whatever the jitter draws, so
-        // 3 × 1.4 s + 0.6 s = 4.8 s fits inside the 5 s total with the last
-        // attempt able to finish. ResilienceHierarchyTests computes it from
-        // this property rather than from the nominal.
-        options.Retry.MaxDelay = TimeSpan.FromMilliseconds(300);
+        // Capped, the worst backoff is MaxRetryAttempts × MaxRetryDelay
+        // whatever the jitter draws, so that plus
+        // (MaxRetryAttempts + 1) × AttemptTimeout fits inside
+        // TotalRequestTimeout with the last attempt able to finish.
+        // ResilienceHierarchyTests computes it from this property rather than
+        // from the nominal.
+        options.Retry.MaxDelay = PricingHop.MaxRetryDelay;
 
-        // 3 × 1.4 s + 2 × 300 ms = 4.8 s. The delays are part of the budget
+        // (MaxRetryAttempts + 1) × AttemptTimeout, plus
+        // MaxRetryAttempts × MaxRetryDelay. The delays are part of the budget
         // rather than an extra on top of it: leave them out and the arithmetic
         // clears the ceiling while the configuration does not, so the third
         // attempt is cancelled part-way and the retry that was meant to save
         // the request never had a chance. ResilienceHierarchyTests asserts the
         // sum including backoff for exactly that reason, and takes the backoff
         // from MaxDelay above rather than from the nominal.
-        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(1.4);
+        options.AttemptTimeout.Timeout = PricingHop.AttemptTimeout;
 
-        options.CircuitBreaker.FailureRatio = 0.5;
-        options.CircuitBreaker.MinimumThroughput = 10;
-        options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(15);
+        options.CircuitBreaker.FailureRatio = PricingHop.CircuitBreakerFailureRatio;
+        options.CircuitBreaker.MinimumThroughput = PricingHop.CircuitBreakerMinimumThroughput;
+        options.CircuitBreaker.BreakDuration = PricingHop.CircuitBreakerBreakDuration;
 
         // The breaker samples over a window, and the window must be at least
         // twice the attempt timeout or the library refuses the options at
