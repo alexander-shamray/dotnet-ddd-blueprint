@@ -31,7 +31,7 @@ namespace Common.Application;
 /// A broad handler would therefore be registered, invisible, and silent: the
 /// registry finds nothing, no <c>Local</c> row is staged, and the projection
 /// never runs while every dashboard stays green. That is the precise failure
-/// §7.5's "empty is a decision" table exists to rule out, so the interface
+/// §9.4's "empty is a decision" table exists to rule out, so the interface
 /// states the exact-match semantics the container actually has.
 /// </remarks>
 public interface IProjectionHandler<TEvent>

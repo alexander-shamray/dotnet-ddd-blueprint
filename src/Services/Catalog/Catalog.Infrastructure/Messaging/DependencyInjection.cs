@@ -56,11 +56,13 @@ public static class DependencyInjection
                 // does once one is is manufacture a queue named after the
                 // consumer type — carrying NEITHER the inbox filter NOR the
                 // retry policy, both being per-endpoint configuration that an
-                // invented endpoint never receives. §9.8 permits an endpoint
-                // without the inbox exactly once, for the saga, and requires
-                // that opt-out to be written down where it is taken; a queue
-                // MassTransit invents takes it and writes nothing. So a
-                // consumer added here needs an explicit ReceiveEndpoint with
+                // invented endpoint never receives. §9.8 admits no exception
+                // to the inbox — every receive endpoint applies InboxFilter<>,
+                // and the one departure that section does record is the saga's
+                // OUTBOX, which is a different filter and a different argument
+                // (ADR-032). So an invented queue is not an opt-out anyone is
+                // entitled to take; it is an endpoint the rule cannot reach.
+                // A consumer added here needs an explicit ReceiveEndpoint with
                 // its own policy, which is what the absence of this line
                 // forces.
             });
