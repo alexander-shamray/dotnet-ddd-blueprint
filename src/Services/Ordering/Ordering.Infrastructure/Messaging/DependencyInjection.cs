@@ -248,7 +248,7 @@ public static class DependencyInjection
                     CatalogEventsQueue,
                     e =>
                     {
-                        // §9.8's plain exponential five, with nothing
+                        // RetryPolicy.Standard, with nothing
                         // excluded the way ordering-commands excludes
                         // ContractMappingException. The faults worth retrying
                         // dominate — a deadlock or a dropped connection is
@@ -257,17 +257,13 @@ public static class DependencyInjection
                         // would be false about the assembly's own throw:
                         // IntegrationEventConsumer<T> fails when the §6.2 scan
                         // registered no handler, which no backoff repairs.
-                        // That still reaches the error queue, five attempts
-                        // later than it might, and §9.4 wants it there: a
+                        // That still reaches the error queue, a whole
+                        // RetryPolicy.RetryLimit of redeliveries later than it
+                        // might, and §9.4 wants it there: a
                         // misconfigured endpoint should be loud rather than
                         // quick. An exclusion list is what changes if that
                         // ever stops being an acceptable trade.
-                        e.UseMessageRetry(r =>
-                            r.Exponential(
-                                retryLimit: 5,
-                                minInterval: TimeSpan.FromSeconds(1),
-                                maxInterval: TimeSpan.FromMinutes(1),
-                                intervalDelta: TimeSpan.FromSeconds(2)));
+                        e.UseMessageRetry(RetryPolicy.Standard);
 
                         // BEFORE the in-memory outbox, which is a correctness
                         // rule rather than a preference (§9.8): filters added
@@ -300,7 +296,7 @@ public static class DependencyInjection
                     });
 
                 // §9.4's command endpoint, and the one whose retry policy is
-                // not the plain exponential five.
+                // not RetryPolicy.Standard alone.
                 cfg.ReceiveEndpoint(
                     CommandsQueue,
                     e =>
@@ -319,11 +315,7 @@ public static class DependencyInjection
                             // faults at all.
                             r.Ignore<ContractMappingException>();
 
-                            r.Exponential(
-                                retryLimit: 5,
-                                minInterval: TimeSpan.FromSeconds(1),
-                                maxInterval: TimeSpan.FromMinutes(1),
-                                intervalDelta: TimeSpan.FromSeconds(2));
+                            RetryPolicy.Standard(r);
                         });
 
                         // Inbox outside the in-memory outbox, for the reason
@@ -353,12 +345,7 @@ public static class DependencyInjection
                     StockEventsQueue,
                     e =>
                     {
-                        e.UseMessageRetry(r =>
-                            r.Exponential(
-                                retryLimit: 5,
-                                minInterval: TimeSpan.FromSeconds(1),
-                                maxInterval: TimeSpan.FromMinutes(1),
-                                intervalDelta: TimeSpan.FromSeconds(2)));
+                        e.UseMessageRetry(RetryPolicy.Standard);
 
                         e.UseConsumeFilter(typeof(InboxFilter<>), context);
                         e.UseInMemoryOutbox(context);
@@ -371,12 +358,7 @@ public static class DependencyInjection
                     FulfilmentSagaQueue,
                     e =>
                     {
-                        e.UseMessageRetry(r =>
-                            r.Exponential(
-                                retryLimit: 5,
-                                minInterval: TimeSpan.FromSeconds(1),
-                                maxInterval: TimeSpan.FromMinutes(1),
-                                intervalDelta: TimeSpan.FromSeconds(2)));
+                        e.UseMessageRetry(RetryPolicy.Standard);
 
                         // **The inbox is here, and §9.8's exemption is gone.**
                         // That exemption said a saga is idempotent by
