@@ -1,4 +1,5 @@
 using System.Net;
+using Common.Web;
 using Shouldly;
 using Xunit;
 
@@ -47,16 +48,25 @@ public sealed class ConditionalBlockTests
 
         response.Headers.GetValues("Access-Control-Allow-Origin").Single().ShouldBe(CorsFactory.Origin);
 
-        // WithExposedHeaders("Retry-After") only has an observable effect on
-        // the actual response — CORS's preflight answer carries Allow-*
-        // headers, never Expose-Headers, so this is asserted here and not
-        // against one of the OPTIONS cases below. Retry-After is not one of
-        // the CORS-safelisted response headers, so without this entry a
-        // browser client cannot read the value §10.3's rejection handler goes
-        // to the trouble of computing — it reaches the network and is dropped
-        // before script ever sees it.
-        response.Headers.GetValues("Access-Control-Expose-Headers").ShouldContain(
-            h => h.Contains("Retry-After", StringComparison.OrdinalIgnoreCase));
+        // WithExposedHeaders only has an observable effect on the actual
+        // response — CORS's preflight answer carries Allow-* headers, never
+        // Expose-Headers, so this is asserted here and not against one of the
+        // OPTIONS cases below. Neither header named is CORS-safelisted, so
+        // without an entry here a browser client cannot read either value:
+        // Retry-After is what §10.3's rejection handler goes to the trouble
+        // of computing, and the correlation id header is written on every
+        // response and is the one the design spec this route was added for
+        // reads the correlation id from — the problem body's own
+        // `correlationId` extension member is the fallback for a response
+        // that has no problem body, not the other way round.
+        //
+        // Both, asserted individually rather than as one loose "contains
+        // Retry-After": a single ShouldContain(predicate) is satisfied by
+        // either header alone, so it would still pass with one silently
+        // dropped from WithExposedHeaders' argument list.
+        string[] exposed = [.. response.Headers.GetValues("Access-Control-Expose-Headers")];
+        exposed.ShouldContain(h => h.Contains("Retry-After", StringComparison.OrdinalIgnoreCase));
+        exposed.ShouldContain(h => h.Contains(CorrelationIdExtensions.Header, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

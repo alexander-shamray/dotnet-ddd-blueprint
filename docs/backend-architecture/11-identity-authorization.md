@@ -174,44 +174,54 @@ Validation is cheap; assume the network is hostile.
 > **A native client is different, and the difference is where the token would
 > live rather than what platform it runs on.** ADR-034's refusal is about a
 > specific storage: `localStorage`, `sessionStorage`, an in-memory variable —
-> anything on `web-app`'s origin, which is readable by any script that shares
-> it, including one that arrived through a compromised dependency rather than
-> an attacker's own code. `mobile-app` has no origin for a script to share.
-> Its refresh token is written to the Android Keystore or the iOS Keychain —
-> storage a browser has no equivalent of, backed by the device's own secure
-> element, and unreachable by anything outside the app's own sandboxed
-> process even if that process were compromised at the JavaScript layer the
-> way a browser tab can be. That is the whole of why `mobile-app`'s realm
-> attribute is `use.refresh.tokens: "true"` where `web-app`'s is `"false"`:
-> the two clients are not answering the same threat model, and giving both
-> flags the same value would apply a browser's exposure to a client that does
-> not have it, or a native app's storage guarantee to a client that has no
-> such storage.
+> anything on `web-app`'s origin, readable by any script that shares it (an
+> XSS, a compromised transitive dependency in the bundle) and, because a
+> browser's profile is not itself encrypted per origin, by anything with
+> filesystem or backup access to the machine it runs on. `mobile-app`'s
+> refresh token is written to the Android Keystore or the iOS Keychain
+> instead — a store neither web storage nor an in-memory variable has an
+> equivalent of, protecting against a different set of attackers: another app
+> on the same device, extraction from a filesystem image or a device backup,
+> and an attacker who has the device but not the app's own unlocked process.
 >
-> **Rotation is what the native client owes in return, and it binds realm-wide
-> rather than per client.** `revokeRefreshToken: true` and
-> `refreshTokenMaxReuse: 0` are realm settings with no per-client override in
-> Keycloak, so both are already true of every client the moment either is —
-> what `mobile-app` changes is not the setting but which client it is now an
-> obligation *for*. `refreshTokenMaxReuse: 0` means a refresh token is usable
-> exactly once; `revokeRefreshToken: true` means using a token that was
-> already rotated out revokes the session it belongs to rather than quietly
-> minting one more access token. A refresh token copied off a device — a
-> stale backup, a compromised app on the same OS reading another app's
-> Keystore entry through a platform bug — is a token the legitimate app has
-> already used or will use next; whichever of the two uses it second is
-> refused, and the session both were drawing from ends. `web-app` is
-> unaffected by either setting for the reason already given above: it holds
-> no refresh token for a rotation rule to bind.
+> **What that storage does not protect against is the app's own JavaScript.**
+> `mobile-app` authenticates a Capacitor/Ionic hybrid, and the secure-storage
+> plugin the app reads the Keystore or Keychain through is itself a
+> JavaScript-callable bridge — so a compromised transitive dependency in the
+> Angular bundle can call it and read the refresh token out exactly as the
+> equivalent dependency could read `web-app`'s out of `localStorage`. The
+> Keystore and the Keychain are not an immunity to the threat ADR-034 names;
+> they narrow *which* attackers reach the token, from "any script on the
+> origin, or anyone with the machine" to "this app's own compromised code,
+> and nothing else." That narrower set is still real, and it is the whole of
+> why `mobile-app`'s realm attribute is `use.refresh.tokens: "true"` where
+> `web-app`'s stays `"false"`:
+> [ADR-044](adr/ADR-044-the-native-client-holds-a-refresh-token-and-the-realm-rotates-it.md)
+> records the trade in full, including the correction this paragraph carries.
 >
-> This client, and the paragraph stating it, are owed to a gap in this
-> chapter rather than a decision made here: `mobile-app` was added to the
-> realm by a backend pull request in service of the Angular/Ionic reference
-> client's native build, specified in the sibling `blueprint-frontend`
-> repository's `docs/superpowers/specs/2026-09-10-blueprint-frontend-design.md`,
-> §9 ("Backend dependency: the `mobile-app` client"), which is also where the
-> client's exact attributes are enumerated and which this paragraph exists to
-> satisfy.
+> **Rotation is what the native client owes in return, and ADR-044 is where
+> the trade and the settings' literal values live — this paragraph states
+> what rotation obliges rather than repeating them.** A refresh token becomes
+> usable exactly once; presenting one that has already been used does not
+> mint another access token, it revokes the session the token belonged to. A
+> refresh token copied off a device — a stale backup, another app reading
+> this one's Keystore entry through a platform bug — is a token the
+> legitimate app has already used or will use next; whichever of the two
+> presents it second is refused, and the session both were drawing from ends.
+> The setting that does this has no per-client override in Keycloak, so it
+> was already true of every client holding a refresh token the moment
+> `mobile-app` existed; `web-app` is unaffected, for the reason already given
+> above — it holds none for a rotation rule to bind.
+>
+> This client was added to the realm by a backend pull request in service of
+> the Angular/Ionic reference client's native build, specified in the sibling
+> `blueprint-frontend` repository's
+> `docs/superpowers/specs/2026-09-10-blueprint-frontend-design.md`, §9
+> ("Backend dependency: the `mobile-app` client"), which is also where its
+> exact attributes are enumerated.
+> [ADR-044](adr/ADR-044-the-native-client-holds-a-refresh-token-and-the-realm-rotates-it.md)
+> is the decision the three paragraphs above state, and this section is the
+> one it amends.
 
 ## 11.3 Service configuration
 
