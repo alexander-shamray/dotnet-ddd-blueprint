@@ -1406,13 +1406,20 @@ public class SubjectBindingTests(ServiceFixture fixture) : IAsyncLifetime
     {
         await fixture.ResetAsync();
 
-        // Same reason PlaceOrderHandlerTests seeds here: the write path reads
+        // Same reason the PlaceOrder suite seeds here: the write path reads
         // prices locally (§6.4), and an unseeded projection fails every
         // PlaceOrder with ProductsUnavailable — which would read as the
         // subject assertion failing rather than as missing fixture data.
-        // Its own copy of the helper, for the reason given where that one is
-        // declared: seeding a price is one INSERT, not fixture surface.
-        await SeedPriceAsync(SeedData.ProductId, 12.50m, "EUR");
+        // Arranged inline rather than through a shared helper: it is one
+        // INSERT, and a second suite needing it is not yet a fixture member.
+        await fixture.ExecuteAsync(
+            """
+            INSERT INTO ordering.ProductPrices (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
+            VALUES ({0}, {1}, {2}, 1, SYSDATETIMEOFFSET());
+            """,
+            SeedData.ProductId,
+            "EUR",
+            12.50m);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
