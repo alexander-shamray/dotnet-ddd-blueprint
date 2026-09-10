@@ -12,7 +12,7 @@
 #
 # Every value below is a fixture. None reaches an environment, and each is
 # pinned by fingerprint, so replacing one with something real is a failure
-# rather than a silent substitution -- which is the whole reason the entry
+# rather than a silent substitution — which is the whole reason the entry
 # names a digest instead of a file.
 
 tests/Catalog.Api.Tests/HostSmokeTests.cs | connection-string-password | da3fd0c5abaa | A deliberately unusable value in a host that must not reach a database.
