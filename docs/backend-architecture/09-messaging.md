@@ -1021,8 +1021,10 @@ Consequences of the per-row design worth stating explicitly:
 Three handler interfaces exist, and confusing them is the most likely mistake in
 this area. They differ by where the message came from:
 
-> **All three are invariant, and the missing `in` is a decision.** Declaring
-> them contravariant would advertise that an
+> **Both interfaces below are invariant, and the missing `in` is a decision.**
+> The third of the three is not, and this callout does not reach it: §6.2
+> prints `ICommandHandler<in TCommand, TResult>`. Declaring these two
+> contravariant would advertise that an
 > `IProjectionHandler<IDomainEvent>` handles every concrete event — and
 > nothing here delivers on it. The §6.2 scan registers each implementation
 > under the exact interface it implements, the registry and the invoker both
