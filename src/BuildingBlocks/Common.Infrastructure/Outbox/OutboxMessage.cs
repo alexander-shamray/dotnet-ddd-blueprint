@@ -20,14 +20,13 @@ namespace Common.Infrastructure.Outbox;
 public sealed class OutboxMessage
 {
     /// <summary>
-    /// The widest <c>LastError</c> the column holds, and the reason it is
-    /// named here rather than in either service's configuration: the
-    /// dispatcher's fail statement truncates to this width with
-    /// <c>LEFT</c>, and both services map this entity — so the literal had
-    /// three homes and the truncation could stop matching the column without
-    /// anything failing. A too-narrow <c>LEFT</c> silently shortens the one
-    /// diagnostic an abandoned row carries; a too-wide one fails the update
-    /// that was recording why the delivery failed.
+    /// The widest <c>LastError</c> the column holds, named here rather than
+    /// in either service's configuration because three sites read it and they
+    /// are not independent: the dispatcher's fail statement truncates to this
+    /// width with <c>LEFT</c>, and both services map this entity. A
+    /// <c>LEFT</c> narrower than the column silently shortens the one
+    /// diagnostic an abandoned row carries; a wider one fails the update that
+    /// was recording why the delivery failed.
     /// </summary>
     public const int LastErrorMaxLength = 2000;
 

@@ -96,7 +96,7 @@ pricing
         // against ServiceOptions.OperationTimeout — equal is not below it.
         options.TotalRequestTimeout.Timeout = PricingHop.TotalRequestTimeout;
 
-        // Redeliveries after the first, so one more request than this.
+        // HTTP retries after the first, so one more request than this.
         options.Retry.MaxRetryAttempts = PricingHop.MaxRetryAttempts;
         options.Retry.BackoffType = DelayBackoffType.Exponential;
         options.Retry.UseJitter = true;

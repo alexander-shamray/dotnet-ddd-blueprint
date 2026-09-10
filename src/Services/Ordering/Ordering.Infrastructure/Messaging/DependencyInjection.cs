@@ -258,8 +258,9 @@ public static class DependencyInjection
                         // IntegrationEventConsumer<T> fails when the §6.2 scan
                         // registered no handler, which no backoff repairs.
                         // That still reaches the error queue, a whole
-                        // RetryPolicy.RetryLimit of redeliveries later than it
-                        // might, and §9.4 wants it there: a
+                        // RetryPolicy ladder of in-memory retries later than
+                        // it might — and holding the delivery throughout —
+                        // and §9.4 wants it there: a
                         // misconfigured endpoint should be loud rather than
                         // quick. An exclusion list is what changes if that
                         // ever stops being an acceptable trade.

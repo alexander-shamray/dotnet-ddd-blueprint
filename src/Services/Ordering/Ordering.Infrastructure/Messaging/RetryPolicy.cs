@@ -3,16 +3,23 @@ using MassTransit;
 namespace Ordering.Infrastructure.Messaging;
 
 /// <summary>
-/// §9.8's redelivery policy, declared once for the four receive endpoints
-/// that apply it.
+/// §9.8's retry policy: the ladder every receive endpoint applies unless it
+/// says otherwise.
 /// </summary>
 /// <remarks>
-/// <b>The values were spelled four times before this type existed</b>, once
-/// per endpoint, and the comments around them called the shape "§9.8's plain
-/// exponential five" — a name for a policy that had no symbol, so the only
-/// way to check that four endpoints agreed was to read four call sites and
-/// compare sixteen numbers. Naming it makes the agreement structural: an
-/// endpoint that wants a different ladder now has to say so.
+/// <b>These are in-memory retries of one broker delivery, not redeliveries.</b>
+/// <c>UseMessageRetry</c> holds the message and waits, so the delivery lock and
+/// the endpoint's concurrency slot are still taken for the whole ladder — which
+/// is what makes the ceiling an operational number rather than only a
+/// correctness one. MassTransit's redelivery filters are a different API that
+/// releases the message and has the broker deliver it again, and §9.5 uses the
+/// word in that sense throughout.
+/// <para>
+/// Declaring the ladder once is what makes agreement between the endpoints
+/// structural: an endpoint that wants a different one has to say so, where a
+/// value repeated per endpoint can only be checked by reading every call site
+/// and comparing them.
+/// </para>
 /// <para>
 /// <b>What this type does not decide is what gets retried.</b>
 /// <c>ordering-commands</c> ignores <c>ContractMappingException</c> before
@@ -20,7 +27,7 @@ namespace Ordering.Infrastructure.Messaging;
 /// itself on the fourth attempt — and that exclusion is the endpoint's,
 /// because it is a claim about which faults are terminal rather than about
 /// how long to wait between attempts. Folding it in here would apply one
-/// endpoint's exclusion to the three that never raise it.
+/// endpoint's exclusion to those that never raise it.
 /// </para>
 /// <para>
 /// <see cref="RetryLimit"/> counts <em>retries</em> and not deliveries: the
@@ -33,16 +40,19 @@ namespace Ordering.Infrastructure.Messaging;
 /// </remarks>
 internal static class RetryPolicy
 {
-    /// <summary>How many redeliveries follow the first attempt.</summary>
+    /// <summary>
+    /// How many retries follow the first attempt, so the endpoint makes one
+    /// more attempt than this and waits this many intervals.
+    /// </summary>
     public const int RetryLimit = 5;
 
     /// <summary>The first interval, before any doubling.</summary>
     public static readonly TimeSpan MinInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// The ceiling the ladder climbs towards. With
-    /// <see cref="RetryLimit"/> retries it is never reached, which is the
-    /// arithmetic §9.6's confirmation timeout depends on.
+    /// The ceiling the ladder climbs towards. It is not reached at
+    /// <see cref="RetryLimit"/> retries, which is the arithmetic §9.6's
+    /// confirmation wait depends on.
     /// </summary>
     public static readonly TimeSpan MaxInterval = TimeSpan.FromMinutes(1);
 

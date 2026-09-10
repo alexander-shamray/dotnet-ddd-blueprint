@@ -1756,10 +1756,10 @@ stateDiagram-v2
 ```
 
 **The diagram names each wait and does not price it.** `OrderFulfilmentSaga`
-declares the five delays and each `Schedule` arms one of them, so a label here
+declares a delay per wait and each `Schedule` arms one, so a label here
 carrying a duration would be a second copy in the one artefact nobody
-re-derives — and `PaymentTimeout` is drawn on two transitions, so the drawing
-held a duplicate of its own:
+re-derives — and a wait may be drawn on more than one transition, so the copies
+would multiply inside the drawing:
 
 | Wait | Delay | Bounds |
 |---|---|---|
@@ -2972,7 +2972,7 @@ pricing
         // Outermost bound. The default would breach the hierarchy.
         options.TotalRequestTimeout.Timeout = PricingHop.TotalRequestTimeout;
 
-        // Redeliveries after the first, so one more request than this.
+        // HTTP retries after the first, so one more request than this.
         options.Retry.MaxRetryAttempts = PricingHop.MaxRetryAttempts;
         options.Retry.BackoffType = DelayBackoffType.Exponential;
         options.Retry.UseJitter = true;
@@ -3004,9 +3004,10 @@ pricing.AddHttpMessageHandler<ClientCredentialsHandler>();
 **`PricingHop` owns every number in that block, and the reason is the sum
 rather than tidiness.** The budget this section argues —
 `(MaxRetryAttempts + 1) × AttemptTimeout`, plus `MaxRetryAttempts ×
-MaxRetryDelay`, fitting inside `TotalRequestTimeout` — is arithmetic over four
-of them, so a chapter that spelled the values held a copy of every term and the
-sum could stop being true without either side being edited.
+MaxRetryDelay`, fitting inside `TotalRequestTimeout` — is arithmetic over
+several of them at once, so any second copy of a value is a term in an
+inequality that can stop holding without either side being edited. Naming them
+is what lets this section state the sum rather than compute it.
 `ResilienceHierarchyTests` in `tests/Web.Bff.Tests` asserts the relations from
 the **built options** rather than from the constants, which is what keeps the
 test a check on the registration and not a restatement of it.
@@ -3139,13 +3140,18 @@ lives.
 
 **The ladder is `RetryPolicy` in `Ordering.Infrastructure/Messaging`**, which
 holds `RetryLimit`, `MinInterval`, `MaxInterval` and `IntervalDelta` and
-applies them through `Standard`. It exists because the four values were
-spelled once per endpoint, so the only way to check that four endpoints agreed
-was to read four call sites and compare sixteen numbers. §9.6's confirmation
-wait has to clear the ladder these produce — a floor rather than the term that
-decides it — and now has a name to clear rather than a number.
-`RetryLimit` counts **redeliveries**, so an endpoint makes one more attempt
-than it says.
+applies them through `Standard`. Declaring it once is what makes agreement
+between the endpoints structural: an endpoint that wants a different ladder has
+to say so, where a ladder written out per endpoint can only be checked by
+reading every call site and comparing them. §9.6's confirmation wait has to
+clear the ladder these produce — a floor rather than the term that decides
+it — and clears a name rather than a number.
+`RetryLimit` counts **retries**, so an endpoint makes one more attempt than it
+says. They are retries of one broker delivery and not redeliveries in §9.5's
+sense: `UseMessageRetry` holds the message and waits, so the delivery and the
+endpoint's concurrency slot are taken for the whole ladder. Releasing a message
+and having the broker bring it back is a different filter, which none of these
+endpoints uses.
 
 **Idempotency is the same on all four**: every one applies `InboxFilter<>`,
 and the callout under the saga's endpoint is the argument for there being no
@@ -3436,7 +3442,7 @@ a message in a queue nobody drains is closer to it.
 
 The distinction generalises: **retry is for faults that time might fix.** A
 broker blip, a deadlock, an expired token — retry those. A message the receiver
-cannot interpret will be rejected identically on every redelivery and hold the
+cannot interpret will be rejected identically on every attempt and hold the
 queue open while it happens, so it belongs in the error queue on the first
 attempt. A command the domain refused belongs in neither: it is not a fault,
 and the queue is not where answers go.

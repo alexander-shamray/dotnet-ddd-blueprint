@@ -72,8 +72,10 @@ public static class PricingHop
     public static readonly TimeSpan TotalRequestTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Redeliveries after the first attempt, so the pipeline makes one more
-    /// request than this.
+    /// HTTP retries after the first attempt, so the pipeline makes one more
+    /// request than this. Nothing here is a message delivery — this hop is a
+    /// gRPC call over <c>HttpClient</c>, and the broker's vocabulary does not
+    /// apply to it.
     /// </summary>
     /// <inheritdoc cref="TotalRequestTimeout" path="/remarks"/>
     public const int MaxRetryAttempts = 2;

@@ -31,13 +31,17 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
     /// How long §9.6 waits for Inventory to answer <c>ReserveStock</c>.
     /// </summary>
     /// <remarks>
-    /// The five delays are named here, together, because §9.6's state diagram
-    /// is drawn from them and its transitions were once labelled with the
-    /// numbers. A diagram that spells a delay is a second copy of it, and the
-    /// one that goes stale is always the drawing — so that diagram now names
-    /// each wait and leaves the value here. The argument for each value stays at
-    /// the schedule that arms it, which is where it can be read beside the
-    /// wait it bounds.
+    /// Each wait's delay is named here and read by the <c>Schedule</c> that
+    /// arms it, so the value has one home. §9.6's state diagram names the
+    /// waits and prints no durations, because a drawing that spells a delay
+    /// is a second copy of it and the drawing is what nobody re-derives.
+    /// The argument for a value stays at the schedule that arms it, beside
+    /// the wait it bounds.
+    /// <para>
+    /// No count is stated here, for the reason <see cref="StockReservationExpired"/>
+    /// gives: one delay per wait state is the invariant, and
+    /// <c>Every_wait_state_declares_a_schedule</c> is what checks it.
+    /// </para>
     /// </remarks>
     public static readonly TimeSpan StockTimeoutDelay = TimeSpan.FromMinutes(5);
 
@@ -416,29 +420,29 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // repository, and the smaller of them is not the one that decides it.
         //
         // §9.8's retry on ordering-commands is RetryPolicy.RetryLimit RETRIES
-        // — one more delivery than that counting the first, which is what
-        // §9.6 says two thousand lines away and what this said "five
-        // attempts" for. **The waiting is about seventy seconds in total, not
-        // five minutes**: the retries are that many intervals whatever the
-        // deliveries are numbered, and this comment read "five attempts
-        // backing off to a minute apiece", which prices every interval at
-        // RetryPolicy.MaxInterval, the cap the ladder never reaches.
+        // — one more delivery than that counting the first. **Its total is a
+        // floor this delay clears easily, not the term that sets it**: the
+        // retries are that many intervals whatever the deliveries are
+        // numbered, and pricing every interval at RetryPolicy.MaxInterval
+        // overstates the ladder, which does not reach that cap in RetryLimit
+        // steps.
         //
         // **The term that actually decides this is §9.4's dispatcher**, and
-        // the earlier revision credited its PollInterval, which is the one
-        // quantity here that cannot matter. A failed publish backs the row off
-        // by OutboxDispatcher's BackoffBaseSeconds doubling to
-        // BackoffAttemptCap, so the cumulative wait runs 5s, 15s, 35s, 75s,
-        // 155s, 315s, 635s. **A publish that only succeeds on its eighth
-        // attempt lands after this timeout has already fired**, filing a
+        // not its PollInterval, which is the one quantity here too small to
+        // matter. A failed publish backs the row off by OutboxDispatcher's
+        // BackoffBaseSeconds doubling to BackoffAttemptCap, and the cumulative
+        // wait that produces overtakes this delay within a few attempts —
+        // well inside MaxAttempts. **A publish that succeeds only late in that
+        // ladder lands after this timeout has already fired**, filing a
         // not_confirmed review for an order that then confirms.
         //
         // ConfirmationTimeoutDelay is chosen knowing that rather than in spite
-        // of it: seven consecutive publish failures is an outbox that is stuck,
-        // which §13.6's abandoned-row alert exists to catch and which nobody
-        // wants this saga waiting quietly through. Raising the delay past
-        // attempt ten would trade a rare false escalation for a common silent
-        // one. It matches ReleaseTimeout below, and for the same reason: both
+        // of it: that many consecutive publish failures is an outbox that is
+        // stuck, which §13.6's abandoned-row alert exists to catch and which
+        // nobody wants this saga waiting quietly through. Raising the delay to
+        // outlast the whole ladder would trade a rare false escalation for a
+        // common silent one. It matches ReleaseTimeoutDelay, and for the same
+        // reason: both
         // are waits on a message this service has already sent rather than on
         // a third party deciding something.
         //
