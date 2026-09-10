@@ -107,7 +107,7 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │                                       only suite that references every service
 │
 ├── deploy/
-│   ├── compose/                        docker-compose.yml + overrides
+│   ├── compose/                        the index, one file per unit, overrides
 │   ├── helm/                           Chart per service + umbrella chart
 │   ├── observability/                  §13.8's dashboards, §13.6's alert rules
 │   │                                   and §13.7's k6 SLO run, as code — plus
@@ -1607,13 +1607,14 @@ version of the argument yet**: `RetentionPurgeService` names the column in both
 of its marker statements, so a service scaffolded without the migration fails
 its own purge with `Invalid column name 'RowVersion'` on the first pass
 ([ADR-041](adr/ADR-041-the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp.md)).
-It then edits seven shared files: `Platform.slnx`, the Compose pair and
-its `infra-only` exclusion, `.env.example`, the ports table in
-`deploy/compose/README.md` ([§14.1](14-local-development.md)), the broker
-definitions that grant the new service an account of its own — without which it
-renders a service that starts and cannot authenticate, since the broker has
-held no shared principal since #44 — and
-`.github/secret-scan/allowed-secrets.txt`, one accepted-finding line per
+It then edits the shared files: `Platform.slnx`, the Compose index that
+includes the service's own unit and its `infra-only` exclusion, `.env.example`,
+the ports table in `deploy/compose/README.md`
+([§14.1](14-local-development.md)), the broker definitions that grant the new
+service an account of its own — without which it renders a service that starts
+and cannot authenticate, since the broker has held no shared principal since
+#44 — and, under `.github/secret-scan/allowed/`, the file covering each
+entry's tree, one accepted-finding line per
 **distinct** finding the render produces — two lines carrying one value under
 one rule in one file are one finding and take one entry. **The last is the
 difference between a service that renders and a service that can be

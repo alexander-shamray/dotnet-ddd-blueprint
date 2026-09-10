@@ -80,7 +80,7 @@ change:
 
 | | |
 |---|---|
-| 1. Compose | `deploy/compose/docker-compose.yml` (§14.1), with a working inline default |
+| 1. Compose | the host's own unit under `deploy/compose/services/` (§14.1), with a working inline default |
 | 2. The Aspire host | §14.2 — **not adopted**, so this is a line to write only if it ever is |
 | 3. Helm values | `deploy/helm/<chart>/values.yaml` and the umbrella (§15.3) |
 | 4. The inventory | §15.4's table — the row is what makes the obligation reviewable |
@@ -371,13 +371,15 @@ test, or in source.
 > in particular passes, and so does a credential written in a shape no rule
 > describes. The list of rules is the list of things it can find.
 >
-> **Every exception is a line in `allowed-secrets.txt` naming a path, a rule
-> and a fingerprint, with a reason** — never a glob and never an inline
-> pragma, on the same argument `Directory.Build.props` makes about
-> suppressions. An entry matching nothing **fails the build**, so a
-> suppression whose finding has gone is reported rather than left standing.
-> That is why the local-development defaults below are enumerated there once
-> per site: rotating one becomes a reconciliation that file lists.
+> **Every exception is a line under `.github/secret-scan/allowed/` naming a
+> path, a rule and a fingerprint, with a reason** — never a glob and never an
+> inline pragma, on the same argument `Directory.Build.props` makes about
+> suppressions. That directory holds one file per tree, each declaring the
+> prefix it may suppress, so an entry goes to the file covering its path. An
+> entry matching nothing **fails the build**, so a suppression whose finding
+> has gone is reported rather than left standing. That is why the
+> local-development defaults below are enumerated there once per site:
+> rotating one becomes a reconciliation those files list.
 >
 > **A person is no longer the only thing that writes to it**, and that is worth
 > knowing before you read a block you did not add. §4.5's scaffold runs this

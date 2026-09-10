@@ -277,10 +277,14 @@ deploy/canary/               §15.5's rollout — the ladder as JSON, the weight
                              Prometheus. It reaches no cluster; the deciding
                              is tested and the acting is not
 tools/new-service/           §4.5's scaffold — see the notes below
-deploy/compose/              §14.1's infrastructure, plus one application pair
-                             per service and the gateway on 5000, which has no
-                             migrator beside it because the edge owns no
-                             database. `rabbitmq/` is the one infrastructure
+deploy/compose/              §14.1's model: `docker-compose.yml` is an index
+                             that includes `infrastructure.yml` and one file
+                             per deployable unit under `services/`, so a
+                             service's environment is a file its own PR owns.
+                             One application pair per service, and the gateway
+                             on 5000 has no migrator beside it because the edge
+                             owns no database. `rabbitmq/` is the one
+                             infrastructure
                              image that is BUILT — ADR-021's delayed-exchange
                              plugin — so its build rides on the compose smoke.
                              It also carries `definitions.json`, the
@@ -467,7 +471,8 @@ reason.
 - **The secret scan** sits beside it under `.github/` on the same argument and
   runs in the same job, first — §15.1 draws "SCA + secret scan" as one node.
   Named rules, each with a positive case and a near miss; every exception is
-  a `path | rule | fingerprint | reason` line in `allowed-secrets.txt`, never
+  a `path | rule | fingerprint | reason` line in the
+  `.github/secret-scan/allowed/` file covering its tree, never
   a glob and never an inline pragma, and **an entry matching nothing fails
   the build**. It reads the working tree and not the history, and it is a
   pattern scanner: the list of rules is the list of things it can find. Both
@@ -558,7 +563,7 @@ cleanup half exists only here, because the runner discards its checkout.
 python tools/new-service/new_service.py Yankee --port 5199
 dotnet build tests/Yankee.Api.Tests/Yankee.Api.Tests.csproj
 rm -rf src/Services/Yankee tests/Yankee.*
-git checkout -- Platform.slnx deploy/compose/ .github/secret-scan/allowed-secrets.txt
+git checkout -- Platform.slnx deploy/compose/ .github/secret-scan/allowed/
 ```
 
 **That `git checkout` reverts uncommitted work in `deploy/compose/` and in the
@@ -576,7 +581,7 @@ commit. `git add -p` the intentional hunks and commit them, then run the
 
 **A rendered service carries credential-shaped literals, and the scaffold
 writes their allow-list entries itself.** §15.1's secret scan reads the
-working tree, so a render with no `.github/secret-scan/allowed-secrets.txt`
+working tree, so a render with no `.github/secret-scan/allowed/`
 entries beside it could not be committed at all. The scaffold **loads the
 real scanner**, runs it over what it has just rendered, and appends one
 `path | rule | fingerprint | reason` line per distinct finding. The
