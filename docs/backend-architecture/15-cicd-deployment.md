@@ -351,9 +351,10 @@ Each of the Helm filter's outside paths is an input `smoke.sh` actually reads:
   Services forward to, so moving the h2c listener off 8081 would otherwise
   leave a Service pointing at a closed port with every assertion still passing;
 - `Common.Web`'s `HealthCheckExtensions.cs`, which maps the three probe
-  paths — the charts are the manifest [§12.4](12-test-strategy.md)'s health
-  suite warns about by name, "a manifest no compiler reads", so the gate reads
-  the routes from that file rather than holding a fourth copy of them;
+  paths — the charts are the manifest `Common.Web.Tests`'
+  `HealthEndpointTests` warns about by name, "a manifest no compiler reads",
+  so the gate reads the routes from that file rather than holding a fourth
+  copy of them;
 - `.gitattributes`, which pins this tree to LF — without it a CRLF template
   renders a CR onto every line and the script's anchored greps match nothing on
   a Linux runner;
@@ -385,9 +386,12 @@ what a service ships, that file belongs in that service's filter.**
 ### A config-only deploy needs a tag it did not build
 
 The `deploy` filter fires on a chart or values change, which skips the image
-build — and `helm upgrade` then has no tag to pass. Left to the chart default
-it would resolve to `image.tag: ""` (§15.3) and roll whatever that means, which
-is a version nobody chose in a job nobody thought was a release.
+build — and `helm upgrade` then has no tag to pass. `values.yaml` leaves
+`image.tag` empty on purpose and `commerce.require` refuses to render without
+it (§15.3), so what an unsupplied tag produces is a failed upgrade rather than
+a version nobody chose in a job nobody thought was a release. Reading the
+running tag back out of the cluster is what that refusal obliges this job to
+do.
 
 **The release is named for the workload, not for the service**, and the two
 had drifted: this sample read `helm get values ordering` while
@@ -718,9 +722,12 @@ identity:
   # The authority, to validate incoming JWTs (§11.2) — and nothing else.
   # Identity:Client is what a host presents when it CALLS a peer (§11.5), and
   # Ordering calls none: prices come from a local projection (§6.4) and the
-  # rest goes over the broker. No clientId here means no Keycloak client, no
-  # secret in the vault and nothing to rotate.
+  # rest goes over the broker. The `false` below is what declares that — no
+  # Keycloak client, no secret in the vault and nothing to rotate — and it is
+  # written rather than left out, because a capability is a claim a chart
+  # makes rather than one to infer from a missing key.
   authority: https://id.example.com/realms/commerce
+  clientCredentials: false
 
 database:
   # The .NET configuration key, not the database name: Infrastructure calls
@@ -736,6 +743,15 @@ database:
 broker:
   enabled: true
   secretRef: { name: ordering-rabbitmq, key: connection-string }
+
+redis:
+  enabled: true
+  # One Secret, two keys, because the two instances differ only in eviction
+  # policy and are provisioned together (§8.1).
+  secretRef:
+    name: commerce-redis
+    cacheKey: cache-connection-string
+    coordinationKey: coordination-connection-string
 
 observability:
   otlpEndpoint: http://otel-collector.observability:4317
@@ -763,13 +779,15 @@ password into `helm get values` and into every diff of the repository.
 rolls.** Changing a ConfigMap changes nothing a running pod reads — the
 environment was bound at start — so without an annotation that moves with the
 values, `helm upgrade` reports success and every pod carries on serving what it
-started with. The hash covers **the whole of `.Values`**, not the rendered
-ConfigMap, and the difference is the gateway: it renders a second ConfigMap
-from its own template, so a narrower hash left `cors.origins` and
-`ingress.trustedNetworks` — the two keys most likely to be edited without a
-rebuild — changing a mounted object while the pod template stayed
-byte-identical. The cost of the wider hash is a rollout on a key the container
-never sees, such as `autoscaling.maxReplicas`, and that is the safe direction.
+started with. The hash covers three things — **the whole of `.Values`**, the
+ConfigMap the common template renders, and the body of every entry a chart
+declares in `extraConfigMaps` — and the third of those is the gateway: it
+renders a second ConfigMap from its own template, so a hash over `.Values`
+alone left `cors.origins` and `ingress.trustedNetworks` — the two keys most
+likely to be edited without a rebuild — changing a mounted object while the
+pod template stayed byte-identical. The cost of the wider hash is a rollout
+on a key the container never sees, such as `autoscaling.maxReplicas`, and
+that is the safe direction.
 
 > **That hash covers values, and a rotated Secret is not one — this is owed.**
 > Kubernetes snapshots a `secretKeyRef` into the container's environment when
@@ -803,10 +821,11 @@ two Redis connection strings for as long as nothing called
 
 **Catalog and Ordering now do**, because §8.5's `IdempotencyBehavior` claims a
 `{service}:idem:` key before any protected command runs, so both charts carry a
-`redis:` block on `broker`'s exact shape and §15.4's column is unconditional
-for them. The gateway and the BFF declare `redis.enabled: false` — written down
-rather than omitted, because a capability is a claim a chart makes rather than
-one to infer from a missing key.
+`redis:` block on `broker`'s shape — one Secret, but two distinct keys where the
+broker needs one — and §15.4's column is unconditional for them. The gateway and
+the BFF declare `redis.enabled: false` — written down rather than omitted,
+because a capability is a claim a chart makes rather than one to infer from a
+missing key.
 
 **Both keys are required together even though only the coordination one is read
 today**, and the reason is the code's rather than the chart's:
@@ -882,6 +901,11 @@ identity:
   authority: https://id.example.com/realms/commerce
   # Required by ValidateOnStart (§15.4): this host does call a peer (§9.7).
   # The secret is a reference, never a value.
+  #
+  # The switch is its own key rather than clientId's presence: with the
+  # boolean set, all three values below are required and a blank one fails
+  # the render — and a clientId WITHOUT the boolean fails it too.
+  clientCredentials: true
   clientId: web-bff
   scope: commerce-api
   clientSecretRef:
@@ -889,10 +913,10 @@ identity:
     key: client-secret
 ```
 
-> **A second chart growing an `identity.clientId` is a design change, not a
-> configuration change.** It means a host started calling a peer synchronously,
-> which is ADR-017's budget being spent — so the review question is not "does
-> the secret exist" but "why is this call not an event".
+> **A second chart setting `identity.clientCredentials: true` is a design
+> change, not a configuration change.** It means a host started calling a peer
+> synchronously, which is ADR-017's budget being spent — so the review question
+> is not "does the secret exist" but "why is this call not an event".
 
 The gateway's chart is not a service chart with the database parts deleted. It
 has no migrator, no client credentials, and two keys no service has — and every
@@ -962,8 +986,10 @@ service:
 identity:
   # Authority only. The gateway validates JWTs (§11.2) but calls nobody —
   # YARP forwards the caller's token — so there is no clientSecretRef here
-  # and no gateway entry in External Secrets (§11.5, §15.4).
+  # and no gateway entry in External Secrets (§11.5, §15.4). The `false`
+  # is what says so, on the same terms as Ordering's above.
   authority: https://id.example.com/realms/commerce
+  clientCredentials: false
 
 ingress:
   # True in every Kubernetes environment: TLS terminates at the load balancer
