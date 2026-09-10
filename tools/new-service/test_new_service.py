@@ -1282,11 +1282,18 @@ class TheAllowListStep(unittest.TestCase):
 
         second = plan(self.root, SECOND_PROBE, SECOND_PORT, "20260810120000")
 
+        # By key difference, never by a tail slice. Entries are read file by
+        # file in sorted order, so a render that appends to `deploy` and to
+        # `tests` inserts INSIDE the combined list rather than at the end of
+        # it — and `entries[len(before):]` would then hand this test unrelated
+        # entries from the last file while omitting the stolen fingerprint it
+        # exists to catch. Silently, and green.
         before, _ = self.parse_all(self.allow_list())
         written = allow_list_appended(second)
         entries, problems = self.parse_all({**self.allow_list(), **written})
         self.assertEqual([], problems)
-        added = entries[len(before):]
+        seen = {entry.key() for entry in before}
+        added = [entry for entry in entries if entry.key() not in seen]
         self.assertNotEqual([], added, "the second render generated nothing")
 
         # The named half: the first service's fingerprint, under the second
@@ -1444,6 +1451,25 @@ class RefusesToRun(unittest.TestCase):
     def test_a_port_another_service_already_publishes(self):
         with self.assertRaises(ScaffoldError):
             render(port=5102)
+
+    def test_a_compose_unit_that_already_exists(self):
+        # `apply` opens every created path with `w`, and the unit is the one
+        # created path outside COPY_ROOTS — so the collision guard that refuses
+        # an existing service tree cannot see it. A unit left by a partial run,
+        # or written by hand, would be truncated in silence by a script whose
+        # contract is that it creates and never merges.
+        with tempfile.TemporaryDirectory() as directory:
+            root = template_copy(Path(directory))
+            unit = root / UNIT
+            unit.write_text("services:\n  hand-written:\n", encoding="utf-8")
+
+            with self.assertRaises(ScaffoldError) as raised:
+                render(repo_root=root)
+            self.assertIn(UNIT, str(raised.exception))
+
+            # And nothing was written over it: `plan` refuses before `apply`.
+            self.assertEqual(
+                "services:\n  hand-written:\n", unit.read_text(encoding="utf-8"))
 
     def test_a_template_whose_api_block_is_not_bound_to_loopback(self):
         # The other half of the loopback rule, and the half a render-and-read

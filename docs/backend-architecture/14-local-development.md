@@ -234,7 +234,7 @@ services:
       # pick its own rate-limit bucket. In Kubernetes this is true (§15.3).
       Ingress__Enabled: "false"
       # Browsers hit the gateway directly in dev. The SPA's dev origin is
-      # 5173 (Vite's default): 3000 belongs to Grafana in this same file.
+      # 5173 (Vite's default): 3000 belongs to Grafana, in infrastructure.yml.
       Cors__Enabled: "true"
       Cors__Origins__0: "http://localhost:5173"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"

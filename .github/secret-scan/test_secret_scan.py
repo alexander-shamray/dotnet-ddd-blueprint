@@ -481,6 +481,50 @@ class AllowList(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("a second `covers:` directive", problems[0])
 
+    def test_rejects_an_entry_the_parent_file_kept_from_a_child_tree(self):
+        # Identical prefixes are refused next door, and that is enough only
+        # while every prefix is disjoint. Split a tree later — `deploy/` into
+        # `deploy/compose/` — and an entry for `deploy/compose/x` satisfies
+        # BOTH files' own prefix check, so it could sit in either and the
+        # parent could keep suppressions the child owns. Placement would stop
+        # being mechanical, which is the whole property a directory buys.
+        with tempfile.TemporaryDirectory() as directory:
+            allowed = Path(directory)
+            allow_file(
+                allowed,
+                "deploy/compose/x.yml | credential-assignment | abc123def456 | "
+                "Filed in the parent, owned by the child.",
+                covers="deploy/", name="deploy.txt")
+            allow_file(allowed, covers="deploy/compose/", name="deploy-compose.txt")
+            _, problems = secret_scan.read_allowed(allowed)
+
+        self.assertEqual(len(problems), 1)
+        self.assertIn("is covered by `deploy/compose/`", problems[0])
+        self.assertIn("deploy-compose.txt declares", problems[0])
+
+    def test_accepts_the_same_entry_in_the_file_that_owns_it(self):
+        # The other side of the refusal above, and the reason it is a
+        # longest-prefix rule rather than a ban on nesting: the child file may
+        # hold the entry, and the parent goes on covering everything else.
+        with tempfile.TemporaryDirectory() as directory:
+            allowed = Path(directory)
+            allow_file(
+                allowed,
+                "deploy/helm/values.yaml | credential-assignment | 456def123abc | "
+                "The parent still covers what no child claims.",
+                covers="deploy/", name="deploy.txt")
+            allow_file(
+                allowed,
+                "deploy/compose/x.yml | credential-assignment | abc123def456 | "
+                "Filed in the file that covers it.",
+                covers="deploy/compose/", name="deploy-compose.txt")
+            entries, problems = secret_scan.read_allowed(allowed)
+
+        self.assertEqual([], problems)
+        self.assertEqual(
+            {"deploy/helm/values.yaml", "deploy/compose/x.yml"},
+            {entry.path for entry in entries})
+
     def test_rejects_two_files_covering_one_tree(self):
         # Then an entry has two homes, and a reader looking for it has two
         # places to fail to find it.

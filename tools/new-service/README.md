@@ -49,10 +49,12 @@ first version of this step could produce one.
 
 **Run it on a clean worktree**, and undoing it is then two commands — the
 generated tree is untracked and the edits above are tracked, so neither one
-alone is enough:
+alone is enough. The Compose unit is on the `rm` line for that reason: it is
+created rather than edited, so `git checkout` restores everything around it and
+leaves it exactly where it was written:
 
 ```bash
-rm -rf src/Services/Yankee tests/Yankee.*
+rm -rf src/Services/Yankee tests/Yankee.* deploy/compose/services/yankee.yml
 git checkout -- Platform.slnx deploy/compose/ .github/secret-scan/allowed/
 ```
 

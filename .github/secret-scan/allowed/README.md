@@ -68,6 +68,6 @@ the failure and writing down why — never guessing at a digest.
 **There is no inline pragma and there never will be.** `CLAUDE.md`'s argument
 against an inline suppression is that it is a decision written where nobody
 re-reads it; a suppression that has to travel to this directory is one somebody
-had to look at twice. Splitting it one file per tree did not weaken that:
-every one of them is still here, under the gate, and none sits beside the code
-it accepts.
+had to look at twice. Splitting the list one file per tree did not weaken
+that: every one of them is still here, under the gate, and none sits beside the
+code it accepts.

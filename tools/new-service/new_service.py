@@ -3109,10 +3109,25 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     # the rename maps the template's casings and never touches the slice's.
     mask = re.compile("|".join(re.escape(n) for n in (names.pascal, names.lower, names.upper)))
     created = render_projects(repo_root, names, migration_id)
+
     # The service's Compose unit is created rather than spliced, so it joins
     # `created` here — before the straggler loop below, which is exactly the
     # check a renamed file wants and the one the spliced block never got.
-    created[compose_unit(names)] = render_service_compose(repo_root, names, port)
+    #
+    # **And it is refused if it is already there**, because `apply` opens every
+    # created path with `w` and this one is the only created path outside
+    # `COPY_ROOTS`, which is what the collision guard above reads. A unit left
+    # behind by a partial run, or written by hand, would be truncated without a
+    # word — against a script whose contract is that it creates and never
+    # merges. `update_compose` refuses a unit the index already includes; this
+    # is the other half, for a file the index has never heard of.
+    unit = compose_unit(names)
+    if (repo_root / unit).exists():
+        raise ScaffoldError(
+            f"{unit} already exists. This script creates it and would overwrite "
+            f"what is there; remove it, or scaffold under a different name."
+        )
+    created[unit] = render_service_compose(repo_root, names, port)
     for relative, text in created.items():
         stripped = BENIGN.sub("", mask.sub("", text))
         if (left := TEMPLATE_TOKEN.search(stripped)) is not None:

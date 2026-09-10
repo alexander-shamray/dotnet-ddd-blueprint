@@ -562,7 +562,7 @@ cleanup half exists only here, because the runner discards its checkout.
 ```bash
 python tools/new-service/new_service.py Yankee --port 5199
 dotnet build tests/Yankee.Api.Tests/Yankee.Api.Tests.csproj
-rm -rf src/Services/Yankee tests/Yankee.*
+rm -rf src/Services/Yankee tests/Yankee.* deploy/compose/services/yankee.yml
 git checkout -- Platform.slnx deploy/compose/ .github/secret-scan/allowed/
 ```
 

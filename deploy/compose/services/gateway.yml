@@ -26,7 +26,7 @@ services:
       # Ingress__TrustedNetworks__0…n becomes required with it.
       Ingress__Enabled: "false"
       # Browsers hit the gateway directly in dev. The SPA's dev origin is
-      # 5173 (Vite's default): 3000 belongs to Grafana in this same file.
+      # 5173 (Vite's default): 3000 belongs to Grafana, in infrastructure.yml.
       # Required once enabled — the host refuses to start without it.
       Cors__Enabled: "true"
       Cors__Origins__0: "http://localhost:5173"

@@ -437,6 +437,33 @@ def read_allowed(path: Path, known: set[str] | None = None) -> tuple[list[Suppre
         entries.extend(found)
         problems.extend(said)
 
+    # **The longest declared prefix owns the entry, and no other file may hold
+    # it.** Identical prefixes are refused above, which is enough only while
+    # every prefix is disjoint: split `deploy/` into `deploy/compose/` later and
+    # an entry for `deploy/compose/x` satisfies BOTH files' own check, so it
+    # could sit in either and the parent file could keep suppressions the child
+    # tree owns. Placement would stop being mechanical — the one property that
+    # makes a directory readable — and this file's own rule would be false.
+    #
+    # It is settled here rather than per file because no file can see the
+    # others' declarations, which is the same reason the duplicate check is
+    # here.
+    for entry in entries:
+        owner = max(
+            (prefix for prefix in declared if entry.path.startswith(prefix)),
+            key=len,
+            default=None,
+        )
+        # None only where the entry's own prefix lost the duplicate check above,
+        # which is already reported; saying it twice would name one defect as
+        # two.
+        if owner is not None and declared[owner] != entry.source:
+            problems.append(
+                f"{entry.source}:{entry.line}: `{entry.path}` is covered by "
+                f"`{owner}`, which {declared[owner]} declares. The file with the "
+                f"longest prefix covering a path owns its entries, or two files "
+                f"could hold this one and a reader has two places to look")
+
     return entries, problems
 
 
