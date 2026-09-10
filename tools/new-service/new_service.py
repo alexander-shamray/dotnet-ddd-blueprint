@@ -1551,11 +1551,27 @@ MIGRATION_LABELS = (
     "AddIdempotencyMarkerRowVersion",
 )
 
-# The two files that accumulate a block per service, and the markers that bound
-# one block. Both were sliced to the end of the file once, which is the same
-# span only until a second service exists.
+# A service key in a Compose file, at the model's own indent, and the marker
+# that bounds one service's block in `.env.example` — the one file that still
+# accumulates a block per service.
 SERVICE_KEY = re.compile(r"^  ([A-Za-z0-9][A-Za-z0-9_-]*):$")
 ENV_MARKER = re.compile(r"^# ([A-Za-z0-9]+)'s two §7\.1 keys")
+
+# §14.1's Compose model is an index and one file per deployable unit, so a
+# service's environment is a file this script CREATES rather than a block it
+# splices into a file every other service also owns. That is the whole of what
+# changed here: the index gains one line, the unit file is written whole, and
+# two services being scaffolded at once no longer meet in one file.
+#
+# The index's `include:` list is the anchor, and it is read rather than
+# assumed: an entry is two spaces, a dash, a space and a path relative to the
+# compose directory. A list this script cannot find is a template that has
+# moved, which is a refusal and never a guess.
+COMPOSE_DIR = "deploy/compose"
+COMPOSE_INDEX = f"{COMPOSE_DIR}/docker-compose.yml"
+COMPOSE_UNITS = "services"
+COMPOSE_TEMPLATE_UNIT = f"{COMPOSE_UNITS}/{TEMPLATE.lower()}.yml"
+INCLUDE_ENTRY = re.compile(r"^  - (\S+)$")
 
 # One service's `environment:` mapping in that same file, and the keys inside
 # it — read back off the block this script has just rendered rather than off
@@ -1591,7 +1607,12 @@ HOST_IP = r"\d+\.\d+\.\d+\.\d+"
 # and nothing was writing those (#161). So the render ends by running the real
 # scanner over what it has just built.
 SCAN_GATE = ".github/secret-scan/secret_scan.py"
-SCAN_ALLOW_LIST = ".github/secret-scan/allowed-secrets.txt"
+# The allow-list is a DIRECTORY, one file per tree, each declaring the prefix
+# it may suppress. So this script no longer appends to one file: it appends to
+# the file covering each entry's path, and refuses an entry no file covers
+# rather than inventing a file for it — a new tree is a decision, exactly as a
+# new credential-shaped literal is.
+SCAN_ALLOW_LIST = ".github/secret-scan/allowed"
 
 # The repository this script was checked out of, as opposed to the one it has
 # been pointed at. They are the same thing whenever `--repo-root` is left alone,
@@ -1602,7 +1623,7 @@ TOOL_ROOT = Path(__file__).resolve().parents[2]
 # Everything this script calls on the module it loads. Named so a file that
 # imports cleanly and is not the gate fails here, against the path the caller
 # supplied, rather than three frames later against a symbol.
-SCAN_GATE_MEMBERS = ("RULES", "read_allowed", "scan_text")
+SCAN_GATE_MEMBERS = ("COVERS", "RULES", "read_allowed", "scan_text")
 
 # The heading width the allow-list's own section headers are padded to.
 SCAN_HEADING_WIDTH = 76
@@ -1689,7 +1710,23 @@ SCAN_REASONS = (
         "A broker URI pointing at a hostname that does not resolve.",
     ),
     (
-        "deploy/compose/docker-compose.yml",
+        # The service's own Compose unit, which a render CREATES. Every finding
+        # in it is therefore new — there is no previous copy of this path for
+        # `update_allowed_secrets` to subtract — so the rows below cover the
+        # whole block and not merely the two literals the spliced version
+        # added to a file that already had the rest.
+        "deploy/compose/services/catalog.yml",
+        "connection-string-password",
+        # The keyword, not the value. A marker naming the password itself would
+        # make this script a second place §14.1's local default is written, and
+        # a credential in two places is a credential nobody can retire — the
+        # allow-list's own header, applied to the table that feeds it.
+        "Password=",
+        "Section 14.1's local database default, nested inside this service's "
+        "two connection defaults.",
+    ),
+    (
+        "deploy/compose/services/catalog.yml",
         "credential-assignment",
         # The database segment of the connection string, which the migrator's
         # line and the API's both carry — one value, one fingerprint, one
@@ -1699,13 +1736,27 @@ SCAN_REASONS = (
         "Catalog's local connection default, in-cluster hostname.",
     ),
     (
-        "deploy/compose/docker-compose.yml",
+        "deploy/compose/services/catalog.yml",
         "credential-assignment",
         # The URI scheme, for the same reason. No service name renames into
         # it, and no connection string carries it.
         "amqp://",
         "Section 14.1's broker default for Catalog, the per-service account "
         "that replaced guest.",
+    ),
+    (
+        "deploy/compose/services/catalog.yml",
+        "credential-assignment",
+        # The host, which appears in the value and never in the key: the key is
+        # `ConnectionStrings__RedisCache`, with no hyphen and no colon.
+        "redis-cache:",
+        "A Redis cache endpoint. Host and port only, no credential in it.",
+    ),
+    (
+        "deploy/compose/services/catalog.yml",
+        "credential-assignment",
+        "redis-coordination:",
+        "A Redis coordination endpoint. Host and port only, no credential.",
     ),
     (
         "deploy/compose/rabbitmq/definitions.json",
@@ -2281,50 +2332,118 @@ def environment_keys(block: str) -> list[list[str]]:
     return mappings
 
 
+def compose_unit(names: Names) -> str:
+    """Where a service's own Compose file lives, repository-relative."""
+    return f"{COMPOSE_DIR}/{COMPOSE_UNITS}/{names.lower}.yml"
+
+
+def compose_included(repo_root: Path) -> list[tuple[int, str]]:
+    """The index's include list: each entry's line number and its path.
+
+    Read out of the index rather than globbed off the directory, because the
+    index is what Compose obeys. A unit file sitting in `services/` that no
+    line includes is not part of the model, and a port published in it is not
+    a port that is taken — so globbing would refuse a free port on the strength
+    of a file nothing reads.
+    """
+    text, _ = read(repo_root, COMPOSE_INDEX)
+    entries = [
+        (number, match.group(1))
+        for number, line in enumerate(text.split("\n"))
+        if (match := INCLUDE_ENTRY.fullmatch(line))
+    ]
+    if not entries:
+        raise ScaffoldError(
+            f"{COMPOSE_INDEX} declares no `include:` entry this script recognises "
+            f"(two spaces, a dash, a space, a path). The template has moved; "
+            f"reconcile tools/new-service/new_service.py with it."
+        )
+    return entries
+
+
 def update_compose(repo_root: Path, names: Names, port: int) -> str:
-    """Catalog's own pair, lifted out of the file being edited and renamed.
+    """The index gains one line, and nothing else in it moves.
 
-    An extraction rather than a template: the block's comments argue the
-    inline-default rule and §7.1's two keys, and they travel with the copy.
-
-    **Bounded by the key that follows the pair, never by the collector.** The
-    first version sliced from `catalog-migrator` to `otel-collector`, which is
-    the same span only until a service has been scaffolded — after that the
-    slice swallows the previous service's pair and appends it a second time,
-    and duplicate keys make the Compose file invalid. Found by a Copilot review
-    asking what a *second* run does; every test until then scaffolded once.
+    **The port collision check reads every included file, not this one.** The
+    index publishes nothing at all now, so a check that kept reading it would
+    have found no mapping anywhere and called every port free — a silent
+    fail-open on the one guard that stops two services publishing the same
+    port. It reads what the index includes instead, which is the same set of
+    mappings the check has always been about.
 
     **Both port regexes carry the host-IP prefix, and the collision check is
-    the one that fails quietly without it.** Every mapping in the file is
+    the one that fails quietly without it.** Every mapping in the model is
     published on `127.0.0.1` (§14.1), so `"5102:` no longer follows a quote
     and a pattern anchored on one matches nothing — which reads exactly like
     a free port, and would have published a second service on one already
-    taken. The substitution fails loudly instead, so only the first was ever
-    going to be found by running the script.
+    taken.
     """
-    text, newline = read(repo_root, "deploy/compose/docker-compose.yml")
-    if re.search(rf'"(?:{HOST_IP}:)?{port}:\d+"', text):
-        raise ScaffoldError(f"port {port} is already published in deploy/compose/docker-compose.yml")
+    entries = compose_included(repo_root)
 
+    for _, entry in entries:
+        included, _ = read(repo_root, f"{COMPOSE_DIR}/{entry}")
+        if re.search(rf'"(?:{HOST_IP}:)?{port}:\d+"', included):
+            raise ScaffoldError(
+                f"port {port} is already published in {COMPOSE_DIR}/{entry}"
+            )
+
+    text, newline = read(repo_root, COMPOSE_INDEX)
     lines = text.split("\n")
-    keys = [(i, m.group(1)) for i, line in enumerate(lines) if (m := SERVICE_KEY.fullmatch(line))]
-    order = [name for _, name in keys]
 
-    pair = [f"{TEMPLATE.lower()}-migrator", f"{TEMPLATE.lower()}-api"]
-    at = order.index(pair[0]) if pair[0] in order else -1
-    if at < 0 or order[at + 1 : at + 2] != pair[1:]:
+    unit = f"{COMPOSE_UNITS}/{names.lower}.yml"
+    if unit in {entry for _, entry in entries}:
+        raise ScaffoldError(f"{COMPOSE_INDEX} already includes {unit}")
+
+    # The template's own entry is the anchor. Its absence means the layout this
+    # script renders into is not the layout on disk, and inserting beside a
+    # list whose shape is unknown is the guess this script does not make.
+    units = [number for number, entry in entries if entry.startswith(f"{COMPOSE_UNITS}/")]
+    if COMPOSE_TEMPLATE_UNIT not in {entry for _, entry in entries}:
         raise ScaffoldError(
-            f"docker-compose.yml has no {pair[0]} / {pair[1]} pair to copy (§14.1's pair rule)"
+            f"{COMPOSE_INDEX} does not include {COMPOSE_TEMPLATE_UNIT}, so there is "
+            f"no template unit to render from (§14.1's pair rule lives in it)"
         )
-    if at + 2 >= len(keys):
-        raise ScaffoldError("nothing follows the template's pair to bound the copy")
 
-    start, stop = keys[at][0], keys[at + 2][0]
-    # Comments immediately above a service belong to it, not to the pair above.
-    while stop > start and lines[stop - 1].lstrip().startswith("#"):
-        stop -= 1
+    # After the last unit, so services accumulate in the order they were
+    # created — the property the spliced block had, kept where it now lives.
+    after = units[-1] + 1
+    return restore("\n".join([*lines[:after], f"  - {unit}", *lines[after:]]), newline)
 
-    block = names.rename("\n".join(lines[start:stop]))
+
+def render_service_compose(repo_root: Path, names: Names, port: int) -> str:
+    """Catalog's own unit file, renamed, re-ported and re-headed.
+
+    An extraction rather than a template: the pair's comments argue the
+    inline-default rule and §7.1's two keys, and they travel with the copy.
+    What does NOT travel is the header above `services:` — it is prose about
+    the template, and a rename would turn true sentences about Catalog into
+    false ones about the service being rendered. It is replaced rather than
+    renamed, and the replacement names no template token, because the
+    straggler check in `plan` reads what this returns.
+    """
+    text, newline = read(repo_root, f"{COMPOSE_DIR}/{COMPOSE_TEMPLATE_UNIT}")
+
+    # §14.1's pair rule, asserted on the file that carries it — and asserted as
+    # the WHOLE of it, which is what the split bought: a unit holds one
+    # service's pair and nothing after it, so the check is an equality rather
+    # than the two anchors and a bound that a spliced block needed. A template
+    # that gained a third service would render one this script never saw.
+    pair = [f"  {TEMPLATE.lower()}-migrator:", f"  {TEMPLATE.lower()}-api:"]
+    declared = [line for line in text.split("\n") if SERVICE_KEY.fullmatch(line)]
+    if declared != pair:
+        raise ScaffoldError(
+            f"{COMPOSE_DIR}/{COMPOSE_TEMPLATE_UNIT} declares {declared or 'no service'}; "
+            f"§14.1's pair rule makes it exactly {pair}. The template has moved; "
+            f"reconcile tools/new-service/new_service.py with it."
+        )
+
+    marker = "\nservices:\n"
+    if marker not in text:
+        raise ScaffoldError(
+            f"{COMPOSE_DIR}/{COMPOSE_TEMPLATE_UNIT} has no `services:` key to render from"
+        )
+    block = names.rename(text[text.index(marker) + 1:])
+
     # The loopback prefix is REQUIRED of the template rather than copied from
     # it. Reading the prefix off Catalog would make the scaffold agree with
     # whatever Catalog does, so removing the bind there would silently publish
@@ -2395,26 +2514,18 @@ def update_compose(repo_root: Path, names: Names, port: int) -> str:
                 )
             seen[key.casefold()] = key
 
-    # After the last application block, so services accumulate in the order
-    # they were created. `build:` is what marks one — a structural test rather
-    # than a hard-coded `otel-collector`, which was only ever the service that
-    # happened to come next.
-    application = [
-        index
-        for index, (line_no, _) in enumerate(keys)
-        if any(
-            body.lstrip().startswith("build:")
-            for body in lines[line_no : keys[index + 1][0] if index + 1 < len(keys) else len(lines)]
-        )
-    ]
-    if not application:
-        raise ScaffoldError("docker-compose.yml has no application block to insert beside")
-
-    after = keys[application[-1] + 1][0]
-    while after > 0 and lines[after - 1].lstrip().startswith("#"):
-        after -= 1
-
-    return restore("\n".join([*lines[:after], block, *lines[after:]]), newline)
+    header = (
+        f"# {names.pascal}'s deployment (§14.1), included by {COMPOSE_INDEX}.\n"
+        f"# Rendered by tools/new-service from the template service's unit file: the\n"
+        f"# pair rule below belongs to the chapter, and the file boundary belongs to\n"
+        f"# docs/change-locality.md, so a {names.pascal} PR edits this file and never\n"
+        f"# another service's.\n"
+        f"#\n"
+        f"# `include` resolves a relative path against the directory of the file that\n"
+        f"# declares it, so the repository root — the build context — is three levels up\n"
+        f"# from here.\n"
+    )
+    return restore(header + block, newline)
 
 
 def update_infra_only(repo_root: Path, names: Names) -> str:
@@ -2611,10 +2722,11 @@ def load_scan_gate(repo_root: Path) -> ModuleType | None:
             f"is what says a rendered service may be committed; without it this "
             f"script cannot write the entries the gate would demand."
         )
-    if not (repo_root / SCAN_ALLOW_LIST).is_file():
+    if not (repo_root / SCAN_ALLOW_LIST).is_dir():
         raise ScaffoldError(
             f"{SCAN_GATE} is here and {SCAN_ALLOW_LIST} is not. The scan reads that "
-            f"file to know what it may ignore, and this script appends to it."
+            f"directory to know what it may ignore, and this script appends to the "
+            f"file in it that covers each entry's tree."
         )
 
     # Executed only if it is the file this script shipped with. Compared as
@@ -2707,9 +2819,34 @@ def scan_reason(rows: list[tuple[str, str, str, str]], finding: Any,
     return matched[0]
 
 
+def allow_list_trees(repo_root: Path, gate: ModuleType) -> dict[str, str]:
+    """Which allow-list file covers which tree, read out of the files.
+
+    The prefixes are the gate's own `covers:` directives rather than a table
+    here, for the reason every anchor in this script is read rather than
+    restated: a second copy of the map is one that goes stale the day a tree is
+    added, and the failure would be an entry written to a file that does not
+    cover it — which the gate then reports against a service somebody has just
+    scaffolded.
+    """
+    covers: dict[str, str] = {}
+    for source in sorted((repo_root / SCAN_ALLOW_LIST).glob("*.txt")):
+        for line in source.read_text(encoding="utf-8").splitlines():
+            if (declaration := gate.COVERS.fullmatch(line.strip())) is not None:
+                covers[declaration.group(1)] = f"{SCAN_ALLOW_LIST}/{source.name}"
+                break
+    return covers
+
+
 def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str],
-                           updated: dict[str, str]) -> str | None:
+                           updated: dict[str, str]) -> dict[str, str] | None:
     """One allow-list entry per finding THIS RENDER ADDS, or None (#161).
+
+    **The return is a map now, because the allow-list is a directory.** An
+    entry goes to the file whose `covers:` prefix its path starts with, so a
+    render that writes both a Compose unit and a test fixture appends to two
+    files — and two services being scaffolded at once meet in fewer of them
+    than they used to.
 
     Two paths return None and both are ordinary. The tree has no `.github/`
     at all — the suite's synthetic roots, where a render has nothing to
@@ -2739,13 +2876,19 @@ def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str
     if gate is None:
         return None
 
-    text, newline = read(repo_root, SCAN_ALLOW_LIST)
     entries, problems = gate.read_allowed(
         repo_root / SCAN_ALLOW_LIST, {rule.id for rule in gate.RULES})
     if problems:
         raise ScaffoldError(
-            f"{SCAN_ALLOW_LIST}: {problems[0]}. This script appends to that file "
-            f"and will not append to one that does not already parse."
+            f"{SCAN_ALLOW_LIST}: {problems[0]}. This script appends to those files "
+            f"and will not append to a set that does not already parse."
+        )
+
+    covers = allow_list_trees(repo_root, gate)
+    if not covers:
+        raise ScaffoldError(
+            f"{SCAN_ALLOW_LIST} declares no `covers:` prefix in any file, so there "
+            f"is nowhere an entry could be filed."
         )
 
     rows = [
@@ -2774,7 +2917,7 @@ def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str
     # the tool that was supposed to prevent one.
     accepted = {entry.key() for entry in entries}
     explained: dict[int, set[str]] = {}
-    lines: list[str] = []
+    lines: dict[str, list[str]] = {}
     for relative, body in {**created, **updated}.items():
         before: set[tuple[str, str, str]] = set()
         if relative in updated:
@@ -2791,7 +2934,25 @@ def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str
             accepted.add(finding.key())
             index, reason = scan_reason(rows, finding, source[finding.line - 1])
             explained.setdefault(index, set()).add(finding.fingerprint)
-            lines.append(
+
+            # The longest matching prefix, so a tree split further later takes
+            # its own entries rather than leaving them with its parent. One
+            # entry, one file: a finding no prefix covers is refused, because
+            # the alternative is choosing a file for it, and which file a
+            # suppression lives in is the whole of what makes it findable.
+            home = max(
+                (prefix for prefix in covers if finding.path.startswith(prefix)),
+                key=len,
+                default=None,
+            )
+            if home is None:
+                raise ScaffoldError(
+                    f"{finding.path}: no file under {SCAN_ALLOW_LIST} covers this "
+                    f"path, so its entry has nowhere to go. Add the file that "
+                    f"covers the tree, with its `covers:` line — this script will "
+                    f"not create one, because a new tree is a decision."
+                )
+            lines.setdefault(covers[home], []).append(
                 f"{finding.path} | {finding.rule.id} | {finding.fingerprint} | "
                 f"{reason}"
             )
@@ -2815,19 +2976,25 @@ def update_allowed_secrets(repo_root: Path, names: Names, created: dict[str, str
 
     heading = f"# --- {names.pascal}, rendered by tools/new-service "
     heading += "-" * max(3, SCAN_HEADING_WIDTH - len(heading))
-    block = "\n".join([
-        "",
-        "",
-        heading,
-        "#",
-        "# One entry per finding the gate reported over this render, carrying the",
-        "# fingerprints it computed rather than any this script worked out. The",
-        "# equivalent literals for a hand-built service are entries above, written",
-        "# the day that service landed; these are the same decision, taken by the",
-        "# tool that rendered them (#161).",
-        "",
-    ] + lines) + "\n"
-    return restore(text + block, newline)
+
+    written: dict[str, str] = {}
+    for relative, block in sorted(lines.items()):
+        text, newline = read(repo_root, relative)
+        appended = "\n".join([
+            "",
+            "",
+            heading,
+            "#",
+            "# One entry per finding the gate reported over this render, carrying the",
+            "# fingerprints it computed rather than any this script worked out. The",
+            "# equivalent literals for a hand-built service are entries above, written",
+            "# the day that service landed; these are the same decision, taken by the",
+            "# tool that rendered them (#161).",
+            "",
+        ] + block) + "\n"
+        written[relative] = restore(text + appended, newline)
+
+    return written
 
 
 def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
@@ -2942,6 +3109,10 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     # the rename maps the template's casings and never touches the slice's.
     mask = re.compile("|".join(re.escape(n) for n in (names.pascal, names.lower, names.upper)))
     created = render_projects(repo_root, names, migration_id)
+    # The service's Compose unit is created rather than spliced, so it joins
+    # `created` here — before the straggler loop below, which is exactly the
+    # check a renamed file wants and the one the spliced block never got.
+    created[compose_unit(names)] = render_service_compose(repo_root, names, port)
     for relative, text in created.items():
         stripped = BENIGN.sub("", mask.sub("", text))
         if (left := TEMPLATE_TOKEN.search(stripped)) is not None:
@@ -2955,7 +3126,7 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
 
     updated = {
         "Platform.slnx": update_solution(repo_root, names),
-        "deploy/compose/docker-compose.yml": update_compose(repo_root, names, port),
+        COMPOSE_INDEX: update_compose(repo_root, names, port),
         "deploy/compose/docker-compose.infra-only.yml": update_infra_only(repo_root, names),
         "deploy/compose/.env.example": update_env_example(repo_root, names),
         "deploy/compose/README.md": update_ports_readme(repo_root, names, port),
@@ -2971,7 +3142,7 @@ def plan(repo_root: Path, name: str, port: int, migration_id: str) -> Plan:
     # disk.
     allowed = update_allowed_secrets(repo_root, names, created, updated)
     if allowed is not None:
-        updated[SCAN_ALLOW_LIST] = allowed
+        updated.update(allowed)
 
     return Plan(created=created, updated=updated)
 

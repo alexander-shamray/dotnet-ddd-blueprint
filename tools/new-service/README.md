@@ -25,12 +25,13 @@ table matches `plan()`.
 | | |
 |---|---|
 | `Platform.slnx` | the service's project entries, in alphabetical position |
-| `deploy/compose/docker-compose.yml` | the migrator and API pair |
+| `deploy/compose/services/<Name>.yml` | the migrator and API pair — created, not spliced |
+| `deploy/compose/docker-compose.yml` | one `include:` line for that file |
 | `deploy/compose/docker-compose.infra-only.yml` | both halves of that pair, excluded |
 | `deploy/compose/.env.example` | the two §7.1 connection variables |
 | `deploy/compose/README.md` | one row in the ports table |
 | `deploy/compose/rabbitmq/definitions.json` | the broker account the service authenticates as, since #44 |
-| `.github/secret-scan/allowed-secrets.txt` | one accepted-finding entry per credential-shaped literal the render carries, since #161 |
+| `.github/secret-scan/allowed/<tree>.txt` | one accepted-finding entry per credential-shaped literal the render carries, in the file covering that entry's tree, since #161 |
 
 **The last one is the difference between a service that renders and a service
 that can be committed.** §15.1's secret scan reads the working tree, so it
@@ -43,7 +44,7 @@ entry per finding **the render introduced** — the fingerprints are the gate's
 own, never a second implementation of which substring each rule matches, and
 each shared file is scanned before and after so a finding that was already
 there stays somebody else's. A suppression arriving for a credential the run
-is not writing is the outcome `allowed-secrets.txt` exists to refuse, and the
+is not writing is the outcome the allow-list exists to refuse, and the
 first version of this step could produce one.
 
 **Run it on a clean worktree**, and undoing it is then two commands — the
@@ -52,7 +53,7 @@ alone is enough:
 
 ```bash
 rm -rf src/Services/Yankee tests/Yankee.*
-git checkout -- Platform.slnx deploy/compose/ .github/secret-scan/allowed-secrets.txt
+git checkout -- Platform.slnx deploy/compose/ .github/secret-scan/allowed/
 ```
 
 (`Yankee` rather than a `<Name>` placeholder because this is a `bash` fence and
@@ -232,7 +233,7 @@ way**, and for the same reason. `SCAN_REASONS` gives one sentence per finding
 §15.1's scanner reports over a render; a finding no row explains raises
 `ScaffoldError` naming the file, the line and the rule, because a reason this
 script invented would be a suppression nobody wrote — which is the one thing
-`allowed-secrets.txt` says in its own header it must never hold. The refusals
+the allow-list's README says it must never hold. The refusals
 are in `RefusesToRun` beside the unclassified-file ones, which is where they
 belong and where they were not: the paragraph above stated this property for a
 release while nothing exercised either raise.

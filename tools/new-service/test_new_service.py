@@ -82,6 +82,16 @@ SECOND_PORT = PORT - 1
 PROBE = "Zulu"
 SECOND_PROBE = "Yankee"
 
+# §14.1's model is an index plus one file per deployable unit, so a render
+# CREATES the service's Compose file rather than splicing a block into a file
+# every other service also owns. Spelt from the probe names, because the path
+# is derived from the service name and an assertion that spelt it twice would
+# stop agreeing with the script the moment either moved.
+COMPOSE_INDEX = "deploy/compose/docker-compose.yml"
+UNIT = f"deploy/compose/services/{PROBE.lower()}.yml"
+SECOND_UNIT = f"deploy/compose/services/{SECOND_PROBE.lower()}.yml"
+TEMPLATE_UNIT = "deploy/compose/services/catalog.yml"
+
 
 def render(name: str = PROBE, port: int = PORT, repo_root: Path = REPO_ROOT) -> Plan:
     return plan(repo_root, name, port, MIGRATION_ID)
@@ -105,6 +115,15 @@ def template_copy(destination: Path) -> Path:
     for shared in (
         "Platform.slnx",
         "deploy/compose/docker-compose.yml",
+        # Every file the index includes, because the port collision check reads
+        # them — the index publishes nothing itself, so a copy holding only the
+        # index would have no mapping to collide with and would call every port
+        # free.
+        "deploy/compose/infrastructure.yml",
+        "deploy/compose/services/catalog.yml",
+        "deploy/compose/services/gateway.yml",
+        "deploy/compose/services/ordering.yml",
+        "deploy/compose/services/web-bff.yml",
         "deploy/compose/docker-compose.infra-only.yml",
         "deploy/compose/.env.example",
         "deploy/compose/README.md",
@@ -142,9 +161,35 @@ def allow_list_entries(gate, text: str) -> tuple[list, list[str]]:
     with itself about a format neither of them owns.
     """
     with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / Path(SCAN_ALLOW_LIST).name
+        # A `.txt`, because the gate reads one file or a directory of them and
+        # this is the one-file form. The name is arbitrary; the `covers:` line
+        # inside the body is what decides which entries the file may hold, and
+        # it travels with the text the caller passed.
+        path = Path(directory) / "one-tree.txt"
         path.write_bytes(text.encode("utf-8"))
         return gate.read_allowed(path, {rule.id for rule in gate.RULES})
+
+
+def allow_list_files(root: Path) -> dict[str, str]:
+    """Every allow-list file in a checkout, keyed by repository-relative path."""
+    return {
+        f"{SCAN_ALLOW_LIST}/{path.name}": path.read_bytes().decode("utf-8")
+        for path in sorted((root / SCAN_ALLOW_LIST).glob("*.txt"))
+    }
+
+
+def allow_list_appended(rendered) -> dict[str, str]:
+    """The allow-list files this render wrote, keyed the same way.
+
+    A render appends to the file covering each entry's tree, so this is a map
+    and not a file — a service's Compose unit and its test fixtures are two
+    trees, and a suite that read one of them would be blind to the other.
+    """
+    return {
+        path: body
+        for path, body in rendered.updated.items()
+        if path.startswith(f"{SCAN_ALLOW_LIST}/")
+    }
 
 
 class RendersTheTemplate(unittest.TestCase):
@@ -674,13 +719,35 @@ class EditsTheSharedFiles(unittest.TestCase):
         services = re.findall(r'<Folder Name="/src/Services/([^/]+)/">', solution)
         self.assertEqual(sorted(services), services)
 
-    def test_the_compose_pair_lands_before_the_collector_on_the_requested_port(self):
-        compose = self.rendered.updated["deploy/compose/docker-compose.yml"]
-        self.assertLess(compose.index("  zulu-migrator:"), compose.index("  otel-collector:"))
-        self.assertLess(compose.index("  zulu-api:"), compose.index("  otel-collector:"))
-        self.assertIn(f'ports: [ "127.0.0.1:{PORT}:8080" ]', compose)
-        self.assertIn(
-            'ports: [ "127.0.0.1:5102:8080" ]', compose, "Catalog keeps its own port"
+    def test_the_unit_is_created_included_last_and_published_on_the_requested_port(self):
+        index = self.rendered.updated[COMPOSE_INDEX].replace("\r\n", "\n").split("\n")
+        self.assertIn("  - services/zulu.yml", index)
+        self.assertGreater(
+            index.index("  - services/zulu.yml"),
+            index.index("  - services/web-bff.yml"),
+            "a unit joins after the ones already there, so services accumulate in order",
+        )
+
+        unit = self.rendered.created[UNIT]
+        self.assertIn("  zulu-migrator:", unit)
+        self.assertIn("  zulu-api:", unit)
+        self.assertIn(f'ports: [ "127.0.0.1:{PORT}:8080" ]', unit)
+
+    def test_the_template_s_own_unit_is_not_touched(self):
+        # The half of the split worth asserting. Catalog's environment used to
+        # share a file with every other service's, so a render that damaged one
+        # line of it damaged everybody's; now the only Compose file a render
+        # writes to is the index, and the only one it creates is its own.
+        self.assertNotIn(TEMPLATE_UNIT, self.rendered.updated)
+        self.assertNotIn(TEMPLATE_UNIT, self.rendered.created)
+        compose_written = [
+            path
+            for path in {**self.rendered.created, **self.rendered.updated}
+            if path.startswith("deploy/compose/") and path.endswith(".yml")
+        ]
+        self.assertEqual(
+            sorted([COMPOSE_INDEX, "deploy/compose/docker-compose.infra-only.yml", UNIT]),
+            sorted(compose_written),
         )
 
     def test_every_mapping_in_the_rendered_file_is_bound_to_loopback(self):
@@ -690,18 +757,20 @@ class EditsTheSharedFiles(unittest.TestCase):
         # prefix would reopen that one service at a time, and every other
         # assertion in this class is satisfied just as happily by a 0.0.0.0
         # bind — so the subject here is the mapping's *shape*, and it is every
-        # mapping in the file rather than the new one alone: an assertion
-        # scoped to the rendered pair cannot notice the template regressing.
-        compose = self.rendered.updated["deploy/compose/docker-compose.yml"]
+        # mapping in the rendered unit rather than the new mapping alone —
+        # which still reaches the template, because the unit IS the template
+        # renamed. `RefusesToRun` covers the same rule from the other side, by
+        # unbinding the template and asserting the run stops.
+        unit = self.rendered.created[UNIT]
         mappings = [
             mapping
-            for published in re.findall(r"ports: \[ ([^\]]*)\]", compose)
+            for published in re.findall(r"ports: \[ ([^\]]*)\]", unit)
             for mapping in re.findall(r'"([^"]+)"', published)
         ]
         # The positive control: a pattern that matched nothing would pass the
         # loop below in silence, which is this repository's most-repeated way
         # for a check to stop checking.
-        self.assertGreater(len(mappings), 1, "found no published mapping to judge")
+        self.assertGreaterEqual(len(mappings), 1, "found no published mapping to judge")
         for mapping in mappings:
             self.assertTrue(
                 mapping.startswith("127.0.0.1:"),
@@ -709,19 +778,21 @@ class EditsTheSharedFiles(unittest.TestCase):
             )
 
     def test_the_compose_pair_keeps_the_two_key_split_of_section_7_1(self):
-        compose = self.rendered.updated["deploy/compose/docker-compose.yml"]
-        self.assertIn("ConnectionStrings__ZuluMigrator:", compose)
-        self.assertIn("ConnectionStrings__Zulu:", compose)
-        self.assertIn("condition: service_completed_successfully", compose)
+        unit = self.rendered.created[UNIT]
+        self.assertIn("ConnectionStrings__ZuluMigrator:", unit)
+        self.assertIn("ConnectionStrings__Zulu:", unit)
+        self.assertIn("condition: service_completed_successfully", unit)
 
     def test_the_api_block_carries_the_bus_key_and_waits_for_the_broker(self):
         # The bus wiring is template, not slice: AddMassTransitMessaging
         # throws without the key, so a scaffolded api block missing it is a
         # container that cannot start. The migrator half must NOT gain either
         # line — a job host has no bus.
-        compose = self.rendered.updated["deploy/compose/docker-compose.yml"].replace("\r\n", "\n")
-        api = compose[compose.index("  zulu-api:"):]
-        api = api[: api.index("\n  otel-collector:")] if "\n  otel-collector:" in api else api
+        # The api block runs to the end of the file now: the unit holds the
+        # pair and nothing after it, which is what removed the bounding
+        # problem a spliced block had.
+        unit = self.rendered.created[UNIT].replace("\r\n", "\n")
+        api = unit[unit.index("  zulu-api:"):]
         # The service's OWN broker account, not `guest` (#44). The rename
         # carries both halves — the login and the password — so a scaffolded
         # service arrives with an identity rather than the shared administrator
@@ -730,7 +801,7 @@ class EditsTheSharedFiles(unittest.TestCase):
         self.assertNotIn("guest:guest", api)
         self.assertIn("rabbitmq: { condition: service_healthy }", api)
 
-        migrator = compose[compose.index("  zulu-migrator:"): compose.index("  zulu-api:")]
+        migrator = unit[unit.index("  zulu-migrator:"): unit.index("  zulu-api:")]
         self.assertNotIn("RabbitMq", migrator)
 
     def test_the_service_gets_a_broker_account_it_can_actually_authenticate_with(self):
@@ -775,9 +846,11 @@ class EditsTheSharedFiles(unittest.TestCase):
         self.assertNotIn("ordering-", permission["write"])
 
     def test_both_halves_of_the_pair_join_the_excluded_profile(self):
-        # §14.1's own rule: every application block added to docker-compose.yml
-        # joins this list in the same change, or `up` on the override starts a
-        # service the developer is running on the host.
+        # §14.1's own rule: every unit the index includes joins this list in
+        # the same change, or `up` on the override starts a service the
+        # developer is running on the host. The override is the one Compose
+        # file the split leaves shared — it merges over a resolved model, so
+        # it cannot be divided per service the way the model itself is.
         override = self.rendered.updated["deploy/compose/docker-compose.infra-only.yml"]
         lines = override.replace("\r\n", "\n")
         self.assertIn('  zulu-migrator:\n    profiles: [ "excluded" ]', lines)
@@ -812,19 +885,26 @@ class EditsTheSharedFiles(unittest.TestCase):
         gate = load_scan_gate(REPO_ROOT)
         self.assertIsNotNone(gate, f"{SCAN_GATE} is this repository's own gate")
 
-        self.assertIn(SCAN_ALLOW_LIST, self.rendered.updated)
-        before = (REPO_ROOT / SCAN_ALLOW_LIST).read_bytes().decode("utf-8")
-        after = self.rendered.updated[SCAN_ALLOW_LIST]
-        self.assertTrue(after.startswith(before), "the render rewrote the allow-list")
+        written = allow_list_appended(self.rendered)
+        self.assertNotEqual({}, written, "the render appended to no allow-list file")
 
-        # The gate's own reader, which is what refuses a line that is not four
-        # fields, a path with a glob in it, a rule nobody declares or a reason
-        # too short to be one. Asserting no problem is asserting all four.
-        existing, _ = allow_list_entries(gate, before)
-        entries, problems = allow_list_entries(gate, after)
-        self.assertEqual([], problems)
+        added = []
+        entries = []
+        for relative, after in written.items():
+            before = (REPO_ROOT / relative).read_bytes().decode("utf-8")
+            self.assertTrue(
+                after.startswith(before), f"the render rewrote {relative}")
 
-        added = entries[len(existing):]
+            # The gate's own reader, which is what refuses a line that is not
+            # four fields, a path with a glob in it, a rule nobody declares, a
+            # reason too short to be one, or a path outside the tree the file
+            # covers. Asserting no problem is asserting all five.
+            existing, _ = allow_list_entries(gate, before)
+            found, problems = allow_list_entries(gate, after)
+            self.assertEqual([], problems, relative)
+            entries.extend(found)
+            added.extend(found[len(existing):])
+
         self.assertNotEqual([], added, "the render generated no entry at all")
 
         # A duplicate is a failed build from the tool that exists to prevent
@@ -860,12 +940,19 @@ class EditsTheSharedFiles(unittest.TestCase):
         # for the values: what counts as a value is the gate's question, and a
         # search written here would be a second answer to it.
         gate = load_scan_gate(REPO_ROOT)
-        before = (REPO_ROOT / SCAN_ALLOW_LIST).read_bytes().decode("utf-8")
-        appended = self.rendered.updated[SCAN_ALLOW_LIST][len(before):]
-        self.assertEqual(
-            [],
-            [str(finding) for finding in gate.scan_text(SCAN_ALLOW_LIST, appended, gate.RULES)],
-        )
+        written = allow_list_appended(self.rendered)
+        self.assertNotEqual({}, written, "nothing was appended to judge")
+        for relative, after in written.items():
+            before = (REPO_ROOT / relative).read_bytes().decode("utf-8")
+            appended = after[len(before):]
+            self.assertEqual(
+                [],
+                [
+                    str(finding)
+                    for finding in gate.scan_text(relative, appended, gate.RULES)
+                ],
+                relative,
+            )
 
     def test_every_shared_file_keeps_the_line_endings_it_had(self):
         # Not "keeps CRLF": `.gitattributes` forces that on `*.cs` only, so
@@ -970,8 +1057,22 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
         self.directory.cleanup()
 
     def test_every_compose_service_key_is_unique(self):
-        compose = self.second.updated["deploy/compose/docker-compose.yml"]
-        keys = re.findall(r"^  ([a-z0-9][a-z0-9-]*):$", compose.replace("\r\n", "\n"), re.M)
+        # Across the whole model rather than one file, which is what the split
+        # changed about this check: two units may each be well formed and still
+        # declare one key twice between them, and Compose reads them as one
+        # model. The second render's own unit is a value, the first's is on
+        # disk, so the union is read from both.
+        model = dict(self.second.created)
+        for unit in (self.root / "deploy/compose/services").glob("*.yml"):
+            relative = unit.relative_to(self.root).as_posix()
+            model.setdefault(relative, unit.read_text(encoding="utf-8"))
+
+        keys = [
+            key
+            for path, body in model.items()
+            if path.startswith("deploy/compose/")
+            for key in re.findall(r"^  ([a-z0-9][a-z0-9-]*):$", body.replace("\r\n", "\n"), re.M)
+        ]
         self.assertEqual(sorted(set(keys)), sorted(keys), keys)
         for expected in ("catalog-api", "zulu-api", "yankee-api"):
             self.assertIn(expected, keys)
@@ -982,10 +1083,13 @@ class RendersASecondServiceBesideTheFirst(unittest.TestCase):
             self.assertEqual(1, env.count(f"# {service}_CONNECTION="), service)
             self.assertEqual(1, env.count(f"# {service}_MIGRATOR_CONNECTION="), service)
 
-    def test_the_new_pair_lands_after_the_services_already_there(self):
-        compose = self.second.updated["deploy/compose/docker-compose.yml"]
-        self.assertLess(compose.index("  zulu-api:"), compose.index("  yankee-migrator:"))
-        self.assertLess(compose.index("  yankee-api:"), compose.index("  otel-collector:"))
+    def test_the_new_unit_is_included_after_the_services_already_there(self):
+        index = self.second.updated[COMPOSE_INDEX].replace("\r\n", "\n").split("\n")
+        self.assertLess(
+            index.index("  - services/zulu.yml"), index.index("  - services/yankee.yml")
+        )
+        self.assertEqual(index[-2], "  - services/yankee.yml", index[-4:])
+        self.assertIn(SECOND_UNIT, self.second.created)
 
     def test_the_ports_table_and_the_override_gain_one_entry_each(self):
         readme = self.second.updated["deploy/compose/README.md"]
@@ -1044,8 +1148,17 @@ class TheAllowListStep(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
-    def allow_list(self) -> str:
-        return (self.root / SCAN_ALLOW_LIST).read_bytes().decode("utf-8")
+    def allow_list(self) -> dict[str, str]:
+        return allow_list_files(self.root)
+
+    def parse_all(self, files: dict[str, str]) -> tuple[list, list[str]]:
+        """Every entry across a set of allow-list files, and every complaint."""
+        entries, problems = [], []
+        for relative, body in sorted(files.items()):
+            found, said = allow_list_entries(self.gate, body)
+            entries.extend(found)
+            problems.extend(said)
+        return entries, problems
 
     def test_a_root_without_the_gate_writes_no_entry(self):
         # The only root in this class without `.github/`, and the only one the
@@ -1056,15 +1169,19 @@ class TheAllowListStep(unittest.TestCase):
             rendered = plan(root, PROBE, PORT, MIGRATION_ID)
 
             self.assertIsNone(load_scan_gate(root))
-            self.assertNotIn(SCAN_ALLOW_LIST, rendered.updated)
+            self.assertEqual({}, allow_list_appended(rendered))
 
     def test_the_same_render_with_the_gate_beside_it_writes_the_entries(self):
-        existing, _ = allow_list_entries(self.gate, self.allow_list())
+        existing, _ = self.parse_all(self.allow_list())
 
         rendered = plan(self.root, PROBE, PORT, MIGRATION_ID)
 
-        self.assertIn(SCAN_ALLOW_LIST, rendered.updated)
-        entries, problems = allow_list_entries(self.gate, rendered.updated[SCAN_ALLOW_LIST])
+        written = allow_list_appended(rendered)
+        self.assertNotEqual({}, written)
+        # More than one file, which is the split's own property: a render
+        # writes a Compose unit and a test fixture, and those are two trees.
+        self.assertGreater(len(written), 1, sorted(written))
+        entries, problems = self.parse_all({**self.allow_list(), **written})
         self.assertEqual([], problems)
         self.assertGreater(len(entries), len(existing))
 
@@ -1082,7 +1199,7 @@ class TheAllowListStep(unittest.TestCase):
         # reads what is on disk, which is the thing CI reads.
         apply(self.root, plan(self.root, PROBE, PORT, MIGRATION_ID))
 
-        entries, problems = allow_list_entries(self.gate, self.allow_list())
+        entries, problems = self.parse_all(self.allow_list())
         self.assertEqual([], problems)
         findings, scanned = self.gate.scan_tree(self.root, self.gate.RULES)
 
@@ -1101,7 +1218,7 @@ class TheAllowListStep(unittest.TestCase):
     def test_a_second_service_appends_beside_the_first(self):
         # Two renders into one checkout, which is what the tool is for. The
         # allow-list accumulates a block per service exactly as the Compose
-        # file accumulates a block per service, and a second run that rewrote
+        # index accumulates a line per service, and a second run that rewrote
         # it would take the first service's entries away — the gate then
         # reports the first service's own literals as unexplained, and the
         # branch that added the second service is what goes red.
@@ -1110,10 +1227,14 @@ class TheAllowListStep(unittest.TestCase):
 
         second = plan(self.root, SECOND_PROBE, SECOND_PORT, "20260810120000")
 
-        after = second.updated[SCAN_ALLOW_LIST]
-        self.assertTrue(after.startswith(first), "the second render rewrote the file")
+        written = allow_list_appended(second)
+        self.assertNotEqual({}, written)
+        for relative, after in written.items():
+            self.assertTrue(
+                after.startswith(first[relative]),
+                f"the second render rewrote {relative}")
 
-        entries, problems = allow_list_entries(self.gate, after)
+        entries, problems = self.parse_all({**first, **written})
         self.assertEqual([], problems)
         paths = {entry.path for entry in entries}
         self.assertIn(f"tests/{PROBE}.Api.Tests/HostSmokeTests.cs", paths)
@@ -1137,21 +1258,33 @@ class TheAllowListStep(unittest.TestCase):
 
         # A bad merge, a hand edit, a partial checkout — the entry is gone and
         # the first service's hash is unexplained again.
-        lines = self.allow_list().splitlines()
+        # The broker account's entry is under `deploy/`, so that is the file
+        # the fixture damages — found by searching, because which file covers
+        # which tree is the allow-list's own declaration and not this suite's
+        # to restate.
+        damaged = next(
+            relative for relative, body in self.allow_list().items()
+            if any(
+                line.startswith("deploy/compose/rabbitmq/definitions.json")
+                and PROBE in line
+                for line in body.splitlines()
+            )
+        )
+        lines = self.allow_list()[damaged].splitlines()
         orphaned = [
             line for line in lines
             if line.startswith("deploy/compose/rabbitmq/definitions.json") and PROBE in line
         ]
         self.assertEqual(1, len(orphaned), "the fixture found no entry to remove")
         stolen = orphaned[0].split("|")[2].strip()
-        (self.root / SCAN_ALLOW_LIST).write_bytes(
+        (self.root / damaged).write_bytes(
             ("\n".join(line for line in lines if line != orphaned[0]) + "\n").encode("utf-8"))
 
         second = plan(self.root, SECOND_PROBE, SECOND_PORT, "20260810120000")
 
-        before, _ = allow_list_entries(self.gate, self.allow_list())
-        entries, problems = allow_list_entries(
-            self.gate, second.updated[SCAN_ALLOW_LIST])
+        before, _ = self.parse_all(self.allow_list())
+        written = allow_list_appended(second)
+        entries, problems = self.parse_all({**self.allow_list(), **written})
         self.assertEqual([], problems)
         added = entries[len(before):]
         self.assertNotEqual([], added, "the second render generated nothing")
@@ -1321,7 +1454,7 @@ class RefusesToRun(unittest.TestCase):
         # platform's and this substitution has no business changing them.
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy(Path(directory))
-            compose = root / "deploy/compose/docker-compose.yml"
+            compose = root / TEMPLATE_UNIT
             unbound = compose.read_bytes().replace(
                 b'ports: [ "127.0.0.1:5102:8080" ]', b'ports: [ "5102:8080" ]'
             )
@@ -1394,15 +1527,19 @@ class RefusesToRun(unittest.TestCase):
         # template's shape hands it nothing — over which every name there is
         # passes. So this asserts what environment_keys extracted, not what the
         # caller concluded from it.
-        compose = render().updated["deploy/compose/docker-compose.yml"].replace("\r\n", "\n")
-        lines = compose.split("\n")
-        # Sliced the way update_compose slices, with the script's own reader:
-        # §14.1's pair rule renders a migrator and an api, so the block is the
-        # two service keys from the migrator to the third one after it.
-        starts = [i for i, line in enumerate(lines) if new_service.SERVICE_KEY.fullmatch(line)]
-        at = starts.index(lines.index(f"  {PROBE.lower()}-migrator:"))
-        end = starts[at + 2] if at + 2 < len(starts) else len(lines)
-        block = "\n".join(lines[starts[at]:end])
+        # The whole unit is the block now — §14.1's pair rule renders a
+        # migrator and an api into a file that holds those two and nothing
+        # else, so there is no slice to get wrong. That the file really does
+        # hold exactly the pair is asserted first, because a unit that had
+        # gained a third service would make the count below mean something
+        # different.
+        block = render().created[UNIT].replace("\r\n", "\n")
+        starts = [
+            line for line in block.split("\n") if new_service.SERVICE_KEY.fullmatch(line)
+        ]
+        self.assertEqual(
+            [f"  {PROBE.lower()}-migrator:", f"  {PROBE.lower()}-api:"], starts, block
+        )
 
         mappings = environment_keys(block)
 
@@ -1659,13 +1796,13 @@ class RefusesToRun(unittest.TestCase):
         # reported against the branch that rendered.
         with tempfile.TemporaryDirectory() as directory:
             root = template_copy_with_gate(Path(directory))
-            allow_list = root / SCAN_ALLOW_LIST
+            allow_list = next((root / SCAN_ALLOW_LIST).glob("*.txt"))
             allow_list.write_bytes(
                 allow_list.read_bytes() + b"this line has no pipes at all\n")
 
             with self.assertRaises(ScaffoldError) as raised:
                 render(repo_root=root)
-            self.assertIn("allowed-secrets.txt", str(raised.exception))
+            self.assertIn(SCAN_ALLOW_LIST, str(raised.exception))
 
     def test_a_github_directory_carrying_neither_the_gate_nor_the_list(self):
         # `.github/` absent is the degradation and is tested next door. A
@@ -1677,7 +1814,11 @@ class RefusesToRun(unittest.TestCase):
         for missing in (SCAN_GATE, SCAN_ALLOW_LIST):
             with tempfile.TemporaryDirectory() as directory:
                 root = template_copy_with_gate(Path(directory))
-                (root / missing).unlink()
+                target = root / missing
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
 
                 with self.assertRaises(ScaffoldError) as raised:
                     render(repo_root=root)
@@ -1737,10 +1878,17 @@ class RefusesToRun(unittest.TestCase):
 
             rendered = plan(root, "Rabbit", PORT, MIGRATION_ID)
 
-            entries, problems = allow_list_entries(
-                load_scan_gate(root), rendered.updated[SCAN_ALLOW_LIST])
+            gate = load_scan_gate(root)
+            entries, problems = [], []
+            for body in allow_list_appended(rendered).values():
+                found, said = allow_list_entries(gate, body)
+                entries.extend(found)
+                problems.extend(said)
             self.assertEqual([], problems)
-            reasons = [entry.reason for entry in entries if "docker-compose" in entry.path]
+            reasons = [
+                entry.reason for entry in entries
+                if entry.path.startswith("deploy/compose/services/")
+            ]
             self.assertIn("Rabbit's local connection default, in-cluster hostname.", reasons)
             self.assertIn(
                 "Section 14.1's broker default for Rabbit, the per-service account "
@@ -1822,7 +1970,7 @@ class TheCommandLine(unittest.TestCase):
             # `6 updated` and not 7: this root has no `.github/`, so §15.1's
             # allow-list step degrades — which is `TheAllowListStep`'s subject
             # and is asserted there from both sides.
-            self.assertIn("63 files created, 6 updated", out)
+            self.assertIn("64 files created, 6 updated", out)
             self.assertIn(f"port {PORT}", out)
             self.assertTrue((root / "src/Services/Zulu/Zulu.Api/Program.cs").exists())
 
