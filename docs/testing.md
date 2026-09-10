@@ -150,13 +150,14 @@ py -3.12 .github/pipeline-gate/pipeline_gate.py stages \
 
 **The logger and the directories are not decoration.** The gate counts from
 TRX and looks for those three directory names, so a bare `dotnet test` runs
-the stages and leaves it nothing to read. What it asserts has no number in
-it: every test project in `Platform.slnx` ran in some stage, no stage was
-empty, and no test ran in two — which is what turns "exhaustive and disjoint
-by construction" from a claim into a check, and on the integration stage an
-overlap is a container set paid for twice. Its floors sit well under any
-plausible total on purpose, because a floor is a number in a file and what
-they grope for is an order-of-magnitude miss.
+the stages and leaves it nothing to read. The structural half of what it
+asserts has no number in it: every test project in `Platform.slnx` ran in
+some stage, no stage was empty, and no test ran in two — which is what turns
+"exhaustive and disjoint by construction" from a claim into a check, and on
+the integration stage an overlap is a container set paid for twice. The
+other half is a floor per stage, sitting well under any plausible total on
+purpose, because a floor is a number in a file and what it gropes for is an
+order-of-magnitude miss.
 
 > **A filter is a new way for a suite to not run, and that is
 > [§12.1](backend-architecture/12-test-strategy.md)'s oldest trap wearing

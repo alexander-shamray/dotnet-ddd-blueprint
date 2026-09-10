@@ -83,7 +83,7 @@ docs/runbooks/               NOT one per alert: §13.8's ownership split makes
                              check.py's SHARED_RUNBOOKS. Plus a README that is
                              EXCLUDED from the pairing by name — one declared
                              exception, so a second non-runbook file has to
-                             be argued for. /validate-blueprint reads §13.6's
+                             be argued for. check.py's check 9 reads §13.6's
                              and §13.9's tables and fails when they and the
                              directory disagree
 docs/superpowers/            one frozen spec + plan per PR, written before it
@@ -187,14 +187,11 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              change or leave the gate blind to the code it
                              checks
 .github/workflows/realm.yml  §11.3's token obligations on deploy/keycloak/**,
-                             reaching outside its own tree:
-                             deploy/compose/keycloak/realm-export.json, which
-                             is the subject; Common.Web's
-                             AuthenticationExtensions.cs, out of which the
-                             lifetime a realm owes is READ rather than
-                             restated; and deploy/canary/**, whose plan the
-                             scheduled job loops over (ADR-043) — all
-                             declared as SOURCE_INPUTS in realm_check.py,
+                             reaching outside its own tree for the realm
+                             export that is its subject, the source the
+                             lifetime a realm owes is READ from rather than
+                             restated, and the rest of what the gate reads —
+                             the list is SOURCE_INPUTS in realm_check.py,
                              which asserts the triggers cover every entry
                              and, in the other direction, that no path the
                              gate reads is missing from the list. Split from
@@ -300,9 +297,10 @@ deploy/helm/                 §15.3's charts. `common/` is a LIBRARY chart
                              and the BFF are values plus one-line includes,
                              the gateway adds `edge-config.yaml` for the two
                              keys no service has, and `platform/` is the
-                             umbrella. `smoke.sh` renders every chart and
-                             asserts what comes out — it reaches no cluster,
-                             and says so
+                             umbrella. `smoke.sh` renders every chart but
+                             the library, which renders nothing, and asserts
+                             what comes out — it reaches no cluster, and
+                             says so
 deploy/observability/        §13.8's dashboards, §13.6's alert rules and
                              §13.7's k6 SLO run. TWO rule files, and the split
                              is the point: `platform-alerts.yaml` is loaded,
