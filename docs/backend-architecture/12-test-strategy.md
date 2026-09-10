@@ -993,13 +993,28 @@ can regress is a pure function:
 // the outbox's table and type map. A fast test does not have to be a domain
 // test, and moving it to reach a container it does not use is how a suite
 // acquires a minute of startup for one assertion.
+//
+// The envelope is this assembly's own SampleIntegrationEvent rather than a
+// service contract, because Common.Infrastructure.Tests references
+// Common.Infrastructure and nothing downstream of it — which is the same
+// fact that makes the test cheap, read from the other side.
+private static readonly DateTimeOffset Now = new(2026, 8, 11, 2, 26, 0, TimeSpan.Zero);
+private static readonly MessageTypeMap Types = new([typeof(SampleDomainEvent).Assembly]);
+private static readonly OutboxJson Json = new([]);
+
 [Fact]
 public void Stage_takes_both_identities_from_the_envelope()
 {
-    V1.OrderPlaced placed = Contracts.OrderPlaced(SeedData.OrderId);
+    SampleIntegrationEvent message = new()
+    {
+        MessageId = Guid.CreateVersion7(),
+        CorrelationId = Guid.CreateVersion7(),
+        OccurredAt = Now,
+        Note = "published"
+    };
 
-    var row = OutboxMessage.Stage(
-        placed,
+    OutboxMessage row = OutboxMessage.Stage(
+        message,
         OutboxLane.Broker,
         correlationId: Guid.CreateVersion7(),
         types: Types,
@@ -1009,8 +1024,8 @@ public void Stage_takes_both_identities_from_the_envelope()
     // particular, because a caller-supplied one is passed in and ignored for
     // an IIntegrationEvent. That argument being silently dropped is the
     // regression this test exists for.
-    row.MessageId.ShouldBe(placed.MessageId);
-    row.CorrelationId.ShouldBe(placed.CorrelationId);
+    row.MessageId.ShouldBe(message.MessageId);
+    row.CorrelationId.ShouldBe(message.CorrelationId);
 }
 ```
 
