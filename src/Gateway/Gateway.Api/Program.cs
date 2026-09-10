@@ -334,6 +334,14 @@ if (corsEnabled)
                 .WithOrigins(origins)
                 .AllowAnyHeader()
                 .AllowAnyMethod()
+                // Retry-After is not a CORS-safelisted response header, so
+                // without this line a browser client cannot read the value
+                // §10.3's rejection handler goes to the trouble of computing —
+                // it reaches the network and is dropped before script sees it.
+                // The correlation id needs no entry here: it rides in the
+                // problem body as an extension member, which is readable
+                // whatever the header policy says.
+                .WithExposedHeaders("Retry-After")
                 .AllowCredentials()));
 }
 

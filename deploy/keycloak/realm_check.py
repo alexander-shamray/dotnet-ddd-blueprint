@@ -144,6 +144,14 @@ TRIGGERS = ("pull_request", "push")
 # predicate is what has gone wrong.
 BROWSER_CLIENT = "web-app"
 
+# `mobile-app` is the native client this route was opened for. No chapter
+# fixes the name yet — the client is new rather than restated — so this
+# constant is the first spelling of it and not a second one agreeing with a
+# first. The same derivation trap applies as it does to BROWSER_CLIENT:
+# inferring "the mobile client" from its flags would let the flags define the
+# subject the flags are meant to be judged against.
+MOBILE_CLIENT = "mobile-app"
+
 # A REALM REPRESENTATION CARRIES EVERY CONFIDENTIAL CLIENT'S SECRET, and this
 # gate needs none of them. The admin API answers `secret` for each such client
 # to a caller with realm-read rights, §14.1's own export carries one, and this
@@ -171,9 +179,14 @@ REDACTED = "<redacted by realm_check>"
 # A projection inverts that. `judged` builds a new document out of the named
 # fields below, so what the checks hold has no credential in it to leak — not a
 # redacted one, none — and a Keycloak version that adds a new secret-bearing
-# field changes nothing here. An allow-list of six keys is also the honest
+# field changes nothing here. An allow-list of eight keys is also the honest
 # statement of what this gate reads.
-REALM_FIELDS = ("accessTokenLifespan",)
+#
+# `revokeRefreshToken` and `refreshTokenMaxReuse` joined the realm fields with
+# the mobile client rather than before it: a realm that issues no refresh
+# token has nothing for either setting to bound, so the two were not this
+# gate's business until a client existed whose refresh token they rotate.
+REALM_FIELDS = ("accessTokenLifespan", "revokeRefreshToken", "refreshTokenMaxReuse")
 CLIENT_FIELDS = ("clientId", "standardFlowEnabled", "implicitFlowEnabled",
                  "directAccessGrantsEnabled")
 CLIENT_ATTRIBUTES = ("use.refresh.tokens", "access.token.lifespan")
@@ -451,11 +464,22 @@ def check_realm(realm: dict, kind: str, lifetime: int) -> list[str]:
             "refresh-token obligation is a property of that client and cannot "
             "be checked without it")
 
+    mobile = [c for c in clients if isinstance(c, dict) and c.get("clientId") == MOBILE_CLIENT]
+    if len(mobile) != 1:
+        problems.append(
+            f"the realm declares the native client {MOBILE_CLIENT!r} "
+            f"{len(mobile)} time(s), expected exactly one. Its refresh-token "
+            "obligation is a property of that client and cannot be checked "
+            "without it")
+
     problems += check_flags_are_booleans(clients)
     problems += check_lifetime(realm, clients, lifetime)
     problems += check_implicit_flow(clients)
     if named:
         problems += check_browser_client(named[0], kind)
+    if mobile:
+        problems += check_mobile_client(mobile[0])
+        problems += check_refresh_token_rotation(realm)
     return problems
 
 
@@ -611,6 +635,99 @@ def check_browser_client(client: dict, kind: str) -> list[str]:
             f"client {BROWSER_CLIENT!r} has directAccessGrantsEnabled="
             f"{grants!r}. Section 14.1's documented login is a password grant, "
             "so the local realm needs it and the README's curl would not work")
+    return problems
+
+
+def check_mobile_client(client: dict) -> list[str]:
+    """The native client's refresh-token obligation, `check_browser_client`'s mirror.
+
+    `web-app` runs in a browser, where a refresh token is reachable by any
+    script on the origin — ADR-034's reason to withhold one. `mobile-app` runs
+    as a platform-installed app with no equivalent script-injection surface,
+    so the realm issues it a refresh token rather than the browser's none, and
+    what has to hold instead is rotation: `check_refresh_token_rotation` below
+    is what makes a copied refresh token cost something once one exists to
+    copy.
+
+    Unlike `check_browser_client`, the password-grant check here does not take
+    the realm kind: the client JSON this PR adds sets
+    `directAccessGrantsEnabled` to `false` unconditionally, because nothing
+    documents a password-grant login for the native client in either realm —
+    §14.1's curl recipe is `web-app`'s alone.
+    """
+    problems: list[str] = []
+    attributes = client.get("attributes")
+    attributes = attributes if isinstance(attributes, dict) else {}
+
+    refresh = attributes.get("use.refresh.tokens")
+    if refresh is None:
+        problems.append(
+            f"client {MOBILE_CLIENT!r} declares no use.refresh.tokens "
+            "attribute. Keycloak's default already issues one on the standard "
+            "flow, so the realm happens to comply today — but an unstated "
+            "attribute is the same silence ADR-034 refuses for the browser, "
+            "read the other way round, and a future Keycloak default is not "
+            "this gate's to trust")
+    elif str(refresh).lower() != "true":
+        problems.append(
+            f"client {MOBILE_CLIENT!r} sets use.refresh.tokens to something "
+            "other than \"true\". The native client has no way to obtain a "
+            "fresh access token without one once the short-lived one expires")
+
+    # The positive half, on check_browser_client's own reasoning: without the
+    # standard flow there is no authorization-code exchange and therefore no
+    # refresh token either, whatever the attribute above says.
+    if client.get("standardFlowEnabled") is not True:
+        problems.append(
+            f"client {MOBILE_CLIENT!r} does not enable the standard flow. "
+            "The refresh-token obligation above then holds because the "
+            "client mints no token at all, which is not the guarantee this "
+            "route was added for")
+
+    grants = client.get("directAccessGrantsEnabled")
+    if grants is not False:
+        problems.append(
+            f"client {MOBILE_CLIENT!r} has directAccessGrantsEnabled="
+            f"{grants!r}. The native client authenticates through the "
+            "authorization-code flow with PKCE; nothing documents a password "
+            "grant for it, in either realm kind")
+    return problems
+
+
+def check_refresh_token_rotation(realm: dict) -> list[str]:
+    """Realm-wide rotation, which is what makes a stolen refresh token cost something.
+
+    `revokeRefreshToken` and `refreshTokenMaxReuse` are realm settings with no
+    per-client override in Keycloak, so they are checked once here rather than
+    folded into `check_mobile_client` — a realm that got rotation right for
+    one client and wrong for another is not a shape Keycloak can produce.
+    `web-app` is untouched by either: ADR-034 leaves it no refresh token to
+    rotate, so a realm-wide setting is not a second exposure for the client
+    the setting was never written for.
+
+    Called only once a mobile client has been found (`check_realm`'s `if
+    mobile:` guard), on the same reasoning `check_browser_client` is guarded
+    by `if named:` — a rotation setting is only an obligation once a client
+    exists for it to bind.
+    """
+    problems: list[str] = []
+
+    revoke = realm.get("revokeRefreshToken")
+    if revoke is not True:
+        problems.append(
+            f"revokeRefreshToken is {revoke!r}, and {MOBILE_CLIENT!r} is "
+            "issued a refresh token. Without rotation, a refresh token copied "
+            "once keeps minting access tokens for as long as the session "
+            "lasts, whatever ADR-033's access-token bound says about the "
+            "token it mints")
+
+    reuse = realm.get("refreshTokenMaxReuse")
+    if reuse != 0:
+        problems.append(
+            f"refreshTokenMaxReuse is {reuse!r}, not 0. A nonzero value lets "
+            "a refresh token already rotated out of use be replayed that "
+            "many more times, which is exactly the reuse window rotation "
+            "exists to close")
     return problems
 
 

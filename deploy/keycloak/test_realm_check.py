@@ -45,13 +45,45 @@ def browser(**overrides) -> dict:
     return client
 
 
+def mobile(**overrides) -> dict:
+    """A compliant `mobile-app`: refresh token, standard flow, no password grant."""
+    client = {
+        "clientId": realm_check.MOBILE_CLIENT,
+        "standardFlowEnabled": True,
+        "implicitFlowEnabled": False,
+        "directAccessGrantsEnabled": False,
+        "publicClient": True,
+        "attributes": {"use.refresh.tokens": "true"},
+    }
+    client.update(overrides)
+    return client
+
+
 def realm(*clients, **overrides) -> dict:
-    """A realm document of the shape both an export and the admin API produce."""
+    """A realm document of the shape both an export and the admin API produce.
+
+    `mobile-app` is appended automatically unless the caller already supplied
+    one. Every fixture written before this client existed constructs a realm
+    to make a point about something else entirely — a lifetime override, a
+    malformed flag — and none of those cases should have to learn a second
+    client exists just to keep passing. A case that IS about the mobile
+    client supplies its own, by name, and this helper gets out of its way.
+    """
+    if clients:
+        client_list = list(clients)
+        if not any(isinstance(c, dict) and c.get("clientId") == realm_check.MOBILE_CLIENT
+                   for c in client_list):
+            client_list.append(mobile())
+    else:
+        client_list = [browser(), mobile()]
+
     document = {
         "realm": "commerce",
         "enabled": True,
         "accessTokenLifespan": 300,
-        "clients": list(clients) if clients else [browser()],
+        "revokeRefreshToken": True,
+        "refreshTokenMaxReuse": 0,
+        "clients": client_list,
     }
     document.update(overrides)
     return document
@@ -266,6 +298,80 @@ class ThePasswordGrant(Fixture):
         self.assertEqual(len(found), 1, found)
 
 
+class TheMobileClient(Fixture):
+    """`check_mobile_client`'s obligations, the mirror of `TheRefreshToken`'s and
+    `ThePasswordGrant`'s with the polarity `mobile-app` carries instead."""
+
+    def test_a_missing_refresh_token_attribute_is_caught(self):
+        client = mobile(attributes={})
+        self.assertIn("declares no use.refresh.tokens", self.one(realm(browser(), client)))
+
+    def test_a_refresh_token_attribute_set_to_false_is_caught(self):
+        """The obligation runs the opposite way from the browser's: mobile is issued one."""
+        client = mobile(attributes={"use.refresh.tokens": "false"})
+        self.assertIn("use.refresh.tokens", self.one(realm(browser(), client)))
+
+    def test_the_standard_flow_has_to_be_on_here_too(self):
+        """Without it there is no token to refresh, so the attribute above means nothing."""
+        client = mobile(standardFlowEnabled=False)
+        self.assertIn("standard flow", self.one(realm(browser(), client)))
+
+    def test_the_password_grant_is_caught_in_either_realm_kind(self):
+        """Unlike the browser's, this check does not take the realm kind:
+        nothing documents a password-grant login for the native client."""
+        client = mobile(directAccessGrantsEnabled=True)
+        deployed = self.problems(realm(browser(), client), realm_check.DEPLOYED)
+        # The local realm's OWN password-grant obligation is the opposite of
+        # the deployed one's (`ThePasswordGrant`), so `browser()` is given the
+        # flag `check_browser_client` requires for LOCAL here — otherwise a
+        # second, unrelated problem about `web-app` would be counted below.
+        local = self.problems(
+            realm(browser(directAccessGrantsEnabled=True), client), realm_check.LOCAL)
+        self.assertEqual(len(deployed), 1, deployed)
+        self.assertEqual(len(local), 1, local)
+        self.assertIn("directAccessGrantsEnabled", deployed[0])
+        self.assertIn("directAccessGrantsEnabled", local[0])
+
+
+class TheRefreshTokenRotation(Fixture):
+    """`revokeRefreshToken` and `refreshTokenMaxReuse`, judged once `mobile-app` exists."""
+
+    def test_revoke_refresh_token_off_is_caught(self):
+        document = realm()
+        document["revokeRefreshToken"] = False
+        self.assertIn("revokeRefreshToken", self.one(document))
+
+    def test_a_missing_revoke_refresh_token_is_caught_rather_than_defaulted(self):
+        document = realm()
+        del document["revokeRefreshToken"]
+        self.assertIn("revokeRefreshToken is None", self.one(document))
+
+    def test_a_nonzero_max_reuse_is_caught(self):
+        document = realm()
+        document["refreshTokenMaxReuse"] = 1
+        self.assertIn("refreshTokenMaxReuse", self.one(document))
+
+    def test_a_missing_max_reuse_is_caught_rather_than_defaulted(self):
+        document = realm()
+        del document["refreshTokenMaxReuse"]
+        self.assertIn("refreshTokenMaxReuse is None", self.one(document))
+
+    def test_rotation_is_not_checked_without_a_mobile_client(self):
+        """No client is issued a refresh token to rotate, so nothing here binds.
+
+        Mirrors `check_browser_client` being skipped when `web-app` is absent:
+        an obligation with no client to attach to is not one this gate can
+        report against a specific field, so it is silent rather than guessing.
+        """
+        other = {"clientId": "commerce-api"}
+        document = realm(clients=[browser(), other])
+        document["revokeRefreshToken"] = False
+        found = self.problems(document)
+        self.assertTrue(
+            any(realm_check.MOBILE_CLIENT in p and "0 time(s)" in p for p in found), found)
+        self.assertFalse(any("revokeRefreshToken" in p for p in found), found)
+
+
 class WhatTheGateIsLookingAt(Fixture):
     def test_a_realm_with_no_clients_is_refused_rather_than_passed(self):
         """Every per-client obligation is vacuously true of an empty realm.
@@ -292,6 +398,19 @@ class WhatTheGateIsLookingAt(Fixture):
     def test_a_duplicated_browser_client_is_refused(self):
         """Two `web-app` entries mean the compliant one could be the one not used."""
         found = self.problems(realm(browser(), browser()))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("2 time(s)", found[0])
+
+    def test_a_realm_missing_the_mobile_client_is_refused(self):
+        """The refresh-token obligation is a property of `mobile-app` and cannot be checked without it."""
+        other = {"clientId": "commerce-api"}
+        found = self.problems(realm(clients=[browser(), other]))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("0 time(s)", found[0])
+
+    def test_a_duplicated_mobile_client_is_refused(self):
+        """Two `mobile-app` entries mean the compliant one could be the one not used."""
+        found = self.problems(realm(browser(), mobile(), mobile()))
         self.assertEqual(len(found), 1, found)
         self.assertIn("2 time(s)", found[0])
 
@@ -810,6 +929,8 @@ class WhatTheGateHolds(unittest.TestCase):
         return {
             "realm": "commerce",
             "accessTokenLifespan": 300,
+            "revokeRefreshToken": True,
+            "refreshTokenMaxReuse": 0,
             "smtpServer": {"password": self.MARKERS["smtp"], "host": "mail"},
             "users": [{"username": "demo",
                        "credentials": [{"type": "password",
@@ -823,6 +944,12 @@ class WhatTheGateHolds(unittest.TestCase):
                 "protocolMappers": [{"name": "x"}],
                 "attributes": {"use.refresh.tokens": "false",
                                "pkce.code.challenge.method": "S256"},
+            }, {
+                "clientId": realm_check.MOBILE_CLIENT,
+                "standardFlowEnabled": True,
+                "implicitFlowEnabled": False,
+                "directAccessGrantsEnabled": False,
+                "attributes": {"use.refresh.tokens": "true"},
             }],
         }
 
