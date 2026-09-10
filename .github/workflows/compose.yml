@@ -6,7 +6,7 @@ name: Compose
 # filter also contains §14.1's two :latest pins — a broken upstream latest
 # can fail only a compose PR, never the main build.
 #
-# Since PR-10 the file carries application blocks with build: stanzas, so
+# Since PR-10 the model carries application blocks with build: stanzas, so
 # `up` also BUILDS those images — the smoke now compiles the solution inside
 # Docker, which is what the timeout below is sized for. Note what the filter
 # implies: a change under src/ alone does not re-run this workflow, so a

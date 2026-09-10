@@ -22,8 +22,13 @@ public static class RepositoryFile
     /// <summary>The shipped Keycloak realm (§14.1).</summary>
     public const string RealmExport = "deploy/compose/keycloak/realm-export.json";
 
-    /// <summary>The Compose file that deploys the BFF (§14.1).</summary>
-    public const string ComposeFile = "deploy/compose/docker-compose.yml";
+    /// <summary>
+    /// The Compose unit that deploys the BFF (§14.1). §14.1's model is an index
+    /// plus one file per deployable unit, so this is the BFF's own file and not
+    /// the index — the index declares no environment at all, and a read of it
+    /// would find no client id to disagree with the realm about.
+    /// </summary>
+    public const string ComposeFile = "deploy/compose/services/web-bff.yml";
 
     public static string Locate(string relativePath)
     {

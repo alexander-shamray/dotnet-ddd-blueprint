@@ -27,7 +27,8 @@ every deployed environment takes its secrets from a vault
 visible cost.** Since
 [ADR-036](../../docs/backend-architecture/adr/ADR-036-the-broker-has-a-per-service-identity.md)
 each service authenticates as itself — `catalog-svc` and `ordering-svc`, whose
-passwords are in `docker-compose.yml` beside every other local default — and
+passwords are in that service's own file under `services/` beside every other
+local default it carries — and
 **`guest` is not created at all**. RabbitMQ seeds that account only when it
 boots with an empty database and skips it when definitions are imported, which
 `rabbitmq/20-commerce.conf` arranges. Note the consequence of a stale volume:

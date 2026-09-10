@@ -596,7 +596,7 @@ public class RealmImportTests
                 "the deployment have to hold the same value (§11.5)");
 
             // The documented default and nothing else. The matching half lives
-            // in deploy/compose/docker-compose.yml as
+            // in deploy/compose/services/web-bff.yml as
             // ${BFF_CLIENT_SECRET:-local-dev-secret}, and Web.Bff.Tests'
             // RealmClientTests asserts the two files agree — which is the
             // assertion this one cannot make, being a building block's suite

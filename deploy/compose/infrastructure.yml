@@ -1,0 +1,146 @@
+# The shared baseline of §14.1: what every service talks to, plus the volumes
+# that outlive a `down`. Nothing here belongs to one service, which is why it
+# is one file and not five.
+#
+# deploy/compose/docker-compose.yml includes it;
+# docs/backend-architecture/14-local-development.md specifies it and this file
+# must stay reconciled with the chapter.
+#
+# This is the one include that sits beside the index, so every relative path in
+# it is relative to the compose directory — `include` resolves a path against
+# the file that declares it, and for this file those two directories are the
+# same one.
+services:
+  sql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SQL_PASSWORD:-Local_Dev_Pa55w0rd!}"
+      MSSQL_PID: Developer
+    # Every mapping in the model is published on 127.0.0.1 rather than on
+    # 0.0.0.0 — this file's and every unit's alike — and the argument is made
+    # once here rather than per service or per file. The
+    # credentials below are deliberate development defaults (§14.1), so the
+    # interface is the control standing in front of them: Compose's short
+    # syntax with no host-IP prefix binds every interface, which offers sa,
+    # two passwordless Redis instances, both broker service accounts and
+    # Keycloak's admin console to every peer on a shared network. Docker
+    # Desktop pre-authorises its own backend through the Windows firewall, so
+    # no prompt stands in the way of that either. deploy/compose/README.md
+    # addresses all of it as localhost already, so the prefix takes nothing
+    # from the documented workflow and closes the shared-Wi-Fi case.
+    ports: [ "127.0.0.1:1433:1433" ]
+    volumes: [ sql-data:/var/opt/mssql ]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Two Redis instances, because eviction policy cannot be shared — §8.1.
+  redis-cache:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports: [ "127.0.0.1:6379:6379" ]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+
+  redis-coordination:
+    image: redis:7-alpine
+    # noeviction: locks and idempotency keys must never be evicted. The
+    # {service}:denylist: namespace §8.1 reserves beside them has no writer
+    # (ADR-033). Appendonly so a restart does not silently release held locks.
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction
+    ports: [ "127.0.0.1:6380:6379" ]
+    volumes: [ redis-coordination-data:/data ]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  # Built rather than pulled, and the ONE infrastructure service that is
+  # (§14.1). rabbitmq/Dockerfile adds the delayed message exchange plugin
+  # §9.6's saga timeouts are scheduled through (ADR-021); the base image
+  # is still an official tag, one line inside it.
+  rabbitmq:
+    build:
+      context: rabbitmq
+    ports: [ "127.0.0.1:5672:5672", "127.0.0.1:15672:15672" ]
+    volumes: [ rabbit-data:/var/lib/rabbitmq ]
+    healthcheck:
+      # check_running answers "is the broker up", which was the whole question
+      # while the image was stock. It is not any more: a broker missing the
+      # plugin is running and healthy while every saga schedule hangs on a
+      # declare it refuses (ADR-021), so the check asserts the plugin is
+      # enabled as well. Both, not just the second — the plugin list is
+      # readable from a broker that has not finished starting.
+      #
+      # is_enabled, NOT `list -e … | grep`. That was the first spelling and it
+      # FAILED OPEN: `rabbitmq-plugins list` echoes the pattern in its own
+      # banner — "Listing plugins with pattern "…"" — so grep matches whether
+      # or not a plugin row follows. Measured against a stock broker: exit 0,
+      # healthy, no plugin. A check written to catch the stock image passed on
+      # the stock image. is_enabled reports it in its exit status instead —
+      # measured 0 enabled, 69 not.
+      test: ["CMD-SHELL", "rabbitmq-diagnostics check_running && rabbitmq-plugins is_enabled rabbitmq_delayed_message_exchange"]
+      interval: 10s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # One issuer, whichever host asks. Without this Keycloak derives the
+      # issuer from each request's Host header, so a token minted through
+      # localhost:8080 carries iss=http://localhost:8080/... while the
+      # discovery document catalog-api reads over the compose network
+      # advertises http://keycloak:8080/... — and ValidateIssuer rejects every
+      # token the README tells a developer to obtain. The two names are the
+      # same server; only the route differs.
+      KC_HOSTNAME: http://localhost:8080
+      # ...which leaves the container-side route to be restored: with a fixed
+      # hostname Keycloak would otherwise advertise localhost:8080 for the
+      # backchannel too, and catalog-api cannot reach that. Dynamic backchannel
+      # resolves the endpoints from the request host while the issuer stays
+      # frontend, which is exactly the split this needs.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # Turns on /health/ready, on the management port, which is what the
+      # healthcheck below reads. Off by default.
+      KC_HEALTH_ENABLED: "true"
+    ports: [ "127.0.0.1:8080:8080" ]
+    volumes: [ ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro ]
+    # The image has a shell — CMD-SHELL below needs one — but no HTTP client:
+    # no curl, no wget. So the check is a bash TCP redirection against the
+    # management port, which is the form Keycloak's own documentation gives for
+    # exactly that reason. Without it `up --wait` returns as soon as the process
+    # launches, and the README's token command can reach a realm that has not
+    # finished importing: a 404 on the token endpoint, on a stack that has just
+    # reported healthy.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/localhost/9000; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: [ "--config=/etc/otel/config.yaml" ]
+    volumes: [ ./otel/config.yaml:/etc/otel/config.yaml:ro ]
+    ports: [ "127.0.0.1:4317:4317", "127.0.0.1:4318:4318" ]
+
+  grafana:
+    image: grafana/otel-lgtm:latest
+    ports: [ "127.0.0.1:3000:3000" ]
+
+volumes:
+  sql-data:
+  redis-coordination-data:
+  rabbit-data:
