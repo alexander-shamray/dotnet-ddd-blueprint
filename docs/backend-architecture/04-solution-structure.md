@@ -1607,8 +1607,9 @@ version of the argument yet**: `RetentionPurgeService` names the column in both
 of its marker statements, so a service scaffolded without the migration fails
 its own purge with `Invalid column name 'RowVersion'` on the first pass
 ([ADR-041](adr/ADR-041-the-markers-delete-identifies-a-row-by-a-rowversion-not-a-timestamp.md)).
-It then edits the shared files: `Platform.slnx`, the Compose index that
-includes the service's own unit and its `infra-only` exclusion, `.env.example`,
+It then edits the shared files: `Platform.slnx`, the Compose index — one
+`include:` line for the unit it just created — the `infra-only` override, which
+excludes both halves of the pair, `.env.example`,
 the ports table in `deploy/compose/README.md`
 ([§14.1](14-local-development.md)), the broker definitions that grant the new
 service an account of its own — without which it renders a service that starts

@@ -299,9 +299,14 @@ something to check against.
 so a service's environment lands in its own file. The secret-scan allow-list
 is checked for whether entries can be scoped per tree the same way.
 
-Done when no file under `deploy/compose/` declares two services' environments,
-and no single file under `.github/secret-scan/` holds suppressions for two
-trees.
+Done when no file under `deploy/compose/` is edited by two services' PRs, and
+no single file under `.github/secret-scan/` holds suppressions for two trees.
+
+The boundary is ownership and not block count, which is what the first draft of
+this test got wrong: `infrastructure.yml` declares every shared service and each
+unit declares §14.1's migrator-and-API pair, so "one service's environment per
+file" was a criterion the shipped model fails. What the split buys is that a
+Catalog PR and an Ordering PR touch different files.
 
 **Both landed on 2026-09-10**, and the second half's check answered yes with a
 qualification worth keeping. The allow-list splits per tree — one `.txt` under

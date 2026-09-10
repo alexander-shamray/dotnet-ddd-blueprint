@@ -1,6 +1,7 @@
 # The shared baseline of §14.1: what every service talks to, plus the volumes
-# that outlive a `down`. Nothing here belongs to one service, which is why it
-# is one file and not five.
+# that outlive a `down`. Nothing here belongs to one service, which is why it is
+# one file: there is no service whose PR owns any of it, so there is no line to
+# divide it along.
 #
 # deploy/compose/docker-compose.yml includes it;
 # docs/backend-architecture/14-local-development.md specifies it and this file
