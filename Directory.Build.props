@@ -72,10 +72,10 @@
   </PropertyGroup>
 
   <!--
-    The second of this file's two suppressions — CA1716 above is the other —
-    and this file is the only place ADR-019 permits either, since `#pragma` is
-    forbidden. CA1707 bans underscores in member names, and every test name in
-    §12 is a sentence written with them —
+    This file is the only place ADR-019 permits a suppression at all, `#pragma`
+    being forbidden; each one's argument sits beside its own `NoWarn` line
+    rather than being counted from here. CA1707 bans underscores in member
+    names, and every test name in §12 is a sentence written with them —
     `Cannot_cancel_an_order_that_has_shipped`. The two rules are in direct
     conflict and one of them has to give.
 
