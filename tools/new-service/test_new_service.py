@@ -115,15 +115,6 @@ def template_copy(destination: Path) -> Path:
     for shared in (
         "Platform.slnx",
         "deploy/compose/docker-compose.yml",
-        # Every file the index includes, because the port collision check reads
-        # them — the index publishes nothing itself, so a copy holding only the
-        # index would have no mapping to collide with and would call every port
-        # free.
-        "deploy/compose/infrastructure.yml",
-        "deploy/compose/services/catalog.yml",
-        "deploy/compose/services/gateway.yml",
-        "deploy/compose/services/ordering.yml",
-        "deploy/compose/services/web-bff.yml",
         "deploy/compose/docker-compose.infra-only.yml",
         "deploy/compose/.env.example",
         "deploy/compose/README.md",
@@ -131,6 +122,19 @@ def template_copy(destination: Path) -> Path:
     ):
         (destination / shared).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO_ROOT / shared, destination / shared)
+
+    # Every file the index includes, READ OUT OF THE INDEX rather than listed
+    # above. The port collision check reads them — the index publishes nothing
+    # itself, so a copy holding only the index would have no mapping to collide
+    # with and would call every port free — and a list here would go stale the
+    # first time a scaffolded service's unit is committed: the index would name
+    # a file this fixture did not copy, and every synthetic `plan()` would fail
+    # on the missing include, from an unrelated change.
+    for _, entry in new_service.compose_included(REPO_ROOT):
+        included = f"{new_service.COMPOSE_DIR}/{entry}"
+        (destination / included).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / included, destination / included)
+
     return destination
 
 

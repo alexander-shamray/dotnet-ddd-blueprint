@@ -22,6 +22,14 @@ include:
   - services/web-bff.yml
 ```
 
+**`include` is what raises the floor, and it is the one prerequisite this
+section has.** Compose gained the top-level element in **v2.20.0**; an older
+v2 rejects this model before anything starts, which is a failure at parse time
+rather than a service that misbehaves. Docker Desktop and a current
+`docker-compose-plugin` are both well past it, so "only Docker" holds — the
+version is stated because a floor nobody writes down is one a stale
+installation discovers.
+
 `include` resolves a relative path against the directory of the file that
 declares it rather than against the index, so a unit under `services/` spells
 its build context one level deeper than the index would; interpolation does not
