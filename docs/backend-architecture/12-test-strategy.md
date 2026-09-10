@@ -502,29 +502,17 @@ public sealed class ServiceFixture : IAsyncLifetime
             .QueryAsync(query, ct);
     }
 
-    public IDbConnection CreateConnection() => new SqlConnection(_sql.GetConnectionString());
-
     /// <summary>
-    /// Seeds the price projection (§6.6). Required before any PlaceOrder test:
-    /// the handler reads prices locally, so an unseeded projection makes every
-    /// order fail ProductsUnavailable rather than erroring visibly.
+    /// Runs a statement outside any unit of work, for arranging. Placeholders
+    /// are {0}-style and EF turns each into a real SQL parameter — a formatted
+    /// string here would be both an injection shape and a CA1305.
     /// </summary>
-    public async Task SeedPriceAsync(Guid productId, decimal amount, string currency = "EUR")
+    public async Task ExecuteAsync(string sql, params object[] parameters)
     {
-        using IDbConnection connection = CreateConnection();
-        await connection.ExecuteAsync(
-            """
-            MERGE ordering.ProductPrices AS t
-            USING (SELECT ProductId = @productId, Currency = @currency) AS s
-                ON t.ProductId = s.ProductId
-                AND t.Currency = s.Currency
-            WHEN NOT MATCHED THEN
-                INSERT (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
-                VALUES (@productId, @currency, @amount, 1, SYSDATETIMEOFFSET())
-            WHEN MATCHED THEN
-                UPDATE SET Amount = @amount, IsAvailable = 1, UpdatedAt = SYSDATETIMEOFFSET();
-            """,
-            new { productId, amount, currency });
+        await using AsyncServiceScope scope = Factory.Services.CreateAsyncScope();
+        OrderingDbContext db = scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
+
+        await db.Database.ExecuteSqlRawAsync(sql, parameters, TestContext.Current.CancellationToken);
     }
 
     /// <summary>
@@ -566,25 +554,19 @@ public sealed class ServiceFixture : IAsyncLifetime
     /// writes. Explicit rather than hidden in a builder, so no state carries
     /// between tests (§12.8).
     /// </summary>
-    public async Task SetOutboxAttemptsAsync(Guid messageId, int attempts)
-    {
-        using IDbConnection connection = CreateConnection();
-        await connection.ExecuteAsync(
-            "UPDATE ordering.OutboxMessages SET Attempts = @attempts WHERE MessageId = @messageId;",
-            new { attempts, messageId });
-    }
+    public Task SetOutboxAttemptsAsync(Guid messageId, int attempts) =>
+        ExecuteAsync(
+            "UPDATE ordering.OutboxMessages SET Attempts = {0} WHERE MessageId = {1};",
+            attempts,
+            messageId);
 
     /// <summary>
     /// Clears retry backoff leases so the next pass is gated only by the
     /// attempt cap. Lets a test distinguish "backed off" from "abandoned"
     /// without sleeping.
     /// </summary>
-    public async Task ExpireOutboxLeasesAsync()
-    {
-        using IDbConnection connection = CreateConnection();
-        await connection.ExecuteAsync(
-            "UPDATE ordering.OutboxMessages SET LockedUntil = NULL WHERE ProcessedAt IS NULL;");
-    }
+    public Task ExpireOutboxLeasesAsync() =>
+        ExecuteAsync("UPDATE ordering.OutboxMessages SET LockedUntil = NULL WHERE ProcessedAt IS NULL;");
 
     public async ValueTask DisposeAsync()
     {
@@ -674,7 +656,7 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
         // prices locally (§6.4). Seed here rather than per test: an unseeded
         // projection fails a PlaceOrder with ProductsUnavailable, which reads
         // as a domain assertion failing rather than missing fixture data.
-        await fixture.SeedPriceAsync(SeedData.ProductId, 12.50m);
+        await SeedPriceAsync(SeedData.ProductId, 12.50m, "EUR");
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -800,6 +782,25 @@ public class PlaceOrderHandlerTests(ServiceFixture fixture) : IAsyncLifetime
             scope.ServiceProvider.GetRequiredService<OrderingDbContext>();
         (await db.Orders.CountAsync()).ShouldBe(2);
     }
+
+    /// <summary>
+    /// Seeds the price projection (§6.6). Required before any PlaceOrder test:
+    /// the handler reads prices locally, so an unseeded projection makes every
+    /// order fail ProductsUnavailable rather than erroring visibly. Private to
+    /// the suite rather than on the fixture: it is one INSERT over
+    /// ExecuteAsync, and the fixture carries what more than one suite needs.
+    /// </summary>
+    private Task SeedPriceAsync(
+        Guid product, decimal amount, string currency, bool available = true) =>
+        fixture.ExecuteAsync(
+            """
+            INSERT INTO ordering.ProductPrices (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
+            VALUES ({0}, {1}, {2}, {3}, SYSDATETIMEOFFSET());
+            """,
+            product,
+            currency,
+            amount,
+            available);
 }
 ```
 
@@ -986,18 +987,34 @@ single-identity rule of [§9.1](09-messaging.md), and it takes no fixture at all
 can regress is a pure function:
 
 ```csharp
-// Same project (Ordering.Application.Tests), no [Collection] and no fixture:
-// Stage touches nothing. It is not a §12.3 test either — that level is
-// *.Domain.Tests, and OutboxMessage is Common.Infrastructure. A fast test does
-// not have to be a domain test, and moving it to reach a container it does not
-// use is how a suite acquires a minute of startup for one assertion.
-[Fact]
-public void Stage_takes_the_message_id_from_the_envelope()
-{
-    V1.OrderPlaced placed = Contracts.OrderPlaced(SeedData.OrderId);
+// Common.Infrastructure.Tests, no [Collection] and no fixture: Stage touches
+// nothing. It is not a §12.3 test either — that level is *.Domain.Tests, and
+// OutboxMessage is Common.Infrastructure, which is where §12.1's table homes
+// the outbox's table and type map. A fast test does not have to be a domain
+// test, and moving it to reach a container it does not use is how a suite
+// acquires a minute of startup for one assertion.
+//
+// The envelope is this assembly's own SampleIntegrationEvent rather than a
+// service contract, because Common.Infrastructure.Tests references
+// Common.Infrastructure and nothing downstream of it — which is the same
+// fact that makes the test cheap, read from the other side.
+private static readonly DateTimeOffset Now = new(2026, 8, 11, 2, 26, 0, TimeSpan.Zero);
+private static readonly MessageTypeMap Types = new([typeof(SampleDomainEvent).Assembly]);
+private static readonly OutboxJson Json = new([]);
 
-    var row = OutboxMessage.Stage(
-        placed,
+[Fact]
+public void Stage_takes_both_identities_from_the_envelope()
+{
+    SampleIntegrationEvent message = new()
+    {
+        MessageId = Guid.CreateVersion7(),
+        CorrelationId = Guid.CreateVersion7(),
+        OccurredAt = Now,
+        Note = "published"
+    };
+
+    OutboxMessage row = OutboxMessage.Stage(
+        message,
         OutboxLane.Broker,
         correlationId: Guid.CreateVersion7(),
         types: Types,
@@ -1007,8 +1024,8 @@ public void Stage_takes_the_message_id_from_the_envelope()
     // particular, because a caller-supplied one is passed in and ignored for
     // an IIntegrationEvent. That argument being silently dropped is the
     // regression this test exists for.
-    row.MessageId.ShouldBe(placed.MessageId);
-    row.CorrelationId.ShouldBe(placed.CorrelationId);
+    row.MessageId.ShouldBe(message.MessageId);
+    row.CorrelationId.ShouldBe(message.CorrelationId);
 }
 ```
 
@@ -1404,11 +1421,20 @@ public class SubjectBindingTests(ServiceFixture fixture) : IAsyncLifetime
     {
         await fixture.ResetAsync();
 
-        // Same reason PlaceOrderHandlerTests seeds here: the write path reads
+        // Same reason the PlaceOrder suite seeds here: the write path reads
         // prices locally (§6.4), and an unseeded projection fails every
         // PlaceOrder with ProductsUnavailable — which would read as the
         // subject assertion failing rather than as missing fixture data.
-        await fixture.SeedPriceAsync(SeedData.ProductId, 12.50m);
+        // Arranged inline rather than through a shared helper: it is one
+        // INSERT, and a second suite needing it is not yet a fixture member.
+        await fixture.ExecuteAsync(
+            """
+            INSERT INTO ordering.ProductPrices (ProductId, Currency, Amount, IsAvailable, UpdatedAt)
+            VALUES ({0}, {1}, {2}, 1, SYSDATETIMEOFFSET());
+            """,
+            SeedData.ProductId,
+            "EUR",
+            12.50m);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -1692,8 +1718,9 @@ public void An_unknown_reason_code_never_becomes_a_command()
 ```
 
 No `[Collection]` and no fixture: the mapper is a pure function, so this sits
-beside `Stage_takes_the_message_id_from_the_envelope` above — same project, same
-absence of infrastructure — rather than inside the container-backed class. It is
+beside `Stage_takes_both_identities_from_the_envelope` above — a different
+project, the same absence of infrastructure — rather than inside the
+container-backed class. It is
 the second half of a boundary whose first half is the endpoint's literal, and
 that half is already covered: the API-contract tests reach the handler through
 HTTP, so they fail if `User` stops being stamped.

@@ -1202,11 +1202,13 @@ Rules for the read side:
   default. There is no such thing as a small table in production.
 
   The exception is narrow and has exactly one instance: a query the caller
-  bounds by *enumerating* what it wants — §9.7's `GetPrices`, which takes a
-  list of product ids and returns one row each. A cursor there would paginate
-  a set the caller already holds. What such a query owes instead is a **ceiling
-  on the list**, enforced by its validator, because an unbounded `IN` list is
-  the same unbounded read wearing a different hat.
+  bounds by *enumerating* what it wants — Catalog's `GetPrices`, which takes a
+  list of product ids and returns one row each, and is reached over the one
+  synchronous hop [§9.7](09-messaging.md) permits. A cursor there would
+  paginate a set the caller already holds. What such a query owes instead is
+  a **ceiling on the list**, enforced by `GetPricesValidator.MaxProductIds`,
+  because an unbounded `IN` list is the same unbounded read wearing a
+  different hat.
 - `limit` is clamped server-side. A client asking for 100,000 rows gets 100.
 - Avoid `COUNT(*)` alongside a page. Fetching `limit + 1` rows answers "is there
   more?" without scanning the table. Return a total only where the UI genuinely
