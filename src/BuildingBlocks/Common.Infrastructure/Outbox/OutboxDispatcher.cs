@@ -33,9 +33,50 @@ public sealed class OutboxDispatcher : BackgroundService
     /// </summary>
     public const int MaxAttempts = 10;
 
+    /// <summary>
+    /// How many rows one claim leases. Public for the reason
+    /// <see cref="MaxAttempts"/> is: §13.6's outbox-growth alert names "batch
+    /// size too small for load" as a cause, and its runbook then has to size
+    /// the batch — which is an answer about this number rather than about a
+    /// number that happens to match it.
+    /// </summary>
+    public const int ClaimBatchSize = 100;
+
+    /// <summary>
+    /// How long a claim holds the rows it leased. Long enough that a slow
+    /// batch is not re-claimed underneath itself, short enough that a
+    /// replica killed mid-batch releases its rows within the minute.
+    /// </summary>
+    public const int LeaseSeconds = 60;
+
+    /// <summary>
+    /// The failed-delivery backoff, in seconds:
+    /// <c>2^min(Attempts, BackoffAttemptCap) × BackoffBaseSeconds</c>.
+    /// </summary>
+    /// <remarks>
+    /// The cap is what stops the doubling from putting a row beyond
+    /// <see cref="MaxAttempts"/>'s reach — without it the last attempts would
+    /// be days apart, and §13.6's abandoned-row alert would fire long after
+    /// anyone could act on it. §9.6's confirmation timeout is priced against
+    /// the ladder these two produce, which is why they are readable from
+    /// there rather than restated in it.
+    /// </remarks>
+    public const int BackoffBaseSeconds = 5;
+
+    /// <inheritdoc cref="BackoffBaseSeconds"/>
+    public const int BackoffAttemptCap = 8;
+
+    /// <summary>
+    /// How often the dispatcher looks for work, and therefore the last delay
+    /// between an aggregate raising an event and a projection seeing it —
+    /// which is the interval §13.7's <c>projection.lag</c> target has to
+    /// leave room for.
+    /// </summary>
+    public static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
+
     // Compiled once rather than parsed per call. CA1848 is enforced by ADR-019
-    // and this loop runs twice a second — see §13.3's LoggingBehavior, which
-    // takes the same shape for the same reason.
+    // and this loop runs once per PollInterval — see §13.3's LoggingBehavior,
+    // which takes the same shape for the same reason.
     private static readonly Action<ILogger, Exception?> ClaimFailed =
         LoggerMessage.Define(
             LogLevel.Error,
@@ -68,7 +109,7 @@ public sealed class OutboxDispatcher : BackgroundService
         _claimSql =
             $"""
             WITH claimable AS (
-                SELECT TOP (100) *
+                SELECT TOP ({ClaimBatchSize}) *
                 FROM {table.QualifiedName} WITH (UPDLOCK, READPAST, ROWLOCK)
                 WHERE ProcessedAt IS NULL
                     AND Attempts < @MaxAttempts
@@ -76,7 +117,7 @@ public sealed class OutboxDispatcher : BackgroundService
                 ORDER BY OccurredAt
             )
             UPDATE claimable
-            SET LockedUntil = DATEADD(second, 60, SYSDATETIMEOFFSET())
+            SET LockedUntil = DATEADD(second, {LeaseSeconds}, SYSDATETIMEOFFSET())
             OUTPUT
                 inserted.Id,
                 inserted.MessageId,
@@ -103,10 +144,12 @@ public sealed class OutboxDispatcher : BackgroundService
             UPDATE {table.QualifiedName}
             SET
                 Attempts    = Attempts + 1,
-                LastError   = LEFT(@Error, 2000),
+                LastError   = LEFT(@Error, {OutboxMessage.LastErrorMaxLength}),
                 LockedUntil = DATEADD(
                     second,
-                    POWER(2, CASE WHEN Attempts > 8 THEN 8 ELSE Attempts END) * 5,
+                    POWER(2, CASE WHEN Attempts > {BackoffAttemptCap}
+                                  THEN {BackoffAttemptCap}
+                                  ELSE Attempts END) * {BackoffBaseSeconds},
                     SYSDATETIMEOFFSET())
             WHERE Id = @Id;
             """;
@@ -118,7 +161,7 @@ public sealed class OutboxDispatcher : BackgroundService
     // took the same correction rather than a suppression).
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using PeriodicTimer timer = new(TimeSpan.FromMilliseconds(500));
+        using PeriodicTimer timer = new(PollInterval);
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
@@ -154,8 +197,8 @@ public sealed class OutboxDispatcher : BackgroundService
         // conversation with the database rather than part of any delivery.
         await using AsyncServiceScope claimScope = _scopes.CreateAsyncScope();
 
-        // Disposed every pass — the loop runs twice a second, so a leaked
-        // connection here exhausts the pool within a minute.
+        // Disposed every pass — the loop ticks once per PollInterval, so a
+        // leaked connection here exhausts the pool within a minute.
         using IDbConnection connection =
             claimScope.ServiceProvider.GetRequiredService<IDbConnectionFactory>().Create();
 
@@ -182,8 +225,8 @@ public sealed class OutboxDispatcher : BackgroundService
                 // A scope per row, not per batch, and this is what makes the
                 // per-row isolation above true rather than merely intended.
                 // Projection handlers are scoped and so is anything they
-                // inject — a DbContext most of all — so one scope for a
-                // hundred rows means a handler that throws mid-write hands
+                // inject — a DbContext most of all — so one scope for a whole
+                // ClaimBatchSize means a handler that throws mid-write hands
                 // the next row its own tracked, half-mutated state. The row
                 // that failed is then not the only row that fails, and the
                 // §13.6 lane alerts stop meaning what they say.
@@ -197,7 +240,8 @@ public sealed class OutboxDispatcher : BackgroundService
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                // One bad message does not affect the other 99.
+                // One bad message does not affect the rest of the batch — the
+                // other ClaimBatchSize - 1 of them.
                 //
                 // Again the token rather than the type. A handler with its own
                 // deadline throws OperationCanceledException while ct is still
