@@ -5,8 +5,47 @@
 One command starts the platform. This is the documented default; it requires
 only Docker and works identically on every operating system and in CI.
 
+The Compose file is an index and one file per deployable unit, so a service's
+environment is a file that service's PR owns rather than a block in a file
+every service PR edits — [`docs/change-locality.md`](../change-locality.md)'s
+rule applied to the one deployment artefact every service has to touch:
+
 ```yaml
 # deploy/compose/docker-compose.yml
+name: commerce
+
+include:
+  - infrastructure.yml
+  - services/catalog.yml
+  - services/gateway.yml
+  - services/ordering.yml
+  - services/web-bff.yml
+```
+
+**`include` is what raises the floor, and it is the one prerequisite this
+section has.** Compose gained the top-level element in **v2.20.0**; an older
+v2 rejects this model before anything starts, which is a failure at parse time
+rather than a service that misbehaves. Docker Desktop and a current
+`docker-compose-plugin` are both well past it, so "only Docker" holds — the
+version is stated because a floor nobody writes down is one a stale
+installation discovers.
+
+`include` resolves a relative path against the directory of the file that
+declares it rather than against the index, so a unit under `services/` spells
+its build context one level deeper than the index would; interpolation does not
+follow that rule, and the `.env` beside the index reaches every included file.
+Both were measured with `docker compose config` rather than assumed, because a
+bind mount resolving to the wrong directory is a container that starts and
+reads nothing.
+
+What the rest of this section specifies is the model those files make between
+them, which is what Compose reads. It is written here as one document, in
+reading order and with the elisions this chapter has always made, rather than
+as any one file's contents:
+
+```yaml
+# the model: deploy/compose/docker-compose.yml, infrastructure.yml
+# and services/*.yml, as one document
 name: commerce
 
 services:
@@ -16,8 +55,9 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${SQL_PASSWORD:-Local_Dev_Pa55w0rd!}"
       MSSQL_PID: Developer
-    # Every mapping in this file publishes on 127.0.0.1 rather than on every
-    # interface, argued once here rather than per service: the credentials
+    # Every mapping in the model publishes on 127.0.0.1 rather than on every
+    # interface — infrastructure.yml's and every unit's alike — argued once
+    # here rather than per service or per file: the credentials
     # are development defaults, so the interface is what stands in front of
     # them. The callout below the endpoint table carries the argument.
     ports: [ "127.0.0.1:1433:1433" ]
@@ -119,7 +159,7 @@ services:
 
   ordering-migrator:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: src/Services/Ordering/Ordering.Migrator/Dockerfile
     environment:
       # Migrator identity (DDL) — §7.1. Locally both keys resolve to the one
@@ -136,7 +176,7 @@ services:
 
   ordering-api:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: src/Services/Ordering/Ordering.Api/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -190,7 +230,7 @@ services:
 
   gateway:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: src/Gateway/Gateway.Api/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -203,7 +243,7 @@ services:
       # pick its own rate-limit bucket. In Kubernetes this is true (§15.3).
       Ingress__Enabled: "false"
       # Browsers hit the gateway directly in dev. The SPA's dev origin is
-      # 5173 (Vite's default): 3000 belongs to Grafana in this same file.
+      # 5173 (Vite's default): 3000 belongs to Grafana, in infrastructure.yml.
       Cors__Enabled: "true"
       Cors__Origins__0: "http://localhost:5173"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
@@ -225,7 +265,7 @@ services:
   # the container name IS the routing configuration.
   web-bff:
     build:
-      context: ../..
+      context: ../../..
       dockerfile: src/BFF/Web.Bff/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
@@ -249,12 +289,13 @@ volumes:
   rabbit-data:
 ```
 
-The file is delivered in [Appendix C](appendix-c-delivery-plan.md)'s order
+The model is delivered in [Appendix C](appendix-c-delivery-plan.md)'s order
 rather than at once. PR-06 ships the seven infrastructure services above;
 each application block lands with the PR that builds its image — the
-scaffold of [§4.5](04-solution-structure.md) writes the pair per service,
-along with both `infra-only` exclusions below, its `.env.example` variables
-and its row in `deploy/compose/README.md`. The
+scaffold of [§4.5](04-solution-structure.md) writes the service's own unit
+file and the one line that includes it, along with both `infra-only`
+exclusions below, its `.env.example` variables and its row in
+`deploy/compose/README.md`. The
 `docker-compose.infra-only.yml` override below arrives with the first
 containerised service, there being nothing to exclude before it.
 
@@ -449,8 +490,10 @@ services:
     profiles: [ "excluded" ]
   ordering-api:
     profiles: [ "excluded" ]
-  # ... every application block in docker-compose.yml joins this list in the
-  # same PR that adds it; an omitted one silently keeps starting. The §4.5
+  # ... every unit the index includes joins this list in the same PR that
+  # adds it; an omitted one silently keeps starting. This is the one Compose
+  # file the per-unit split leaves shared, because an override merges over a
+  # resolved model and cannot be divided the way the model is. The §4.5
   # scaffold writes both halves, which is the reliable way to keep a rule
   # whose only symptom is a container nobody asked for.
 ```

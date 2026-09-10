@@ -295,10 +295,36 @@ something to check against.
 
 ### Step 9 — split the compose file and the secret allow-list
 
-Lower priority; do it when a PR next collides on them.
 `deploy/compose/docker-compose.yml` gains `include:` of one file per service
 so a service's environment lands in its own file. The secret-scan allow-list
 is checked for whether entries can be scoped per tree the same way.
+
+Done when no deployable unit's Compose environment shares a file with
+another's, and no single file under `.github/secret-scan/` holds suppressions
+for two trees.
+
+**The criterion is about environments, and the shared files named below are not
+gaps in it.** Two earlier drafts of this line each asked a wider question and
+each was false of what shipped: "no file declares two services' environments"
+fails on `infrastructure.yml` and on §14.1's migrator-and-API pair, and "no file
+edited by two services' PRs" fails on the index and the `infra-only` override,
+which gain a line per service by design. What the split buys is narrower than
+either and worth stating exactly — the couple of hundred lines saying how a
+service runs are in a file that service's PR owns, and what every service PR
+still shares is one line apiece.
+
+**Both landed on 2026-09-10**, and the second half's check answered yes with a
+qualification worth keeping. The allow-list splits per tree — one `.txt` under
+`.github/secret-scan/allowed/`, each declaring the prefix it may suppress — but
+it does **not** split per service, because a suppression's value is that it
+travels away from the credential it accepts and a file per service would be the
+inline pragma the gate refuses, one directory further out. So a scaffolded
+service still meets another scaffolded service in `allowed/deploy.txt` and
+`allowed/tests.txt`, where it no longer meets one in its Compose environment.
+The Compose files that stay shared do so for reasons of their own: the index
+gains one `include:` line per service, the `infra-only` override merges over a
+resolved model and cannot be divided the way the model is, and
+`infrastructure.yml` is shared by construction.
 
 ## 5. Where this differs from `agent-locality.md`
 

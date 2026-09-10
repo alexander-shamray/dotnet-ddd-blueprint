@@ -2,8 +2,10 @@
 # the host with a debugger attached. Assigning a profile removes a service
 # from the default `up` — profiles gate activation, and nothing activates
 # this one — which is the declarative way to exclude a service an override
-# file cannot delete. Every application block added to docker-compose.yml
-# joins this list in the same PR.
+# file cannot delete. Every service under services/ joins this list in the PR
+# that adds its file, and this file stays a shared surface for the reason a
+# profile is: an override merges over a resolved model, so it cannot be split
+# per service the way the model itself now is.
 #
 # Both commands run from the repository root — one working directory:
 #

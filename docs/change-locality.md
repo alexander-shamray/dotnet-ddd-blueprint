@@ -158,10 +158,23 @@ row, when there is no issue — when a task needs one:
 ```
 Directory.Packages.props        Directory.Build.props        Platform.slnx
 .editorconfig                   deploy/compose/docker-compose.yml
+deploy/compose/infrastructure.yml
+deploy/compose/docker-compose.infra-only.yml
 deploy/compose/keycloak/realm-export.json
-.github/secret-scan/allowed-secrets.txt
 docs/backend-architecture/appendix-b-licences.md
 ```
+
+The Compose index is on that list for one line — the `include:` entry a new
+service appends — and `deploy/compose/services/*.yml` is deliberately not on
+it at all: a unit file belongs to the service it deploys, so two agents adding
+or changing two services never meet in one. That is what the split bought, and
+naming the files it did not free is the honest half of saying so.
+
+`.github/secret-scan/allowed/` came off the list the same way and is not a
+file: it is one `.txt` per tree, each declaring the prefix it may suppress, so
+an entry goes to the file covering its path and two agents suppressing findings
+in two trees never edit one. The README beside them argues why every one of
+them is still under the gate rather than beside the code it accepts.
 
 ## 5. The procedure
 

@@ -1,0 +1,64 @@
+# The BFF's deployment (§14.1), included by
+# deploy/compose/docker-compose.yml. A host rather than a service —
+# docs/change-locality.md section 3 draws that line — and the one host that
+# holds client credentials, which is what makes its environment worth reading
+# on its own.
+#
+# `include` resolves a relative path against the directory of the file that
+# declares it, so the repository root — the build context — is three levels up
+# from here.
+services:
+  # The one host with client credentials, because it is the one host that calls
+  # a peer synchronously (§9.7). Everything else here has the authority only.
+  # Named web-bff, matching the Aspire resource (§14.2) and the YARP
+  # destination (§10.2) — the gateway resolves the destination by hostname, so
+  # the container name IS the routing configuration.
+  #
+  # No migrator beside it and no pair rule: the BFF owns no database, so there
+  # is nothing to migrate — the same shape services/gateway.yml has.
+  web-bff:
+    build:
+      context: ../../..
+      dockerfile: src/BFF/Web.Bff/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Identity__Authority: "http://keycloak:8080/realms/commerce"
+      # Required by ValidateOnStart (§15.4) — this host refuses to boot without
+      # all three, which is the whole point of the [Required] attributes on
+      # ServiceIdentityOptions. Local values only; production mounts a secret.
+      #
+      # The client id must exist in the realm, and RealmClientTests is what
+      # says so: a name here that Keycloak has never heard of satisfies
+      # ValidateOnStart, boots cleanly, and fails every pricing call at the
+      # token endpoint.
+      Identity__Client__ClientId: "web-bff"
+      Identity__Client__ClientSecret: "${BFF_CLIENT_SECRET:-local-dev-secret}"
+      # The scope that becomes the audience every service validates (§11.5).
+      # Not the same claim as `aud`, and nothing but the realm's audience
+      # mapper makes one imply the other.
+      Identity__Client__Scope: "commerce-api"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      # No connection strings of any kind, and therefore no readiness check
+      # (§13.5): a host with a connection string has one and a host without
+      # one does not. /health/ready answers immediately here, correctly — not
+      # because the BFF depends on nothing, but because its one dependency is
+      # §9.7's synchronous hop to Catalog and that deliberately does not gate
+      # readiness: a BFF reporting unready whenever Catalog is down would take
+      # itself out of rotation for a fault it exists to degrade around. The
+      # host declares that at the call site rather than leaving an empty
+      # readiness set to pass on its own:
+      # MapCommonHealthEndpoints(ownsNoReadinessDependencies: true), which is
+      # what stops "declared empty" and "was never wired up" reading
+      # identically from out here.
+    ports: [ "127.0.0.1:5200:8080" ]
+    depends_on:
+      # Keycloak, because this host mints its own token and would otherwise
+      # discover that on the first request.
+      keycloak: { condition: service_healthy }
+      # And catalog-api, which services/gateway.yml cannot say about its own
+      # destinations for a different reason — it routes to services that do
+      # not exist yet, where this one calls a service that does. The hop is
+      # over 8081, catalog-api's HTTP/2 endpoint (§9.7): a cleartext port
+      # cannot serve HTTP/1.1 and h2c at once, so Catalog declares two and this
+      # is the second. It is not published to the host and no route reaches it.
+      catalog-api: { condition: service_started }

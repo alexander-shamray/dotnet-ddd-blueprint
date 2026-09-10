@@ -1,0 +1,17 @@
+# One tree's share of the secret-scan allow-list:
+#
+#     path | rule-id | sha256 fingerprint | reason
+#
+# The format, what an entry may say, and why this is a directory rather than a
+# file are argued once in README.md beside this file. Do not restate them here.
+#
+# covers: tools/
+
+
+# The scaffold's own suite.
+#
+# tools/new-service renders a service's Compose unit and writes the entries
+# its literals owe; its suite pins what that render produces, which puts the
+# rendered broker account in the suite as well.
+
+tools/new-service/test_new_service.py | credential-assignment | 1c47d06cedb2 | The scaffold suite pinning the per-service broker account it renders into compose.

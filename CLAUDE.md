@@ -48,7 +48,7 @@ Directory.*.props            shared MSBuild settings and ADR-019's analyser poli
 .github/<gate>/              licence-gate, secret-scan, closure-gate, locality-gate, pipeline-gate, coverage — a directory each
 deploy/canary/               §15.5's ladder, its arithmetic and its verdict
 deploy/keycloak/             §11's realm obligations, over any realm
-deploy/compose/              §14.1's infrastructure, one pair per service
+deploy/compose/              §14.1's model: an index, the shared baseline, one file per unit under services/
 deploy/helm/                 §15.3's charts — one library chart, four users
 deploy/observability/        §13.8's dashboards, §13.6's rules, §13.7's k6 run
 tools/new-service/           §4.5's scaffold, with Catalog as its template
