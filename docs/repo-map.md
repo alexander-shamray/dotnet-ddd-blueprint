@@ -376,9 +376,9 @@ tests/                       per service: .Domain.Tests, .Application.Tests,
                              test project (§4.1). Per building block with
                              behaviour to test, one suite. Per host, one
                              suite, and the BFF's has a .TestSupport of its
-                             own. Plus Platform.IntegrationTests, the one
-                             suite that crosses a service boundary, where
-                             §12.1 homes Common.Contracts' shape tests
+                             own. Plus Platform.IntegrationTests, the only
+                             suite that references every service (§4.1),
+                             where §12.1 homes Common.Contracts' shape tests
 ```
 
 **A `.TestSupport` project is not a test project (§4.1), and it exists for a

@@ -161,7 +161,8 @@ jobs:
   # **One module rather than the whole `discover`**, and that is a property of
   # the module rather than a preference: `test_edit_target_guard.py` needs
   # nothing but Python and a filesystem, where the suite beside it needs
-  # `bash`, `grep`, `git` and `jq` and a `gh` stub on PATH. Widening this job
+  # `bash`, `grep`, `git` and `jq` on PATH (its `gh` is a stub it writes
+  # itself). Widening this job
   # to the directory would be adopting that whole toolchain on two more
   # platforms to reach four branches.
   edit-target-guard:
