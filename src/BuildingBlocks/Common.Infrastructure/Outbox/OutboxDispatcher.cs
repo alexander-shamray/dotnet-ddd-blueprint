@@ -54,12 +54,12 @@ public sealed class OutboxDispatcher : BackgroundService
     /// <c>2^min(Attempts, BackoffAttemptCap) × BackoffBaseSeconds</c>.
     /// </summary>
     /// <remarks>
-    /// The cap is what stops the doubling from putting a row beyond
-    /// <see cref="MaxAttempts"/>'s reach — without it the last attempts would
-    /// be days apart, and §13.6's abandoned-row alert would fire long after
-    /// anyone could act on it. §9.6's confirmation timeout is priced against
-    /// the ladder these two produce, which is why they are readable from
-    /// there rather than restated in it.
+    /// The cap bounds the later waits so a row still reaches
+    /// <see cref="MaxAttempts"/> promptly enough for §13.6's abandoned-row
+    /// alert to be actionable: past the cap the delay stops doubling and the
+    /// remaining attempts are evenly spaced. §9.6's confirmation wait is set
+    /// against the ladder these two produce, which is why they are readable
+    /// from there rather than restated in it.
     /// </remarks>
     public const int BackoffBaseSeconds = 5;
 

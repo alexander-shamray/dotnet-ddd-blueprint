@@ -420,12 +420,12 @@ public sealed class OrderFulfilmentSaga : MassTransitStateMachine<OrderFulfilmen
         // repository, and the smaller of them is not the one that decides it.
         //
         // §9.8's retry on ordering-commands is RetryPolicy.RetryLimit RETRIES
-        // — one more delivery than that counting the first. **Its total is a
-        // floor this delay clears easily, not the term that sets it**: the
-        // retries are that many intervals whatever the deliveries are
-        // numbered, and pricing every interval at RetryPolicy.MaxInterval
-        // overstates the ladder, which does not reach that cap in RetryLimit
-        // steps.
+        // — one more ATTEMPT than that counting the first, all of them inside
+        // a single broker delivery. **Their total is a floor this delay clears
+        // easily, not the term that sets it**: the retries are that many
+        // intervals however the attempts are numbered, and pricing every
+        // interval at RetryPolicy.MaxInterval overstates the ladder, which
+        // does not reach that cap in RetryLimit steps.
         //
         // **The term that actually decides this is §9.4's dispatcher**, and
         // not its PollInterval, which is the one quantity here too small to

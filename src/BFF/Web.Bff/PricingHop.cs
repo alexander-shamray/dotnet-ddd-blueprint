@@ -59,15 +59,15 @@ public static class PricingHop
     /// </summary>
     /// <remarks>
     /// <b>The resilience values are named here rather than left inline in
-    /// <c>Program.cs</c> because §9.7 does arithmetic with them.</b> The
-    /// section's budget — attempts times
-    /// <see cref="AttemptTimeout"/> plus <see cref="MaxRetryDelay"/> times
-    /// <see cref="MaxRetryAttempts"/>, fitting inside this — was written out
-    /// as a sum in prose with the numbers substituted, so the chapter held a
-    /// copy of every term and the sum could stop being true without either
-    /// side changing. <c>ResilienceHierarchyTests</c> asserts the
-    /// relationships from the built options; these names are what let the
-    /// chapter state them without restating the values.
+    /// <c>Program.cs</c> because §9.7 does arithmetic with them.</b> Its
+    /// budget — <see cref="AttemptTimeout"/> per attempt plus
+    /// <see cref="MaxRetryDelay"/> per retry, all of it fitting inside
+    /// this — is an inequality over several of these at once, so any second
+    /// copy of one is a term that can stop holding without either side being
+    /// edited. Naming them is what lets the chapter state the sum instead of
+    /// computing it. <c>ResilienceHierarchyTests</c> asserts the
+    /// relationships from the built options rather than from these constants,
+    /// which keeps it a check on the registration.
     /// </remarks>
     public static readonly TimeSpan TotalRequestTimeout = TimeSpan.FromSeconds(5);
 

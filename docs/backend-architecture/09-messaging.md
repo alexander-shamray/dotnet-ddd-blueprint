@@ -1765,7 +1765,7 @@ would multiply inside the drawing:
 |---|---|---|
 | `StockTimeout` | `StockTimeoutDelay` | Inventory answering `ReserveStock` |
 | `PaymentTimeout` | `PaymentTimeoutDelay` | Payments returning a verdict — longer, because a PSP retry is normal |
-| `ConfirmationTimeout` | `ConfirmationTimeoutDelay` | Ordering acknowledging its own `ConfirmOrder` ([#126](https://github.com/alexander-shamray/dotnet-ddd-blueprint/issues/126)) |
+| `ConfirmationTimeout` | `ConfirmationTimeoutDelay` | Ordering acknowledging its own `ConfirmOrder` — the one wait whose far end is this same service |
 | `ReleaseTimeout` | `ReleaseTimeoutDelay` | A `ReleaseStock` this saga sent while compensating |
 | `DespatchTimeout` | `DespatchTimeoutDelay` | Despatch, once the order is confirmed — days, because the far end is a warehouse |
 
