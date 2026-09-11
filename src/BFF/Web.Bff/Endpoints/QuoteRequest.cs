@@ -34,8 +34,9 @@ namespace Web.Bff.Endpoints;
 /// </remarks>
 /// <param name="Currency">The currency the basket is to be priced in.</param>
 /// <param name="Lines">
-/// One per product, at most <see cref="OrderLimits.MaxLines"/> of them, each
-/// naming a product at most once.
+/// At most <see cref="OrderLimits.MaxLines"/> of them. A product may be named
+/// more than once and the quantities are merged, because that is what placing
+/// the order does with them.
 /// </param>
 public sealed record QuoteRequest(string Currency, IReadOnlyList<QuoteRequestLine> Lines);
 
@@ -102,21 +103,22 @@ internal sealed class QuoteRequestValidator : AbstractValidator<QuoteRequest>
             // Copilot.
             .Must(lines => lines.All(line => line is not null))
             .WithMessage("A quote line cannot be null.")
-            // A repeated product is refused rather than summed, and rather
-            // than deduplicated. Summing silently repairs a caller's bug and
-            // hides it: a basket has one line per product, and a request with
-            // two is a client that has lost track of its own state. Dropping
-            // the duplicate is worse still — under the old contract a repeated
-            // id carried no information, so Distinct() lost nothing, but a
-            // repeated LINE carries a quantity, and dropping it discards part
-            // of the customer's basket.
+            // Over the MERGED quantity, because a repeated product is
+            // legitimate and the endpoint merges it before pricing — exactly
+            // as Order.AddLine does in the domain. Checked per line alone this
+            // would not be a bound on the basket: two lines of MaxQuantity
+            // each would quote a basket the order refuses, which is the whole
+            // failure this endpoint's shared bounds exist to prevent.
             //
-            // The dedup's second purpose survives: it kept a caller from
-            // spending Catalog's id ceiling on one product repeated a hundred
-            // times, and refusing outright does that more cheaply, because the
-            // request never leaves this host.
-            .Must(lines => lines.Select(line => line.ProductId).Distinct().Count() == lines.Count)
-            .WithMessage("A quote names each product at most once.");
+            // This refused a repeated product outright until Copilot pointed
+            // out that PlaceOrder accepts one and merges it, deliberately and
+            // with a domain test pinning it. Shipping a second duplicate
+            // policy in the host that quotes FOR that order is the same defect
+            // as the one ADR-045 set out to fix, pointing the other way.
+            .Must(lines => lines
+                .GroupBy(line => line.ProductId)
+                .All(product => product.Sum(line => line.Quantity) <= OrderLimits.MaxQuantity))
+            .WithMessage($"A quote cannot contain more than {OrderLimits.MaxQuantity} of one product.");
 
         // Guarded, because RuleForEach is a separate rule from the chain above
         // and the class-level cascade runs every rule: a null element rejected

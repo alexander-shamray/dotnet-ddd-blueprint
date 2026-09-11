@@ -39,11 +39,20 @@ public static class OrderLimits
     public const int MinQuantity = 1;
 
     /// <summary>
-    /// The most of one product a single line may carry. A business-shaped
-    /// bound rather than a storage one: a basket wanting more than this is a
+    /// The most of one product a basket may carry. A business-shaped bound
+    /// rather than a storage one: a basket wanting more than this is a
     /// wholesale order, which is a different conversation and a different
     /// price.
     /// </summary>
+    /// <remarks>
+    /// <b>Of a product, not of a line, and the distinction is load-bearing.</b>
+    /// A repeated product is legitimate and merges — <c>Order.AddLine</c> does
+    /// it in the domain and the quote does it before pricing — so a bound
+    /// checked per line is not a bound on the order at all: two lines of
+    /// <see cref="MaxQuantity"/> each would place an order for twice it. Both
+    /// validators therefore sum by product before comparing, and a test on
+    /// each side pins it (ADR-045).
+    /// </remarks>
     public const int MaxQuantity = 999;
 
     /// <summary>

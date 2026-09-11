@@ -107,27 +107,52 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_repeated_product_is_refused_rather_than_deduplicated()
+    public async Task A_repeated_product_is_merged_and_asked_about_once()
+    {
+        using HttpClient client = Caller();
+
+        QuoteResponse? quote = await client.Quote(
+            "GBP", TestContext.Current.CancellationToken, (Chair, 2), (Chair, 1));
+
+        // Merged, not refused and not deduplicated, because that is what
+        // placing the order does with the same basket: PlaceOrderHandler calls
+        // a repeated product legitimate in as many words and Order.AddLine
+        // merges the lines. A quote that refused what the order accepts is the
+        // defect ADR-045 exists to close, pointing the other way — found by
+        // Copilot after the first version of this test asserted the refusal.
+        //
+        // Dropping the duplicate is still wrong and is not what happens: a
+        // repeated LINE carries a quantity, so DistinctBy would discard part
+        // of the customer's basket. The sum is the whole of it.
+        quote.ShouldNotBeNull();
+
+        QuoteLine line = quote.Lines.ShouldHaveSingleItem();
+        line.Quantity.ShouldBe(3);
+        line.LineTotal.ShouldBe(149.97m);
+        quote.Total.ShouldBe(149.97m);
+
+        // Asserted at the wire as well, because the merge's second job is
+        // upstream and invisible from the response: it is what keeps a caller
+        // from spending Catalog's id ceiling on one product repeated a hundred
+        // times.
+        _catalog.Calls.Single().ProductIds.ShouldBe([Chair.ToString()]);
+    }
+
+    [Fact]
+    public async Task A_merged_quantity_past_the_ceiling_is_refused_without_a_hop()
     {
         using HttpClient client = Caller();
 
         HttpResponseMessage response = await client.PostQuote(
-            "GBP", TestContext.Current.CancellationToken, (Chair, 2), (Chair, 1));
+            "GBP",
+            TestContext.Current.CancellationToken,
+            (Chair, OrderLimits.MaxQuantity),
+            (Chair, 1));
 
-        // This test used to assert the opposite — one line back, and one id at
-        // the wire — and the behaviour it pinned was correct while the request
-        // carried no quantities: a repeated id held no information, so
-        // dropping it lost nothing. A repeated LINE holds a quantity, and
-        // dropping it discards part of the customer's basket. Summing the two
-        // would be worse still, because it silently repairs a client that has
-        // lost track of its own state (ADR-045).
-        //
-        // The wire assertion does not survive in its old form and should not
-        // be forced to: validation runs before the hop, so a duplicated id now
-        // means Catalog is called ZERO times rather than once. The dedup's
-        // real job — keeping a caller from spending Catalog's id ceiling on
-        // one product repeated a hundred times — is done more cheaply than
-        // before, because the request never leaves this host.
+        // Every LINE here is within the bound and the basket is not, which is
+        // the case a per-line rule cannot see. Without the merged check this
+        // quoted a basket the order refuses — so OrderLimits.MaxQuantity was
+        // not the bound ADR-045 claims it is, on either side.
         await ShouldBeRefusedWithoutAHop(response);
     }
 

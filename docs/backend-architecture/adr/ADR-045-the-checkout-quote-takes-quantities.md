@@ -5,8 +5,9 @@ lines — `currency`, and `lines` of `{ productId, quantity }` — instead of a
 repeated `productId` query parameter, and is therefore a `POST` rather than a
 `GET`. `QuoteLine` gains `Quantity`, echoed from the request, and `LineTotal`,
 computed from it; `QuoteResponse.Total` becomes the sum of the line totals,
-which is the basket. Two lines naming the same product are refused with a
-field-keyed 400 rather than deduplicated. The bounds a line must satisfy —
+which is the basket. Two lines naming the same product are **merged**, as
+`Order.AddLine` already merges them one service over, and the bounds are
+checked against the merged quantity on both sides. The bounds —
 `OrderLimits.MinQuantity`, `MaxQuantity` and `MaxLines` — move into
 `Common.Contracts.Ordering.V1`, and `PlaceOrderValidator` and the BFF's new
 `QuoteRequestValidator` both read them rather than holding literals. `v1`
@@ -58,12 +59,34 @@ the third leaves every *line* total computed in the client, which is the same
 defect one level down. `Amount` keeps its name and its meaning as the unit
 price, because the screen needs it.
 
-**A repeated product is refused rather than summed or dropped.** Summing
-silently repairs a caller that has lost track of its own state; the kindest
-answer is the one that says so while the cause is still on screen. Dropping is
-worse: under the old contract a repeated id carried no information, so
-`Distinct()` lost nothing, but a repeated *line* carries a quantity, and
-dropping it discards part of the customer's basket.
+**A repeated product is merged rather than refused or dropped, and this
+reversed during the review.** Dropping was never in question — under the old
+contract a repeated id carried no information, so `Distinct()` lost nothing,
+but a repeated *line* carries a quantity, and dropping it discards part of the
+customer's basket. The first version of this record chose to **refuse** it
+instead, on the argument that summing silently repairs a caller that has lost
+track of its own state.
+
+That argument is not wrong and it is not this platform's. `PlaceOrderHandler`
+calls a repeated product legitimate in as many words — "a caller may
+legitimately send the same product twice — `Order.AddLine` merges those into
+one line" — and `OrderTests.Place_merges_two_lines_for_the_same_product` pins
+it in the domain. So refusing here shipped a **second duplicate policy** in the
+one host that quotes for that order, which is the defect this whole record
+exists to close, pointing the other way: a quote that refuses a basket the
+order accepts. Copilot found it on this pull request, after the first
+implementation and its test had both been written to the refusal.
+
+The merge is also not silent, which was the original objection's real force: the
+reply echoes `Quantity` per line, so a caller that sent two lines for one
+product gets back one line carrying their sum and can see what happened to it.
+
+**Merging makes the quantity bound mean something, which per-line checking did
+not.** Two lines of `MaxQuantity` each passed every rule on both sides and
+placed an order for twice it — so the constant this record introduces as "the
+order's quantity bound" was not one. Both validators now sum by product before
+comparing, and a test on each side pins it. That was the sharper half of the
+same finding.
 
 **The bounds are Ordering's, read rather than copied.** A quote that accepts
 what the order will refuse hands the customer a price for a basket they cannot
@@ -147,11 +170,16 @@ it holds cross-boundary facts about each, and this is one.
   `GreaterThanOrEqualTo(OrderLimits.MinQuantity)`, which is the same bound
   phrased against the constant rather than against the value below it. The
   error message changes with it.
-- **Three open questions are left for a later record rather than answered
-  here.** `PlaceOrderValidator` does **not** refuse duplicate product ids —
-  `RuleForEach` checks each item and nothing checks the set — so the quote is
-  now stricter than the order it quotes for, and the two should probably
-  agree. `Amount` would read better as `UnitPrice` now that it sits beside a
+- **`PlaceOrderValidator` gains a rule it did not have**, and it is a
+  behaviour change to Ordering rather than to the BFF: an order whose repeated
+  lines sum past `OrderLimits.MaxQuantity` for one product is now a 400 where
+  it was accepted. Nothing asserted the old behaviour, and it was never
+  intended — the ceiling has always been stated as a bound on how many of a
+  product a customer may buy. It is named here because a reader looking for
+  why an order started being refused will not think to look in a record about
+  the checkout quote.
+- **Two open questions are left for a later record rather than answered here.**
+  `Amount` would read better as `UnitPrice` now that it sits beside a
   `LineTotal`, and was not renamed because that is a breaking change to a
   field every consumer reads, for clarity alone. And the local-development
   affordance in [`deploy/compose/README.md`](../../../deploy/compose/README.md)

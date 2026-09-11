@@ -54,18 +54,27 @@ public static class CheckoutEndpoints
                     // ValidationException into §10.5's ValidationProblemDetails.
                     await validator.ValidateAndThrowAsync(request, ct);
 
-                    // Order-preserving, and distinct by construction now that
-                    // the validator refuses a repeated product. That is the
-                    // replacement for the Distinct() that used to stand here:
-                    // deduplicating a list of QUANTIFIED lines would silently
-                    // discard part of the customer's basket, where
-                    // deduplicating a set of ids discarded nothing.
-                    Guid[] requested = [.. request.Lines.Select(line => line.ProductId)];
+                    // Merged by product, first appearance ordered. This is
+                    // the replacement for the Distinct() that used to stand
+                    // here, and it is a different operation: Distinct() on a
+                    // set of ids discarded nothing, where DistinctBy on a list
+                    // of QUANTIFIED lines would discard part of the customer's
+                    // basket. Summing is what Order.AddLine does with the same
+                    // basket one service over, and a quote that answered a
+                    // different question from the order it quotes for is the
+                    // defect ADR-045 exists to close.
+                    //
+                    // It is not silent: the reply echoes Quantity per line, so
+                    // a caller that sent two lines for one product gets back
+                    // one line carrying their sum and can see the merge.
+                    Dictionary<Guid, int> quantities = [];
+                    foreach (QuoteRequestLine line in request.Lines)
+                        quantities[line.ProductId] = quantities.GetValueOrDefault(line.ProductId) + line.Quantity;
 
-                    // Safe for the same reason, and the reply is matched back
-                    // to it rather than trusted to arrive in order.
-                    Dictionary<Guid, int> quantities = request.Lines
-                        .ToDictionary(line => line.ProductId, line => line.Quantity);
+                    // The merged ids, which is what Catalog is asked about —
+                    // so a repeated product still costs one id against its
+                    // ceiling rather than one per line.
+                    Guid[] requested = [.. quantities.Keys];
 
                     GetPricesRequest pricesRequest = new() { Currency = request.Currency };
                     pricesRequest.ProductId.AddRange(requested.Select(id => id.ToString()));

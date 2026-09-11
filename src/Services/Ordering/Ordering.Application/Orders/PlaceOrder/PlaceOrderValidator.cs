@@ -57,6 +57,23 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
                 .LessThanOrEqualTo(OrderLimits.MaxQuantity);
         });
 
+        // And again over the MERGED quantity, because the rule above is not a
+        // bound on the order. A repeated product is legitimate here — the
+        // handler says so and Order.AddLine merges the lines — so two items of
+        // MaxQuantity each passed every rule and placed an order for twice it.
+        // The per-item rule still earns its place: it names the offending
+        // item, where this one can only name the collection.
+        //
+        // Found by Copilot on the pull request that gave these bounds an owner,
+        // and it is the sharper half of that finding: a constant claiming to be
+        // the order's quantity bound has to actually be one (ADR-045).
+        RuleFor(x => x.Items)
+            .Must(items => items
+                .GroupBy(i => i.ProductId)
+                .All(product => product.Sum(i => i.Quantity) <= OrderLimits.MaxQuantity))
+            .WithMessage($"An order cannot contain more than {OrderLimits.MaxQuantity} of one product.")
+            .When(x => x.Items is not null && x.Items.All(i => i is not null));
+
         // The address is required as a whole before its parts are worth
         // checking: a null body member would otherwise produce five failures
         // about members of nothing.

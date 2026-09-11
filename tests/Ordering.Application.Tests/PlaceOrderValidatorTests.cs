@@ -14,6 +14,9 @@ public class PlaceOrderValidatorTests
 {
     private static readonly PlaceOrderValidator Validator = new();
 
+    /// <summary>One product, so two lines can name the same one.</summary>
+    private static readonly Guid Product = Guid.CreateVersion7();
+
     private static AddressDto AnAddress() =>
         new("1 Test Street", null, "Almaty", "050000", "KZ");
 
@@ -57,6 +60,43 @@ public class PlaceOrderValidatorTests
         const int sqlServerParameterLimit = 2100;
 
         OrderLimits.MaxLines.ShouldBeLessThan(sqlServerParameterLimit - 1);
+    }
+
+    [Fact]
+    public void Two_lines_for_one_product_may_not_exceed_the_quantity_ceiling_between_them()
+    {
+        // Order.AddLine merges two lines for one product, and PlaceOrderHandler
+        // calls that legitimate — so the per-item rule is not a bound on the
+        // order at all: both items below are inside it and the order they place
+        // is for twice the ceiling. Found by Copilot, on the pull request that
+        // gave this bound an owner and claimed it was the order's.
+        PlaceOrderCommand command = new(
+            Guid.CreateVersion7(),
+            [new PlaceOrderItem(Product, OrderLimits.MaxQuantity), new PlaceOrderItem(Product, 1)],
+            AnAddress(),
+            "EUR");
+
+        ValidationResult result = Validator.Validate(command);
+
+        result.IsValid.ShouldBeFalse();
+        result.Errors.ShouldContain(e => e.PropertyName == nameof(PlaceOrderCommand.Items));
+    }
+
+    [Fact]
+    public void Two_lines_for_one_product_at_the_ceiling_between_them_are_accepted()
+    {
+        // The boundary from below, and it is the assertion that keeps the rule
+        // above from being a ban on repeating a product at all.
+        PlaceOrderCommand command = new(
+            Guid.CreateVersion7(),
+            [
+                new PlaceOrderItem(Product, OrderLimits.MaxQuantity - 1),
+                new PlaceOrderItem(Product, 1)
+            ],
+            AnAddress(),
+            "EUR");
+
+        Validator.Validate(command).IsValid.ShouldBeTrue();
     }
 
     [Fact]
