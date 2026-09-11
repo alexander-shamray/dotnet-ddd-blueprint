@@ -1,5 +1,6 @@
 using System.Globalization;
 using Catalog.Pricing.V1;
+using FluentValidation;
 
 namespace Web.Bff.Endpoints;
 
@@ -31,40 +32,63 @@ public static class CheckoutEndpoints
             .RequireAuthorization();
 
         group
-            .MapGet(
+            // POST, and v1 changed in place rather than growing a v2
+            // (ADR-045). QuoteRequest argues the verb; the version is the
+            // narrower call: the response change is additive, the request
+            // change is breaking, and the one known consumer lands with it. A
+            // /v2 whose /v1 has no remaining callers is a second code path
+            // maintained to serve nobody.
+            .MapPost(
                 "/quote",
                 async (
-                    Guid[] productId,
-                    string currency,
+                    QuoteRequest request,
+                    IValidator<QuoteRequest> validator,
                     Pricing.PricingClient pricing,
                     CancellationToken ct) =>
                 {
-                    if (productId.Length == 0)
-                    {
-                        return Results.Problem(
-                            title: "No products to price",
-                            detail: "A quote needs at least one productId.",
-                            statusCode: StatusCodes.Status400BadRequest);
-                    }
+                    // Before the hop, always. A request that cannot produce
+                    // anything must not spend the platform's one synchronous
+                    // hop finding that out — and the throw is how the 400 gets
+                    // its field keys, because Common.Web's
+                    // ValidationExceptionHandler is what turns a
+                    // ValidationException into §10.5's ValidationProblemDetails.
+                    await validator.ValidateAndThrowAsync(request, ct);
 
-                    // The caller's set, deduplicated and order-preserving. The
-                    // dedup matters twice over: it is what makes the reply's
-                    // one-price-per-product shape line up with the request, and
-                    // it is what keeps a caller from spending the ceiling on
-                    // the same id a hundred times.
-                    Guid[] requested = [.. productId.Distinct()];
+                    // Merged by product, first appearance ordered. This is
+                    // the replacement for the Distinct() that used to stand
+                    // here, and it is a different operation: Distinct() on a
+                    // set of ids discarded nothing, where DistinctBy on a list
+                    // of QUANTIFIED lines would discard part of the customer's
+                    // basket. Summing is what Order.AddLine does with the same
+                    // basket one service over, and a quote that answered a
+                    // different question from the order it quotes for is the
+                    // defect ADR-045 exists to close.
+                    //
+                    // It is not silent: the reply echoes Quantity per line, so
+                    // a caller that sent two lines for one product gets back
+                    // one line carrying their sum and can see the merge.
+                    Dictionary<Guid, int> quantities = [];
+                    foreach (QuoteRequestLine line in request.Lines)
+                        quantities[line.ProductId] = quantities.GetValueOrDefault(line.ProductId) + line.Quantity;
 
-                    GetPricesRequest request = new() { Currency = currency };
-                    request.ProductId.AddRange(requested.Select(id => id.ToString()));
+                    // The merged ids, which is what Catalog is asked about —
+                    // so a repeated product still costs one id against its
+                    // ceiling rather than one per line.
+                    Guid[] requested = [.. quantities.Keys];
 
-                    // No ceiling checked here, deliberately. Catalog's
-                    // GetPricesValidator owns that number and answers
-                    // InvalidArgument past it, which UpstreamExceptionHandler
-                    // turns into the 400 the caller deserves. A second copy of
-                    // the limit in this host would be a number that drifts from
-                    // the one actually enforced — and the drift would show as
-                    // requests refused here that Catalog would have served.
-                    GetPricesReply reply = await pricing.GetPricesAsync(request, cancellationToken: ct);
+                    GetPricesRequest pricesRequest = new() { Currency = request.Currency };
+                    pricesRequest.ProductId.AddRange(requested.Select(id => id.ToString()));
+
+                    // No PRODUCT-COUNT ceiling checked here, deliberately, and
+                    // the line ceiling the validator holds is not a second copy
+                    // of it. Catalog's GetPricesValidator owns how many ids one
+                    // price query may carry and answers InvalidArgument past
+                    // it, which UpstreamExceptionHandler turns into the 400 the
+                    // caller deserves; a second copy of THAT limit in this host
+                    // would drift from the one actually enforced. What the
+                    // validator bounds is this request's own size, before the
+                    // hop, at the number the order will later insist on.
+                    GetPricesReply reply = await pricing.GetPricesAsync(pricesRequest, cancellationToken: ct);
 
                     List<QuoteLine> lines = new(reply.Price.Count);
 
@@ -146,13 +170,13 @@ public static class CheckoutEndpoints
                         // A contract violation between two services, like the
                         // malformed amount above, so it stays a 500 rather than
                         // blaming the caller.
-                        if (!string.Equals(price.Currency, currency, StringComparison.OrdinalIgnoreCase))
+                        if (!string.Equals(price.Currency, request.Currency, StringComparison.OrdinalIgnoreCase))
                         {
                             throw new InvalidOperationException(
                                 $"Catalog priced product {price.ProductId} in '{price.Currency}' for a " +
-                                $"'{currency}' request. A reply's currency is the amount's own label " +
-                                "(pricing.proto), so the two disagreeing is a contract violation rather " +
-                                "than a quote.");
+                                $"'{request.Currency}' request. A reply's currency is the amount's own " +
+                                "label (pricing.proto), so the two disagreeing is a contract violation " +
+                                "rather than a quote.");
                         }
 
                         Guid pricedProduct = Guid.Parse(price.ProductId);
@@ -170,7 +194,23 @@ public static class CheckoutEndpoints
                                 "in a way only the arithmetic shows.");
                         }
 
-                        lines.Add(new QuoteLine(pricedProduct, price.Name, amount));
+                        // The quantity comes from the REQUEST, keyed by the id
+                        // the reply named — never from the reply's position in
+                        // the list. Catalog is free to answer in any order and
+                        // to leave products out, so pairing by index would put
+                        // one product's quantity on another's price, which is
+                        // the failure the request record refuses two parallel
+                        // arrays to avoid. The lookup cannot miss: outstanding
+                        // was built from the same ids and has just accepted
+                        // this one.
+                        int quantity = quantities[pricedProduct];
+
+                        lines.Add(new QuoteLine(
+                            pricedProduct,
+                            price.Name,
+                            amount,
+                            quantity,
+                            amount * quantity));
                     }
 
                     // Set-based, so the answer does not depend on the reply's
@@ -179,11 +219,11 @@ public static class CheckoutEndpoints
                     HashSet<Guid> priced = [.. lines.Select(line => line.ProductId)];
 
                     return Results.Ok(new QuoteResponse(
-                        currency,
+                        request.Currency,
                         lines,
-                        lines.Sum(line => line.Amount),
+                        lines.Sum(line => line.LineTotal),
                         [.. requested.Where(id => !priced.Contains(id))]));
                 })
-            .WithName("GetQuote");
+            .WithName("Quote");
     }
 }

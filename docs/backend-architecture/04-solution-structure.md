@@ -1166,6 +1166,18 @@ check could be rejected by its own auth pipeline.
 Exactly one thing: `Common.Contracts`, containing integration event records and
 nothing else. No behaviour, no validation, no domain types.
 
+> **One exception, and its test is narrow**
+> ([ADR-045](adr/ADR-045-the-checkout-quote-takes-quantities.md)). A **bound
+> both sides of a boundary are obliged by** may live here too — `OrderLimits`,
+> the quantities and line count an order accepts, which the BFF's quote must
+> refuse exactly as Ordering's command does. It is still not validation: the
+> validators stay where they are, one per host, and what is shared is the
+> integers they read. The exception admits a value only when **both** sides are
+> bound by it and a second copy could therefore drift. A number one service
+> alone enforces — Catalog's id ceiling is the case to compare against — fails
+> that test and stays with the service that owns it, because a copy here would
+> drift from the one actually enforced.
+
 **A record arrives in the PR whose code first publishes or consumes it**, and
 a new service's contracts arrive with that service rather than ahead of it. A
 record's members follow the same rule from the other direction: the PR that

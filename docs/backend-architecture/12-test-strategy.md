@@ -1836,7 +1836,7 @@ what arrived:
 ```csharp
 _catalog.AbortNextCalls = 1;                  // a transport fault — see below
 
-await client.GetFromJsonAsync<QuoteResponse>(Quote);
+await client.Quote("GBP", ct, (Chair, 1));    // one product, one of it
 
 presented.ShouldBe(["Bearer token-1", "Bearer token-2"]);
 ```
@@ -2563,7 +2563,7 @@ difference is deliberate. The ids and the currency come from
 `PricingContract.RequestedIds` on both sides, so the stub and the real service
 are asked about the same products in the same currency. Only the provider suite
 then sends that as a `GetPricesRequest`; the consumer suite hands it to the
-screen as a query string and lets `CheckoutEndpoints` build the gRPC message
+screen as a basket and lets `CheckoutEndpoints` build the gRPC message
 itself. Having the contract build it there would verify the contract against
 itself — the consumer's half exists precisely to establish that the request the
 *endpoint* constructs is the one the contract describes.
@@ -2590,10 +2590,27 @@ it must be refused with `InvalidArgument` — the status
 `UpstreamExceptionHandler` turns into the caller's 400. Either interaction
 alone is satisfiable by a provider that has quietly moved the limit, so the pair
 is what pins it, and a change in either direction fails verification on purpose.
-That is not a contradiction of `CheckoutEndpoints` holding no ceiling of its
-own: production code with a copy would refuse requests Catalog would have
-served, where a contract with one is the consumer saying which number it is
-relying on.
+`CheckoutEndpoints` holds no copy of *that* number: production code with one
+would refuse requests Catalog would have served, where a contract with one is
+the consumer saying which number it is relying on.
+
+> **The consumer stopped being able to drive the refusal half, and the
+> interaction stays anyway
+> ([ADR-045](adr/ADR-045-the-checkout-quote-takes-quantities.md)).** The quote
+> now bounds its own line count at `OrderLimits.MaxLines` — the bound the
+> *order* insists on, not a copy of Catalog's — so a basket past the ceiling
+> fails validation before the hop and Catalog is never asked. The consumer
+> suite asserts that instead, and the `InvalidArgument` mapping keeps its
+> coverage in `QuoteEndpointTests`, which stubs the status rather than
+> provoking it with a size.
+>
+> **An expectation the consumer cannot drive is still an expectation it
+> needs**, which is the case worth having met once: the provider verification
+> holds Catalog to the refusal either way, and the two bounds agree today only
+> by coincidence of value. The day one of them moves, this is the interaction
+> that says which — and had it been deleted as unreachable, the first symptom
+> would have been a quote refusing baskets Catalog would have priced, or
+> accepting ones it would not.
 
 **It is not Pact, and the mechanism was a decision rather than a
 convenience** — [ADR-023](adr/ADR-023-the-consumer-driven-contract-is-a-linked-file-not-pact.md)

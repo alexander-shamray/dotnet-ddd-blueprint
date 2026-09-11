@@ -16,12 +16,19 @@ public sealed class GetPricesValidator : AbstractValidator<GetPricesQuery>
     /// obligation and nothing to validate.
     /// </summary>
     /// <remarks>
-    /// A hundred is the order form's own bound — §5's <c>Order</c> is a basket,
-    /// and a screen renders nothing like that many lines. What the ceiling
-    /// really protects is the parameter budget: Dapper expands
+    /// What the ceiling protects is the parameter budget: Dapper expands
     /// <c>IN @ProductIds</c> into one parameter per id, and SQL Server refuses
     /// a batch past 2,100 of them with an error naming neither this query nor
-    /// its caller.
+    /// its caller. A value well inside that is also a screen's worth of
+    /// products, which is what makes it a comfortable bound rather than a
+    /// tight one.
+    /// <para>
+    /// <b>It is not the order's bound and must not be cited as one.</b>
+    /// <c>OrderLimits.MaxLines</c> bounds how many lines an order may carry and
+    /// this bounds how many ids one price query may name; they are equal today
+    /// and nothing holds them together (ADR-045). Deriving either from the
+    /// other is how a change to one silently becomes a claim about the other.
+    /// </para>
     /// </remarks>
     public const int MaxProductIds = 100;
 

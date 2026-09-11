@@ -1,5 +1,6 @@
 using Catalog.Pricing.V1;
 using Common.Web;
+using FluentValidation;
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
 using Web.Bff;
@@ -23,6 +24,19 @@ builder.AddCommonWebDefaults();                 // §13.2
 // already registers. It is here rather than in Common.Web because it is about
 // an outbound call, and this is the only host that makes one (§9.7).
 builder.Services.AddExceptionHandler<UpstreamExceptionHandler>();
+
+// §6.4's validator, registered rather than newed up in the endpoint, because
+// Program.cs is the only composition root (§4.2). Singleton because an
+// AbstractValidator holds its rules and no state; one registration rather than
+// AddValidatorsFromAssembly because this host has exactly one validator and
+// the scanning extension is a package it does not otherwise need.
+//
+// This is the whole of the BFF's validation wiring: there is no MediatR
+// pipeline here to run a ValidationBehavior, so the endpoint calls the
+// validator itself and Common.Web's ValidationExceptionHandler — already in
+// the pipeline through AddCommonWebDefaults — turns the throw into §10.5's
+// field-keyed 400.
+builder.Services.AddSingleton<IValidator<QuoteRequest>, QuoteRequestValidator>();
 
 // §9.7, §11.5 — the whole of the platform's client-credentials mechanism, in
 // the one host that has any. Every line below is absent from every other

@@ -1,3 +1,4 @@
+using Common.Contracts.Ordering.V1;
 using FluentValidation;
 
 namespace Ordering.Application.Orders.PlaceOrder;
@@ -10,13 +11,6 @@ namespace Ordering.Application.Orders.PlaceOrder;
 /// </summary>
 public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
 {
-    /// <summary>
-    /// The most lines one order may carry. Public because the test that pins
-    /// the boundary reads it rather than repeating the number — a literal in
-    /// both places is the second table this repository keeps removing.
-    /// </summary>
-    public const int MaxItems = 100;
-
     public PlaceOrderValidator()
     {
         // An omitted CommandId binds as Guid.Empty, which is a single shared
@@ -31,14 +25,12 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
         // as input (§5.7's division). \z, not $: .NET's $ matches before a
         // trailing newline, and "EUR\n" must fail here, not in the domain.
         RuleFor(x => x.Currency).NotEmpty().Matches(@"^[A-Za-z]{3}\z");
-        // A maximum as well as a minimum, and the ceiling is not cosmetic.
-        // ProjectedPriceReader expands the product ids into one SQL parameter
-        // each and adds @Currency beside them; SQL Server's limit is 2,100, so
-        // an authenticated caller sending 2,100 items turned a well-formed
-        // request into a 500 rather than a 400. 100 is a business-shaped bound
-        // well inside that — an order with more lines than this is a data
-        // import, not a checkout — and it fails as validation, which is where
-        // a request the caller phrased wrongly belongs (§5.7).
+        // A maximum as well as a minimum, and the ceiling is not cosmetic —
+        // OrderLimits.MaxLines argues why, and owns the number. It is read
+        // rather than repeated because Web.Bff's quote validator enforces the
+        // same bound: a quote that accepts what this refuses prices a basket
+        // the customer cannot buy. It fails as validation, which is where a
+        // request the caller phrased wrongly belongs (§5.7).
         // Cascade(Stop) is load-bearing, not tidiness. FluentValidation runs
         // every validator in a rule by default, so on an explicit JSON
         // "items": null the NotEmpty below records its failure and then the
@@ -48,13 +40,43 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
         RuleFor(x => x.Items)
             .Cascade(CascadeMode.Stop)
             .NotEmpty()
-            .Must(items => items.Count <= MaxItems)
-            .WithMessage($"An order cannot contain more than {MaxItems} items.");
+            .Must(items => items.Count <= OrderLimits.MaxLines)
+            .WithMessage($"An order cannot contain more than {OrderLimits.MaxLines} items.");
         RuleForEach(x => x.Items).ChildRules(item =>
         {
             item.RuleFor(i => i.ProductId).NotEmpty();
-            item.RuleFor(i => i.Quantity).GreaterThan(0).LessThanOrEqualTo(999);
+
+            // The same two numbers Web.Bff's quote validator reads, from the
+            // same constants — see OrderLimits. GreaterThanOrEqualTo rather
+            // than GreaterThan, because the bound the constant names is the
+            // smallest quantity a line may carry and not the largest it may
+            // not: phrased as GreaterThan(MinQuantity) this rule would refuse
+            // a line for one of something.
+            item.RuleFor(i => i.Quantity)
+                .GreaterThanOrEqualTo(OrderLimits.MinQuantity)
+                .LessThanOrEqualTo(OrderLimits.MaxQuantity);
         });
+
+        // And again over the MERGED quantity, because the rule above is not a
+        // bound on the order. A repeated product is legitimate here — the
+        // handler says so and Order.AddLine merges the lines — so two items of
+        // MaxQuantity each passed every rule and placed an order for twice it.
+        // The per-item rule still earns its place: it names the offending
+        // item, where this one can only name the collection.
+        //
+        // Found by Copilot on the pull request that gave these bounds an owner,
+        // and it is the sharper half of that finding: a constant claiming to be
+        // the order's quantity bound has to actually be one (ADR-045).
+        // Summed as long, because Enumerable.Sum over int is CHECKED and this
+        // rule runs before RuleForEach reports either quantity: two items at
+        // int.MaxValue threw OverflowException and turned a malformed order
+        // into a 500 rather than the 400 validation exists to produce.
+        RuleFor(x => x.Items)
+            .Must(items => items
+                .GroupBy(i => i.ProductId)
+                .All(product => product.Sum(i => (long)i.Quantity) <= OrderLimits.MaxQuantity))
+            .WithMessage($"An order cannot contain more than {OrderLimits.MaxQuantity} of one product.")
+            .When(x => x.Items is not null && x.Items.All(i => i is not null));
 
         // The address is required as a whole before its parts are worth
         // checking: a null body member would otherwise produce five failures

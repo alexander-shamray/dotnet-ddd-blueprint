@@ -24,6 +24,18 @@ namespace Web.Bff.Tests;
 /// exists compiles until the type is deleted.
 /// </para>
 /// <para>
+/// <b>One entry is now the exception that sentence warns about, and it is kept
+/// deliberately.</b> Since ADR-045 the quote bounds its own line count, so the
+/// ceiling refusal fails validation here and never reaches the stub — this
+/// suite drives it and asserts the absence of the hop, which is a weaker thing
+/// than driving the interaction. It is not an expectation held for nothing:
+/// the two ceilings are independent and equal only by coincidence of value, so
+/// the provider verification is what would catch them parting. What it is no
+/// longer is consumer-driven, and saying so is the point of this paragraph —
+/// an exception recorded is a decision, where an exception nobody wrote down
+/// is how a contract quietly becomes a second provider suite.
+/// </para>
+/// <para>
 /// <b>The violation tests in <c>QuoteEndpointTests</c> are the other half and
 /// are deliberately not here.</b> Those drive replies the contract forbids —
 /// a comma decimal, a negative amount, a duplicate, a product nobody asked
@@ -64,7 +76,7 @@ public sealed class PricingContractTests : IAsyncLifetime
         IReadOnlyDictionary<string, Guid> published = _catalog.Publish(interaction);
 
         using HttpClient client = Caller();
-        await client.GetAsync(Query(interaction, published), TestContext.Current.CancellationToken);
+        await client.PostQuote(interaction.Currency, TestContext.Current.CancellationToken, Basket(interaction, published));
 
         // The same verification the provider run applies to the real Catalog's
         // reply. Both sides passing it is the whole guarantee this PR buys: the
@@ -82,9 +94,8 @@ public sealed class PricingContractTests : IAsyncLifetime
         PricingOutcome.Priced priced = (PricingOutcome.Priced)interaction.Then;
 
         using HttpClient client = Caller();
-        QuoteResponse? quote = await client.GetFromJsonAsync<QuoteResponse>(
-            Query(interaction, published),
-            TestContext.Current.CancellationToken);
+        QuoteResponse? quote = await client.Quote(
+            interaction.Currency, TestContext.Current.CancellationToken, Basket(interaction, published));
 
         Guid[] expected = [.. priced.Aliases.Select(alias => published[alias])];
 
@@ -109,14 +120,30 @@ public sealed class PricingContractTests : IAsyncLifetime
         IReadOnlyDictionary<string, Guid> published = _catalog.Publish(interaction);
 
         using HttpClient client = Caller();
-        using HttpResponseMessage response = await client.GetAsync(
-            Query(interaction, published),
-            TestContext.Current.CancellationToken);
+        using HttpResponseMessage response = await client.PostQuote(
+            interaction.Currency,
+            TestContext.Current.CancellationToken,
+            Basket(interaction, published));
 
-        // 400 rather than 500, through UpstreamExceptionHandler's
-        // InvalidArgument arm. CheckoutEndpoints holds no ceiling of its own and
-        // says so in a comment; this is the test that makes the comment true.
+        // 400, and ADR-045 changed which mechanism produces it. The contract's
+        // one refusal is a basket past Catalog's id ceiling, and the endpoint
+        // used to have no ceiling of its own, so this asserted
+        // UpstreamExceptionHandler's InvalidArgument arm. QuoteRequestValidator
+        // now bounds the request's own line count at OrderLimits.MaxLines,
+        // which is the order's bound and happens to equal Catalog's — so the
+        // refusal is raised here and Catalog is never asked.
+        //
+        // The interaction stays in the contract because Catalog still OWES the
+        // refusal, and PricingContractVerificationTests is what holds it to
+        // that. What the consumer can no longer drive through its own screen it
+        // still needs the provider to promise: the day the two ceilings part,
+        // this is the expectation that says which way.
+        //
+        // The InvalidArgument mapping keeps its coverage in
+        // QuoteEndpointTests.An_upstream_refusal_is_the_callers_400_rather_than_the_hosts_500,
+        // which stubs the status directly rather than provoking it with a size.
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        _catalog.Calls.ShouldBeEmpty();
     }
 
     private HttpClient Caller()
@@ -128,23 +155,28 @@ public sealed class PricingContractTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The interaction as the BFF's own caller would ask it.
+    /// The interaction as the BFF's own caller would ask it — a basket.
     /// </summary>
     /// <remarks>
-    /// Through the query string rather than through
+    /// <para>
+    /// Through the screen's own request shape rather than through
     /// <c>PricingContract.Request</c>, deliberately: the consumer's half has to
     /// establish that the request the ENDPOINT builds is the one the contract
     /// describes. Handing the endpoint's job to the contract would verify the
     /// contract against itself.
+    /// </para>
+    /// <para>
+    /// One of each, because quantity is not this contract's subject. Catalog
+    /// prices a product and has no opinion about how many of one a basket
+    /// holds (ADR-045), so a quantity above one would change the quote's
+    /// arithmetic without changing a single field of the question asked
+    /// upstream — which is what these interactions are about.
+    /// </para>
     /// </remarks>
-    private static string Query(
+    private static (Guid ProductId, int Quantity)[] Basket(
         PricingInteraction interaction,
-        IReadOnlyDictionary<string, Guid> published)
-    {
-        IEnumerable<string> ids = PricingContract
+        IReadOnlyDictionary<string, Guid> published) =>
+        [.. PricingContract
             .RequestedIds(interaction, published)
-            .Select(id => $"productId={id}");
-
-        return $"/v1/checkout/quote?{string.Join('&', ids)}&currency={interaction.Currency}";
-    }
+            .Select(id => (id, 1))];
 }
