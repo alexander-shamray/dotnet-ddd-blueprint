@@ -87,6 +87,21 @@ internal sealed class QuoteRequestValidator : AbstractValidator<QuoteRequest>
             .NotEmpty()
             .Must(lines => lines.Count <= OrderLimits.MaxLines)
             .WithMessage($"A quote cannot contain more than {OrderLimits.MaxLines} lines.")
+            // Before anything reads a member off an element, because a JSON
+            // "lines": [null] binds as a list holding a null: the element type
+            // being non-nullable is a compiler constraint and not a
+            // deserialisation one, and System.Text.Json enforces neither. The
+            // duplicate check below projects ProductId off every element, so
+            // without this a malformed request arrived as a 500 rather than
+            // the 400 this validator exists to produce.
+            //
+            // This is the null-LIST guard's sibling rather than a second copy
+            // of it. Cascade(Stop) above catches "lines": null and nothing in
+            // that chain looks inside the list, so a guard on one does nothing
+            // for the other -- which is why each has its own test. Found by
+            // Copilot.
+            .Must(lines => lines.All(line => line is not null))
+            .WithMessage("A quote line cannot be null.")
             // A repeated product is refused rather than summed, and rather
             // than deduplicated. Summing silently repairs a caller's bug and
             // hides it: a basket has one line per product, and a request with
@@ -103,7 +118,13 @@ internal sealed class QuoteRequestValidator : AbstractValidator<QuoteRequest>
             .Must(lines => lines.Select(line => line.ProductId).Distinct().Count() == lines.Count)
             .WithMessage("A quote names each product at most once.");
 
-        RuleForEach(x => x.Lines).ChildRules(line =>
+        // Guarded, because RuleForEach is a separate rule from the chain above
+        // and the class-level cascade runs every rule: a null element rejected
+        // there would still arrive here. The predicate repeats no bound -- it
+        // asks only whether the elements are safe to look inside.
+        RuleForEach(x => x.Lines)
+            .Where(line => line is not null)
+            .ChildRules(line =>
         {
             line.RuleFor(l => l.ProductId).NotEmpty();
             line.RuleFor(l => l.Quantity)

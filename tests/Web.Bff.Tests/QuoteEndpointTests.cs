@@ -160,6 +160,26 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_null_line_is_a_400_and_not_a_500()
+    {
+        using HttpClient client = Caller();
+
+        // A JSON "lines": [null] binds as a list holding a null: the compiler's
+        // non-nullable element type is not a deserialisation constraint, and
+        // nothing in System.Text.Json enforces one. The null then reaches the
+        // duplicate-product predicate, which projects ProductId off every
+        // element — so a malformed request became a 500 before RuleForEach ever
+        // saw it. Found by Copilot on this pull request.
+        //
+        // Separate from the null-LIST case above, because the two fail in
+        // different rules and a guard on one does nothing for the other.
+        HttpResponseMessage response = await client.PostQuote(
+            new QuoteRequest("GBP", [null!]), TestContext.Current.CancellationToken);
+
+        await ShouldBeRefusedWithoutAHop(response);
+    }
+
+    [Fact]
     public async Task A_quantity_of_none_is_refused_without_a_hop()
     {
         using HttpClient client = Caller();
