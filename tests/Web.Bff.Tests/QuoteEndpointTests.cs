@@ -246,6 +246,26 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_quantity_that_overflows_the_merge_is_refused_without_a_hop()
+    {
+        using HttpClient client = Caller();
+
+        // int.MaxValue twice. Enumerable.Sum over int is CHECKED, so the
+        // merged-quantity predicate threw OverflowException before the
+        // per-line rule could report either quantity as invalid — turning a
+        // malformed body into a 500, which is the same shape of defect as the
+        // null element two tests up and arrived in the fix for it. Found by
+        // Copilot.
+        HttpResponseMessage response = await client.PostQuote(
+            "GBP",
+            TestContext.Current.CancellationToken,
+            (Chair, int.MaxValue),
+            (Chair, int.MaxValue));
+
+        await ShouldBeRefusedWithoutAHop(response);
+    }
+
+    [Fact]
     public async Task A_quote_past_the_line_ceiling_is_refused_without_a_hop()
     {
         using HttpClient client = Caller();

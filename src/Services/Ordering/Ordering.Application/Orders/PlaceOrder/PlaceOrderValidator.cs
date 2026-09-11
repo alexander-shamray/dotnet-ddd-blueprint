@@ -67,10 +67,14 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
         // Found by Copilot on the pull request that gave these bounds an owner,
         // and it is the sharper half of that finding: a constant claiming to be
         // the order's quantity bound has to actually be one (ADR-045).
+        // Summed as long, because Enumerable.Sum over int is CHECKED and this
+        // rule runs before RuleForEach reports either quantity: two items at
+        // int.MaxValue threw OverflowException and turned a malformed order
+        // into a 500 rather than the 400 validation exists to produce.
         RuleFor(x => x.Items)
             .Must(items => items
                 .GroupBy(i => i.ProductId)
-                .All(product => product.Sum(i => i.Quantity) <= OrderLimits.MaxQuantity))
+                .All(product => product.Sum(i => (long)i.Quantity) <= OrderLimits.MaxQuantity))
             .WithMessage($"An order cannot contain more than {OrderLimits.MaxQuantity} of one product.")
             .When(x => x.Items is not null && x.Items.All(i => i is not null));
 

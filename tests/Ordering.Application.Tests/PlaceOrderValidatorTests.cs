@@ -100,6 +100,25 @@ public class PlaceOrderValidatorTests
     }
 
     [Fact]
+    public void A_quantity_that_overflows_the_merge_is_a_400_and_not_a_500()
+    {
+        // Enumerable.Sum over int is checked, so the merged-quantity rule threw
+        // OverflowException on two int.MaxValue lines before RuleForEach could
+        // report either as invalid. The assertion is that Validate returns
+        // rather than throws; IsValid being false is the easy half — the same
+        // shape as the null-item-list test below. Found by Copilot.
+        PlaceOrderCommand command = new(
+            Guid.CreateVersion7(),
+            [new PlaceOrderItem(Product, int.MaxValue), new PlaceOrderItem(Product, int.MaxValue)],
+            AnAddress(),
+            "EUR");
+
+        ValidationResult result = Should.NotThrow(() => Validator.Validate(command));
+
+        result.IsValid.ShouldBeFalse();
+    }
+
+    [Fact]
     public void A_null_item_list_is_a_400_and_not_a_500()
     {
         // An explicit JSON "items": null binds as null. FluentValidation runs

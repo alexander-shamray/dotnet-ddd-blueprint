@@ -99,7 +99,7 @@ internal sealed class QuoteRequestValidator : AbstractValidator<QuoteRequest>
             // This is the null-LIST guard's sibling rather than a second copy
             // of it. Cascade(Stop) above catches "lines": null and nothing in
             // that chain looks inside the list, so a guard on one does nothing
-            // for the other -- which is why each has its own test. Found by
+            // for the other — which is why each has its own test. Found by
             // Copilot.
             .Must(lines => lines.All(line => line is not null))
             .WithMessage("A quote line cannot be null.")
@@ -115,14 +115,20 @@ internal sealed class QuoteRequestValidator : AbstractValidator<QuoteRequest>
             // with a domain test pinning it. Shipping a second duplicate
             // policy in the host that quotes FOR that order is the same defect
             // as the one ADR-045 set out to fix, pointing the other way.
+            // Summed as long, because Enumerable.Sum over int is CHECKED and
+            // this predicate runs before the per-line rules: two lines at
+            // int.MaxValue threw OverflowException and answered 500 where the
+            // whole point of this validator is a 400. Widening makes the rule
+            // total over every int the wire can bind, and a hundred lines of
+            // int.MaxValue is nowhere near long's range.
             .Must(lines => lines
                 .GroupBy(line => line.ProductId)
-                .All(product => product.Sum(line => line.Quantity) <= OrderLimits.MaxQuantity))
+                .All(product => product.Sum(line => (long)line.Quantity) <= OrderLimits.MaxQuantity))
             .WithMessage($"A quote cannot contain more than {OrderLimits.MaxQuantity} of one product.");
 
         // Guarded, because RuleForEach is a separate rule from the chain above
         // and the class-level cascade runs every rule: a null element rejected
-        // there would still arrive here. The predicate repeats no bound -- it
+        // there would still arrive here. The predicate repeats no bound — it
         // asks only whether the elements are safe to look inside.
         RuleForEach(x => x.Lines)
             .Where(line => line is not null)
