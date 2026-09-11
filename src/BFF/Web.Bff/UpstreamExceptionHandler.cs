@@ -39,9 +39,9 @@ internal sealed class UpstreamExceptionHandler(IProblemDetailsService problemDet
         (int status, string title) = rpc.StatusCode switch
         {
             // Catalog refused the request as malformed (§9.7's interceptor).
-            // The BFF built that request from the caller's query string, so the
+            // The BFF built that request from the caller's own basket, so the
             // caller is who has to change something — 502 would send them to
-            // read Catalog's logs for a mistake in their own URL.
+            // read Catalog's logs for a mistake in what they sent.
             StatusCode.InvalidArgument => (StatusCodes.Status400BadRequest, "Invalid pricing request"),
 
             // Catalog answered Unavailable itself, as a gRPC status. 503 rather

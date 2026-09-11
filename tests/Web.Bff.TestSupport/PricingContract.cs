@@ -101,7 +101,7 @@ public static class PricingContract
             "GBP",
             PricingOutcome.Prices("chair")),
 
-        // The currency reaches this hop from the caller's own query string, so
+        // The currency reaches this hop from the caller's own request body, so
         // the consumer cannot promise a case. What it needs is that the answer
         // is the same one either way — and this is the interaction that puts a
         // reply whose currency is spelled differently from the request through
@@ -236,7 +236,7 @@ public static class PricingContract
     /// <b>What both sides share is <see cref="RequestedIds"/>, not this.</b> The
     /// question — which products, in which currency — is built once and asked of
     /// the stub and the real service alike. The gRPC message is not: the
-    /// consumer suite hands the same ids to the screen as a query string and
+    /// consumer suite hands the same ids to the screen as a basket and
     /// lets <c>CheckoutEndpoints</c> construct its own, because its whole job is
     /// to establish that the request the ENDPOINT builds is the one this
     /// contract describes. Building it here for that side too would verify the

@@ -2563,7 +2563,7 @@ difference is deliberate. The ids and the currency come from
 `PricingContract.RequestedIds` on both sides, so the stub and the real service
 are asked about the same products in the same currency. Only the provider suite
 then sends that as a `GetPricesRequest`; the consumer suite hands it to the
-screen as a query string and lets `CheckoutEndpoints` build the gRPC message
+screen as a basket and lets `CheckoutEndpoints` build the gRPC message
 itself. Having the contract build it there would verify the contract against
 itself — the consumer's half exists precisely to establish that the request the
 *endpoint* constructs is the one the contract describes.

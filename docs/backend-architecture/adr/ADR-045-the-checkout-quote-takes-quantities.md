@@ -61,34 +61,30 @@ the third leaves every *line* total computed in the client, which is the same
 defect one level down. `Amount` keeps its name and its meaning as the unit
 price, because the screen needs it.
 
-**A repeated product is merged rather than refused or dropped, and this
-reversed during the review.** Dropping was never in question — under the old
-contract a repeated id carried no information, so `Distinct()` lost nothing,
-but a repeated *line* carries a quantity, and dropping it discards part of the
-customer's basket. The first version of this record chose to **refuse** it
-instead, on the argument that summing silently repairs a caller that has lost
-track of its own state.
+**A repeated product is merged rather than refused or dropped.** Dropping is
+the one option with no defence: under the old contract a repeated id carried no
+information, so `Distinct()` lost nothing, but a repeated *line* carries a
+quantity, and dropping it discards part of the customer's basket.
 
-That argument is not wrong and it is not this platform's. `PlaceOrderHandler`
-calls a repeated product legitimate in as many words — "a caller may
-legitimately send the same product twice — `Order.AddLine` merges those into
-one line" — and `OrderTests.Place_merges_two_lines_for_the_same_product` pins
-it in the domain. So refusing here shipped a **second duplicate policy** in the
-one host that quotes for that order, which is the defect this whole record
-exists to close, pointing the other way: a quote that refuses a basket the
-order accepts. Copilot found it on this pull request, after the first
-implementation and its test had both been written to the refusal.
+Refusing is the tempting middle option, on the argument that summing silently
+repairs a caller that has lost track of its own state. Two things rule it out.
+`PlaceOrderHandler` calls a repeated product legitimate in as many words — "a
+caller may legitimately send the same product twice — `Order.AddLine` merges
+those into one line" — and `OrderTests.Place_merges_two_lines_for_the_same_product`
+pins the merge in the domain, so refusing in the host that quotes *for* that
+order is a **second duplicate policy**: a quote that refuses a basket the order
+accepts, which is this record's own defect pointing the other way. And the
+merge is not silent, which is the objection's real force: the reply echoes
+`Quantity` per line, so a caller that sent two lines for one product gets back
+one line carrying their sum and can see what became of it.
 
-The merge is also not silent, which was the original objection's real force: the
-reply echoes `Quantity` per line, so a caller that sent two lines for one
-product gets back one line carrying their sum and can see what happened to it.
-
-**Merging makes the quantity bound mean something, which per-line checking did
-not.** Two lines of `MaxQuantity` each passed every rule on both sides and
-placed an order for twice it — so the constant this record introduces as "the
-order's quantity bound" was not one. Both validators now sum by product before
-comparing, and a test on each side pins it. That was the sharper half of the
-same finding.
+**The quantity bound is on the merged quantity, not on a line.** Because a
+repeated product merges, a rule checked per line is not a bound on the order at
+all — two lines at `MaxQuantity` place an order for twice it. Both validators
+group by product and compare the sum, and each side pins it with a test,
+including the acceptance case for two *distinct* products at the ceiling:
+without that one, a basket-wide sum satisfies every boundary test while
+refusing a legitimate basket.
 
 **The bounds are Ordering's, read rather than copied.** A quote that accepts
 what the order will refuse hands the customer a price for a basket they cannot
