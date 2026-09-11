@@ -927,6 +927,18 @@ public sealed class PlaceOrderValidator : AbstractValidator<PlaceOrderCommand>
                 .GreaterThanOrEqualTo(OrderLimits.MinQuantity)
                 .LessThanOrEqualTo(OrderLimits.MaxQuantity);
         });
+        // And again over the MERGED quantity, because the rule above is not a
+        // bound on the order: a repeated product is legitimate and
+        // Order.AddLine merges the lines, so two items at the ceiling placed an
+        // order for twice it (ADR-045). Summed as long because Enumerable.Sum
+        // over int is checked, and this rule runs before RuleForEach reports
+        // either item.
+        RuleFor(x => x.Items)
+            .Must(items => items
+                .GroupBy(i => i.ProductId)
+                .All(product => product.Sum(i => (long)i.Quantity) <= OrderLimits.MaxQuantity))
+            .WithMessage($"An order cannot contain more than {OrderLimits.MaxQuantity} of one product.")
+            .When(x => x.Items is not null && x.Items.All(i => i is not null));
     }
 }
 
