@@ -77,8 +77,7 @@ public sealed class UpstreamRetryTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         _catalog.Calls.Count.ShouldBe(3);
@@ -95,8 +94,7 @@ public sealed class UpstreamRetryTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // 503, not merely "not OK". The loose assertion this replaced permitted
         // a 500, so breaking UpstreamExceptionHandler's outage mapping left
@@ -115,8 +113,7 @@ public sealed class UpstreamRetryTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // Grpc.Net.Client has no gRPC status for a failure raised inside the
         // client pipeline, so it reports Internal and puts Polly's
@@ -139,15 +136,12 @@ public sealed class UpstreamRetryTests : IAsyncLifetime
 
         for (int i = 0; i < 12; i++)
         {
-            await client.GetAsync(
-                $"/v1/checkout/quote?productId={Chair}&currency=GBP",
-                TestContext.Current.CancellationToken);
+            await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
         }
 
         int callsBeforeOpen = _catalog.Calls.Count;
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
 
@@ -169,8 +163,7 @@ public sealed class UpstreamRetryTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
 

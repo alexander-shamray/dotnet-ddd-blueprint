@@ -33,11 +33,26 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The only project reference, exactly as the gateway has. Everything the
-         BFF needs from the platform — observability, token validation, the
-         "authenticated" policy, problem details, the liveness probe — arrives
-         through AddCommonWebDefaults. -->
+    <!-- Everything the BFF needs from the platform — observability, token
+         validation, the "authenticated" policy, problem details, the liveness
+         probe — arrives through AddCommonWebDefaults. FluentValidation comes
+         with it, transitively, which is why QuoteRequestValidator costs no
+         package. -->
     <ProjectReference Include="..\..\BuildingBlocks\Common.Web\Common.Web.csproj" />
+    <!-- The second reference, and the only one this host has that the gateway
+         does not need. It exists for OrderLimits and nothing else: the quote
+         endpoint must refuse exactly the quantities PlaceOrderValidator will
+         later refuse, so the two read one constant instead of holding two
+         literals that can drift.
+
+         §4.3 permits exactly one assembly to cross a service boundary and this
+         is that assembly, so the edge is the sanctioned one rather than a new
+         kind. What it is NOT is permission to reach further: an unused project
+         reference is a claim about the dependency graph that nothing makes
+         true, and a reference existing is not licence to reach across §4.2
+         through it. The BFF consumes no Ordering message type and must not
+         start. -->
+    <ProjectReference Include="..\..\BuildingBlocks\Common.Contracts\Common.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

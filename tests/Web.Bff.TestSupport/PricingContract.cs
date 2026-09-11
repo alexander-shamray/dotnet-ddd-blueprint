@@ -136,10 +136,18 @@ public static class PricingContract
             "GBP",
             PricingOutcome.Prices()),
 
-        // CheckoutEndpoints deliberately holds no ceiling of its own and relies
-        // on this refusal to become the caller's 400 (UpstreamExceptionHandler).
         // Served in part instead, a basket past the ceiling would quote a total
         // that silently omitted lines.
+        //
+        // CheckoutEndpoints used to hold no ceiling of its own and relied on
+        // this refusal to become the caller's 400 (UpstreamExceptionHandler).
+        // Since ADR-045 it bounds its own line count at OrderLimits.MaxLines,
+        // which is the order's bound rather than a copy of this one, and the
+        // two numbers agree today. So the consumer no longer REACHES this
+        // refusal through its screen — and the interaction stays, because what
+        // the consumer stops driving it still needs the provider to promise.
+        // The day the two ceilings part, this is the expectation that says
+        // which way they parted.
         new PricingInteraction(
             "a basket past the ceiling is refused rather than served in part",
             [],

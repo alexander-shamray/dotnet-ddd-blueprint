@@ -49,9 +49,7 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
     {
         using HttpClient client = Caller();
 
-        await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        await client.Quote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // Read off the request Catalog actually received, not off the handler.
         // A DelegatingHandler registered and never reached is the failure this
@@ -64,9 +62,7 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
     {
         using HttpClient client = Caller();
 
-        await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        await client.Quote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // §11.5: the scope has to become an audience, and a client-credentials
         // token that asked for the wrong scope carries the wrong `aud` and is
@@ -81,9 +77,7 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
         using HttpClient client = Caller();
         client.DefaultRequestHeaders.Add("X-Correlation-Id", "018f4c2e-supplied");
 
-        await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        await client.Quote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // §10.4 promises one ID "propagates through every service", and this
         // is the one synchronous hop in the platform — so it is the only place
@@ -99,9 +93,7 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
     {
         using HttpClient client = Caller();
 
-        await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        await client.Quote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // The middleware mints one when the caller sends none, so this hop
         // does carry an ID — what it must not do is invent an EMPTY one. A
@@ -139,9 +131,7 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        QuoteResponse? quote = await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        QuoteResponse? quote = await client.Quote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         quote.ShouldNotBeNull();
 
@@ -163,12 +153,8 @@ public sealed class PricingCredentialsTests : IAsyncLifetime
     {
         using HttpClient client = Caller();
 
-        await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
-            TestContext.Current.CancellationToken);
-        await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        await client.Quote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
+        await client.Quote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // The handler asks the cache on every attempt, deliberately — that is
         // what the test above depends on. Which means the *caching* is

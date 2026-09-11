@@ -1,4 +1,5 @@
 using System.Net;
+using Common.Contracts.Ordering.V1;
 using System.Net.Http.Json;
 using Grpc.Core;
 using Shouldly;
@@ -45,19 +46,31 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_quote_prices_every_product_and_totals_them()
+    public async Task A_quote_prices_every_product_and_totals_the_basket()
     {
         using HttpClient client = Caller();
 
-        QuoteResponse? quote = await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&productId={Desk}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        QuoteResponse? quote = await client.Quote(
+            "GBP", TestContext.Current.CancellationToken, (Chair, 2), (Desk, 1));
 
         quote.ShouldNotBeNull();
         quote.Currency.ShouldBe("GBP");
         quote.Lines.Count.ShouldBe(2);
-        quote.Total.ShouldBe(170.49m);
+
+        // 2A + B, not A + B, and the difference is the whole of ADR-045. The
+        // quantities are deliberately unequal: at one each, a total that
+        // multiplies and one that does not produce identical bytes, so this
+        // assertion would pass against the endpoint it replaced.
+        quote.Total.ShouldBe(220.48m);
         quote.Unpriced.ShouldBeEmpty();
+
+        // The unit price keeps its meaning and its name — a cart renders
+        // "£49.99 each" beside the line total — so both are asserted rather
+        // than only the one the total is computed from.
+        QuoteLine chair = quote.Lines.Single(line => line.ProductId == Chair);
+        chair.Amount.ShouldBe(49.99m);
+        chair.Quantity.ShouldBe(2);
+        chair.LineTotal.ShouldBe(99.98m);
     }
 
     [Fact]
@@ -65,15 +78,14 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     {
         using HttpClient client = Caller();
 
-        QuoteResponse? quote = await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&productId={Unknown}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        QuoteResponse? quote = await client.Quote(
+            "GBP", TestContext.Current.CancellationToken, (Chair, 3), (Unknown, 2));
 
         // The assertion that matters is the second: a form that silently drops
         // a line the customer chose is worse than one that says it cannot
         // price it, and "the total is right" is true of both.
         quote.ShouldNotBeNull();
-        quote.Total.ShouldBe(49.99m);
+        quote.Total.ShouldBe(149.97m);
         quote.Unpriced.ShouldBe([Unknown]);
     }
 
@@ -82,9 +94,8 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     {
         using HttpClient client = Caller();
 
-        QuoteResponse? quote = await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&productId={Desk}&currency=USD",
-            TestContext.Current.CancellationToken);
+        QuoteResponse? quote = await client.Quote(
+            "USD", TestContext.Current.CancellationToken, (Chair, 2), (Desk, 1));
 
         // Catalog stores one price per product and filters rather than
         // converts (pricing.proto), so this is the honest answer and not an
@@ -96,36 +107,164 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_repeated_product_is_asked_about_once()
+    public async Task A_repeated_product_is_refused_rather_than_deduplicated()
     {
         using HttpClient client = Caller();
 
-        QuoteResponse? quote = await client.GetFromJsonAsync<QuoteResponse>(
-            $"/v1/checkout/quote?productId={Chair}&productId={Chair}&currency=GBP",
-            TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote(
+            "GBP", TestContext.Current.CancellationToken, (Chair, 2), (Chair, 1));
 
-        quote.ShouldNotBeNull();
-        quote.Lines.Count.ShouldBe(1);
-
-        // Asserted at the wire and not only in the response, because the
-        // dedup's real job is upstream: it is what keeps a caller from
-        // spending Catalog's id ceiling on one product repeated a hundred
-        // times.
-        _catalog.Calls.Single().ProductIds.ShouldBe([Chair.ToString()]);
+        // This test used to assert the opposite — one line back, and one id at
+        // the wire — and the behaviour it pinned was correct while the request
+        // carried no quantities: a repeated id held no information, so
+        // dropping it lost nothing. A repeated LINE holds a quantity, and
+        // dropping it discards part of the customer's basket. Summing the two
+        // would be worse still, because it silently repairs a client that has
+        // lost track of its own state (ADR-045).
+        //
+        // The wire assertion does not survive in its old form and should not
+        // be forced to: validation runs before the hop, so a duplicated id now
+        // means Catalog is called ZERO times rather than once. The dedup's
+        // real job — keeping a caller from spending Catalog's id ceiling on
+        // one product repeated a hundred times — is done more cheaply than
+        // before, because the request never leaves this host.
+        await ShouldBeRefusedWithoutAHop(response);
     }
 
     [Fact]
-    public async Task A_quote_with_no_products_is_refused_without_a_hop()
+    public async Task A_quote_with_no_lines_is_refused_without_a_hop()
     {
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync("/v1/checkout/quote?currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote(
+            "GBP", TestContext.Current.CancellationToken);
 
+        await ShouldBeRefusedWithoutAHop(response);
+    }
+
+    [Fact]
+    public async Task A_null_line_list_is_a_400_and_not_a_500()
+    {
+        using HttpClient client = Caller();
+
+        // An explicit JSON "lines": null binds as null. Without Cascade(Stop)
+        // in the validator, NotEmpty records its failure and the count
+        // predicate then dereferences null — turning a malformed request into
+        // a 500. The same guard PlaceOrderValidator carries, for the same
+        // reason, asserted through the status because the throw is not
+        // observable from out here.
+        HttpResponseMessage response = await client.PostQuote(
+            new QuoteRequest("GBP", null!), TestContext.Current.CancellationToken);
+
+        await ShouldBeRefusedWithoutAHop(response);
+    }
+
+    [Fact]
+    public async Task A_quantity_of_none_is_refused_without_a_hop()
+    {
+        using HttpClient client = Caller();
+
+        HttpResponseMessage response = await client.PostQuote(
+            "GBP", TestContext.Current.CancellationToken, (Chair, 0));
+
+        await ShouldBeRefusedWithoutAHop(response);
+    }
+
+    [Fact]
+    public async Task A_quantity_past_the_ceiling_is_refused_without_a_hop()
+    {
+        using HttpClient client = Caller();
+
+        HttpResponseMessage response = await client.PostQuote(
+            "GBP", TestContext.Current.CancellationToken, (Chair, OrderLimits.MaxQuantity + 1));
+
+        // The bound is Ordering's, and that is the point rather than a
+        // convenience: a quote that priced this basket would hand the customer
+        // a number for an order PlaceOrderValidator refuses, and move the
+        // refusal from the cart screen to the checkout screen.
+        await ShouldBeRefusedWithoutAHop(response);
+    }
+
+    [Fact]
+    public async Task A_quantity_at_the_ceiling_is_priced()
+    {
+        using HttpClient client = Caller();
+
+        // The boundary from below. Without it the rule could be off by one in
+        // the strict direction and only the rejection test would notice —
+        // which it would not, because it asserts a failure either way.
+        QuoteResponse? quote = await client.Quote(
+            "GBP", TestContext.Current.CancellationToken, (Chair, OrderLimits.MaxQuantity));
+
+        quote.ShouldNotBeNull();
+        quote.Total.ShouldBe(49.99m * OrderLimits.MaxQuantity);
+    }
+
+    [Fact]
+    public async Task A_quote_past_the_line_ceiling_is_refused_without_a_hop()
+    {
+        using HttpClient client = Caller();
+
+        (Guid ProductId, int Quantity)[] lines =
+            [.. Enumerable
+                .Range(0, OrderLimits.MaxLines + 1)
+                .Select(_ => (Guid.CreateVersion7(), 1))];
+
+        HttpResponseMessage response = await client.PostQuote(
+            "GBP", TestContext.Current.CancellationToken, lines);
+
+        // Refused here rather than by Catalog, and the two are different
+        // bounds that happen to agree today: this one is on the request's own
+        // size and is checked before the hop, where GetPricesValidator's is on
+        // how many ids one price query may carry. Were Catalog's raised, this
+        // would still refuse — because the ORDER would.
+        await ShouldBeRefusedWithoutAHop(response);
+    }
+
+    [Fact]
+    public async Task A_quote_at_the_line_ceiling_is_priced_in_one_hop()
+    {
+        (Guid ProductId, int Quantity)[] lines =
+            [.. Enumerable
+                .Range(0, OrderLimits.MaxLines)
+                .Select(i =>
+                {
+                    Guid id = Guid.CreateVersion7();
+                    _catalog.Prices[id] = ($"Product {i}", 1.00m, "GBP");
+
+                    return (id, 1);
+                })];
+
+        using HttpClient client = Caller();
+
+        QuoteResponse? quote = await client.Quote("GBP", TestContext.Current.CancellationToken, lines);
+
+        // The boundary from below again, and the last assertion is the one
+        // that would catch a ceiling enforced by batching rather than by
+        // refusing: §9.7 budgets ONE synchronous hop, not one per hundred.
+        quote.ShouldNotBeNull();
+        quote.Lines.Count.ShouldBe(OrderLimits.MaxLines);
+        quote.Total.ShouldBe(OrderLimits.MaxLines * 1.00m);
+        _catalog.Calls.Count.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// Both halves of every refusal above. The second is the one worth
+    /// stating: a request that cannot produce anything must not spend the
+    /// platform's one synchronous hop finding that out (§9.7).
+    /// </summary>
+    private async Task ShouldBeRefusedWithoutAHop(HttpResponseMessage response)
+    {
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
 
-        // The second half is the point: a request that cannot produce anything
-        // must not spend the platform's one synchronous hop finding that out.
+        // Field-keyed, which is what makes this a ValidationProblemDetails
+        // rather than a bare problem response: the client can put the message
+        // beside the input that caused it. Results.Problem could not, and that
+        // is the reason the endpoint throws rather than returning (ADR-045).
+        string body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        body.ShouldContain("errors");
+
         _catalog.Calls.ShouldBeEmpty();
     }
 
@@ -134,8 +273,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
     {
         using HttpClient client = _factory.CreateClient();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // §11.2: this host validates its own tokens, whatever the gateway in
         // front of it did. The group fails closed, so the refusal comes from
@@ -158,8 +296,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // Catalog refused a request the BFF built out of the caller's query
         // string, so the caller is who has to change something. Without
@@ -176,8 +313,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
         response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
@@ -197,8 +333,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // Without this check the endpoint totalled a USD amount and labelled
         // the quote GBP, because the response's currency came from the REQUEST
@@ -215,8 +350,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // Untrusted, the Desk would have been priced and added to a total the
         // caller never asked for — and Unpriced would not show it, because that
@@ -231,8 +365,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // The second copy would have been added and totalled, doubling the
         // quote while every id in it was one the caller asked for — the
@@ -247,8 +380,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // A contract violation between two services is nobody's caller's
         // fault, and answering 400 would tell the client to fix a request that
@@ -266,8 +398,7 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         using HttpClient client = Caller();
 
-        HttpResponseMessage response = await client.GetAsync(
-            $"/v1/checkout/quote?productId={Chair}&currency=GBP", TestContext.Current.CancellationToken);
+        HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
         // "-12.50" parses perfectly well, which is why this needs its own
         // assertion rather than riding on the one above: the failure is a
