@@ -50,8 +50,10 @@ and the 400 it produces cannot be keyed to a field.
 makes it look like a write. Nothing caches this: the group carries
 `RequireAuthorization()`, emits no cache headers, and a quote is keyed to one
 customer's basket, so a shared cache's hit rate on it is approximately zero.
-And `GET` had a ceiling nobody chose — a hundred ids as repeated parameters is
-roughly 4.5 kB of URL, inside every common limit but not far inside.
+And `GET` had a ceiling nobody chose — a basket at Catalog's
+`GetPricesValidator.MaxProductIds`, spelled as repeated query parameters, runs
+to several kilobytes of URL: inside every common limit, but not far inside, and
+the margin is nobody's decision.
 
 **`LineTotal` as well as `Total`, because otherwise the fix is half a fix.**
 A cart shows "2 × £12.50 = £25.00". Supplying the first two figures and not

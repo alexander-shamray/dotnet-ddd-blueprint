@@ -4,8 +4,9 @@ using FluentValidation;
 namespace Web.Bff.Endpoints;
 
 /// <summary>
-/// A basket, as the screen holds it. One line per product, each carrying how
-/// many of it the customer wants.
+/// A basket, as the screen holds it: lines of a product and how many of it the
+/// customer wants. A product may be named by more than one line, and the
+/// quantities are merged — see <see cref="Lines"/>.
 /// </summary>
 /// <remarks>
 /// <para>
