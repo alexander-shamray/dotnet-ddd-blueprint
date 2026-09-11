@@ -24,6 +24,18 @@ namespace Web.Bff.Tests;
 /// exists compiles until the type is deleted.
 /// </para>
 /// <para>
+/// <b>One entry is now the exception that sentence warns about, and it is kept
+/// deliberately.</b> Since ADR-045 the quote bounds its own line count, so the
+/// ceiling refusal fails validation here and never reaches the stub — this
+/// suite drives it and asserts the absence of the hop, which is a weaker thing
+/// than driving the interaction. It is not an expectation held for nothing:
+/// the two ceilings are independent and equal only by coincidence of value, so
+/// the provider verification is what would catch them parting. What it is no
+/// longer is consumer-driven, and saying so is the point of this paragraph —
+/// an exception recorded is a decision, where an exception nobody wrote down
+/// is how a contract quietly becomes a second provider suite.
+/// </para>
+/// <para>
 /// <b>The violation tests in <c>QuoteEndpointTests</c> are the other half and
 /// are deliberately not here.</b> Those drive replies the contract forbids —
 /// a comma decimal, a negative amount, a duplicate, a product nobody asked

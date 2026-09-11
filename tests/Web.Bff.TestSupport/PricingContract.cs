@@ -10,6 +10,13 @@ namespace Web.Bff.TestSupport;
 /// provider.
 /// </summary>
 /// <remarks>
+/// <b>One interaction is verified on the provider side only</b>, and it is
+/// named where it is declared rather than only here: since ADR-045 the quote
+/// bounds its own line count, so a basket past the ceiling is refused before
+/// the hop and never reaches the stub. The expectation stays because Catalog
+/// still owes the refusal. See <see cref="Interactions"/>.
+/// </remarks>
+/// <remarks>
 /// <para>
 /// <b>This is Appendix C's PR-26, and it is not Pact.</b> Pact expresses a
 /// contract in one artefact the consumer authors and the provider verifies, and
@@ -66,7 +73,10 @@ public static class PricingContract
 
     /// <summary>
     /// Every expectation the consumer has of the provider, each verified on both
-    /// sides of the hop.
+    /// sides of the hop — except the ceiling refusal at the end of this list,
+    /// which the consumer can no longer drive through its own screen and which
+    /// the provider verification alone holds Catalog to (ADR-045). The comment
+    /// above that interaction carries the reason.
     /// </summary>
     public static IReadOnlyList<PricingInteraction> Interactions { get; } =
     [
