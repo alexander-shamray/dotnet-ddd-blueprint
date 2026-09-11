@@ -51,6 +51,7 @@ decision looks wrong.
 | **ADR-042** | [The deployed realm is checked at deploy time](adr/ADR-042-the-deployed-realm-is-checked-at-deploy-time.md) |
 | **ADR-043** | [The deployed realm is checked between rollouts](adr/ADR-043-the-deployed-realm-is-checked-between-rollouts.md) |
 | **ADR-044** | [The native client holds a refresh token, and the realm rotates it](adr/ADR-044-the-native-client-holds-a-refresh-token-and-the-realm-rotates-it.md) |
+| **ADR-045** | [The checkout quote takes quantities](adr/ADR-045-the-checkout-quote-takes-quantities.md) |
 
 ---
 

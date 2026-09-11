@@ -21,7 +21,7 @@ request size limits.
 > it is a constant rather than configuration for §15.4's reason — it does not
 > vary between environments. Every request this platform accepts is a JSON
 > command, and the largest one it can construct is an order at
-> `PlaceOrderValidator.MaxItems` — a hundred lines, so tens of kilobytes
+> `OrderLimits.MaxLines` — a hundred lines, so tens of kilobytes
 > ([§6.4](06-cqrs.md)). A mebibyte is two orders of magnitude above that
 > and two below what an upload endpoint would want, which is the shape of a
 > limit chosen for a platform that has none.
@@ -97,6 +97,15 @@ The shape of the pattern, not this platform's topology: a second BFF per client
 type is what the pattern looks like at scale, and the fan-out to two services is
 what [§9.7](09-messaging.md) permits. What is actually built here is one `Web.Bff` making one call
 to Catalog ([§2.2](02-architecture-at-a-glance.md), §9.7) — the diagram is the ceiling, not the inventory.
+
+**Aggregation is shaped for the screen, and the screen's question is the whole
+of the request.** A BFF that computes a figure the client cannot render has
+aggregated nothing: it has moved the arithmetic one hop and left the client to
+redo it.
+[ADR-045](adr/ADR-045-the-checkout-quote-takes-quantities.md) is where that was
+paid for — the checkout quote totalled a set of products while the caller held
+a basket — and it is why a BFF request carries what the screen has rather than
+the subset a resource would need.
 
 ## 10.2 YARP configuration
 
@@ -981,7 +990,7 @@ Each belongs to a mechanism that runs before or beside a handler, and giving
 
 | Status | Produced by | Why not `Error` |
 |---|---|---|
-| 400 | `ValidationBehavior` throwing `ValidationException` ([§6.3](06-cqrs.md)) | The `errors` extension is field-keyed, and `Error` has no field. A malformed request is rejected before any handler runs, so no handler can return one |
+| 400 | `ValidationBehavior` throwing `ValidationException` ([§6.3](06-cqrs.md)) — or, in the one host with no handler pipeline to run one, an endpoint invoking its own validator and throwing the same exception ([ADR-045](adr/ADR-045-the-checkout-quote-takes-quantities.md)) | The `errors` extension is field-keyed, and `Error` has no field. A malformed request is refused without a result, so no handler can return one |
 | 401 / 403 | The authentication and authorization middleware (§11.4) | Decided before the endpoint's delegate is entered — and written with **no body at all** unless something converts them, which is what `app.UseStatusCodePages()` is for (§4.2). Registering `AddProblemDetails` is not enough: it supplies a writer that nothing on this path was calling, so the two statuses a client meets first were the two that broke the promise this section opens with. Measured on a gateway 401 in PR-17, true of every host since PR-16, fixed in all of them |
 | 409 / 412 | `DbUpdateConcurrencyException` and the precondition filter | A different conversation with the client — retry with a fresh ETag, rather than the request was understood and refused |
 

@@ -71,7 +71,7 @@ and exits, then `catalog-api` starts (§14.1's pair rule).
 | Catalog API | http://localhost:5102 | `/health/live`, `/health/ready`, `/openapi/v1.json` (needs a token — see below), `/v1/catalog/products` |
 | Gateway | http://localhost:5000 | `/health/live`, `/health/ready`, and [§10.2](../../docs/backend-architecture/10-api-gateway.md)'s four routes |
 | Ordering API | http://localhost:5101 | `/health/live`, `/health/ready`, `/openapi/v1.json` (needs a token — see below), `/v1/orders` — every route needs a token, unlike Catalog's listing |
-| Web BFF | http://localhost:5200 | `/health/live`, `/health/ready`, `/v1/checkout/quote?productId=…&currency=GBP` — a token needed, and the only host that mints one of its own ([§11.5](../../docs/backend-architecture/11-identity-authorization.md)) |
+| Web BFF | http://localhost:5200 | `/health/live`, `/health/ready`, `POST /v1/checkout/quote` with a body of `currency` and `lines` ([ADR-045](../../docs/backend-architecture/adr/ADR-045-the-checkout-quote-takes-quantities.md)) — a token needed, and the only host that mints one of its own ([§11.5](../../docs/backend-architecture/11-identity-authorization.md)) |
 
 **Both OpenAPI documents need a token**, and that is a decision rather than an
 oversight. `MapOpenApi()` carries no authorization metadata, so the
