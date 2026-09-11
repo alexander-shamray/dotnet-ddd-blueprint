@@ -1,3 +1,4 @@
+using Common.Contracts.Ordering.V1;
 using FluentValidation.Results;
 using Ordering.Application.Orders.PlaceOrder;
 using Shouldly;
@@ -29,7 +30,7 @@ public class PlaceOrderValidatorTests
         // The boundary from below. Without this the rule could be off by one
         // in the strict direction and only the rejection test would notice —
         // which it would not, because it asserts a failure either way.
-        Validator.Validate(WithItems(PlaceOrderValidator.MaxItems)).IsValid.ShouldBeTrue();
+        Validator.Validate(WithItems(OrderLimits.MaxLines)).IsValid.ShouldBeTrue();
     }
 
     [Fact]
@@ -40,7 +41,7 @@ public class PlaceOrderValidatorTests
         // beside them, and SQL Server's limit is 2,100 — so before the ceiling
         // existed, an authenticated caller sending enough items turned a
         // well-formed request into a 500 rather than a 400. Found by Copilot.
-        ValidationResult result = Validator.Validate(WithItems(PlaceOrderValidator.MaxItems + 1));
+        ValidationResult result = Validator.Validate(WithItems(OrderLimits.MaxLines + 1));
 
         result.IsValid.ShouldBeFalse();
         result.Errors.ShouldContain(e => e.PropertyName == nameof(PlaceOrderCommand.Items));
@@ -51,11 +52,11 @@ public class PlaceOrderValidatorTests
     {
         // The rule's reason, asserted rather than left in a comment: the
         // ceiling is only correct while it stays under SQL Server's parameter
-        // limit with room for @Currency. Raising MaxItems past this fails
+        // limit with room for @Currency. Raising MaxLines past this fails
         // here, which is the moment to batch the query instead.
         const int sqlServerParameterLimit = 2100;
 
-        PlaceOrderValidator.MaxItems.ShouldBeLessThan(sqlServerParameterLimit - 1);
+        OrderLimits.MaxLines.ShouldBeLessThan(sqlServerParameterLimit - 1);
     }
 
     [Fact]

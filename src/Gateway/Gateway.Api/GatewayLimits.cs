@@ -12,7 +12,7 @@ public static class GatewayLimits
     /// <remarks>
     /// <para>
     /// Every request this platform accepts is a JSON command, and the largest
-    /// one it can construct is an order at <c>PlaceOrderValidator.MaxItems</c>
+    /// one it can construct is an order at <c>OrderLimits.MaxLines</c>
     /// — a hundred lines, so tens of kilobytes. A mebibyte is two orders of
     /// magnitude above that and two below what an upload endpoint would want,
     /// which is the shape of a limit chosen for a platform that has no uploads
