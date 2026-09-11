@@ -93,9 +93,10 @@ internal sealed class QuoteRequestValidator : AbstractValidator<QuoteRequest>
             // "lines": [null] binds as a list holding a null: the element type
             // being non-nullable is a compiler constraint and not a
             // deserialisation one, and System.Text.Json enforces neither. The
-            // duplicate check below projects ProductId off every element, so
-            // without this a malformed request arrived as a 500 rather than
-            // the 400 this validator exists to produce.
+            // merged-quantity rule below groups by ProductId and sums
+            // Quantity, reading both off every element, so without this a
+            // malformed request arrived as a 500 rather than the 400 this
+            // validator exists to produce.
             //
             // This is the null-LIST guard's sibling rather than a second copy
             // of it. Cascade(Stop) above catches "lines": null and nothing in

@@ -251,10 +251,10 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
         using HttpClient client = Caller();
 
         // int.MaxValue twice. Enumerable.Sum over int is CHECKED, so the
-        // merged-quantity predicate threw OverflowException before the
-        // per-line rule could report either quantity as invalid — turning a
-        // malformed body into a 500, which is the same shape of defect as the
-        // null element two tests up and arrived in the fix for it. Found by
+        // merged-quantity rule threw OverflowException before the per-line
+        // rule could report either quantity as invalid — turning a malformed
+        // body into a 500, which is the same shape of defect as the null
+        // element two tests up and arrived in the fix for it. Found by
         // Copilot.
         HttpResponseMessage response = await client.PostQuote(
             "GBP",
@@ -263,6 +263,28 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
             (Chair, int.MaxValue));
 
         await ShouldBeRefusedWithoutAHop(response);
+    }
+
+    [Fact]
+    public async Task Two_products_at_the_quantity_ceiling_are_both_priced()
+    {
+        using HttpClient client = Caller();
+
+        // The rule is PER PRODUCT, and nothing else here pins that half of it.
+        // Every other quantity case uses one product, so a mistaken
+        // basket-wide sum — the same predicate without its GroupBy — passes
+        // all of them while refusing this, which is a legitimate basket.
+        // Found by Copilot, which reached it by mutating the rule rather than
+        // by reading the tests.
+        QuoteResponse? quote = await client.Quote(
+            "GBP",
+            TestContext.Current.CancellationToken,
+            (Chair, OrderLimits.MaxQuantity),
+            (Desk, OrderLimits.MaxQuantity));
+
+        quote.ShouldNotBeNull();
+        quote.Lines.Count.ShouldBe(2);
+        quote.Total.ShouldBe(170319.51m);
     }
 
     [Fact]

@@ -17,6 +17,9 @@ public class PlaceOrderValidatorTests
     /// <summary>One product, so two lines can name the same one.</summary>
     private static readonly Guid Product = Guid.CreateVersion7();
 
+    /// <summary>A second, so the quantity rule can be shown to group.</summary>
+    private static readonly Guid OtherProduct = Guid.CreateVersion7();
+
     private static AddressDto AnAddress() =>
         new("1 Test Street", null, "Almaty", "050000", "KZ");
 
@@ -92,6 +95,25 @@ public class PlaceOrderValidatorTests
             [
                 new PlaceOrderItem(Product, OrderLimits.MaxQuantity - 1),
                 new PlaceOrderItem(Product, 1)
+            ],
+            AnAddress(),
+            "EUR");
+
+        Validator.Validate(command).IsValid.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Two_products_at_the_quantity_ceiling_are_both_accepted()
+    {
+        // The rule is PER PRODUCT, and nothing else pins that half of it: every
+        // other quantity case names one product, so a mistaken basket-wide Sum
+        // satisfies all of them while refusing this order, which is valid.
+        // Found by Copilot, by mutating the rule rather than reading the tests.
+        PlaceOrderCommand command = new(
+            Guid.CreateVersion7(),
+            [
+                new PlaceOrderItem(Product, OrderLimits.MaxQuantity),
+                new PlaceOrderItem(OtherProduct, OrderLimits.MaxQuantity)
             ],
             AnAddress(),
             "EUR");

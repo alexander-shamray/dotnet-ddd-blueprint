@@ -4,10 +4,10 @@ using Web.Bff.Endpoints;
 namespace Web.Bff.Tests;
 
 /// <summary>
-/// How this suite asks for a quote, in one place. Four test classes drive the
-/// same endpoint, and before the request carried a body each of them spelled
-/// the URL itself — which was tolerable while a quote was a query string and
-/// is not now that it is a record.
+/// How this suite asks for a quote, in one place. Several classes here drive
+/// the same endpoint, and before the request carried a body each of them
+/// spelled the URL itself — which was tolerable while a quote was a query
+/// string and is not now that it is a record.
 /// </summary>
 /// <remarks>
 /// The body is built out of <see cref="QuoteRequest"/> rather than an
