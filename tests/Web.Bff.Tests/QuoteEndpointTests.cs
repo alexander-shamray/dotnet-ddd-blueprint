@@ -204,6 +204,31 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
         await ShouldBeRefusedWithoutAHop(response);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("GB")]
+    [InlineData("GBPP")]
+    [InlineData("GB1")]
+    [InlineData("GBP\n")]
+    public async Task A_currency_that_is_not_three_letters_is_refused_without_a_hop(string currency)
+    {
+        using HttpClient client = Caller();
+
+        HttpResponseMessage response = await client.PostQuote(
+            currency, TestContext.Current.CancellationToken, (Chair, 1));
+
+        // The trailing-newline case is the one with a reason beyond
+        // completeness, and it is why the rule is anchored with \z rather than
+        // $: .NET's $ matches before a trailing newline, so "GBP\n" satisfies a
+        // $-anchored pattern and would reach Catalog as a currency label no row
+        // carries. PlaceOrderValidator makes the same choice for the same
+        // reason and has had cases for it since it was written; this rule had
+        // none until Copilot pointed out that every quote test sends GBP or
+        // USD.
+        await ShouldBeRefusedWithoutAHop(response);
+    }
+
+
     [Fact]
     public async Task A_quantity_of_none_is_refused_without_a_hop()
     {
@@ -385,10 +410,10 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         HttpResponseMessage response = await client.PostQuote("GBP", TestContext.Current.CancellationToken, (Chair, 1));
 
-        // Catalog refused a request the BFF built out of the caller's query
-        // string, so the caller is who has to change something. Without
+        // Catalog refused a request the BFF built out of the caller's own
+        // basket, so the caller is who has to change something. Without
         // UpstreamExceptionHandler this is a 500, which sends them to read
-        // another service's logs for a mistake in their own URL.
+        // another service's logs for a mistake in what they sent.
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         response.Content.Headers.ContentType?.MediaType.ShouldBe("application/problem+json");
     }
