@@ -16,9 +16,10 @@ namespace Web.Bff.Endpoints;
 /// <c>RequireAuthorization()</c>, emits no cache headers, and a quote is keyed
 /// to one customer's basket, so a shared cache's hit rate on it is
 /// approximately zero. And the request is a list of records, which a body is
-/// the honest place for: as repeated query parameters a hundred ids run to
-/// roughly four and a half kilobytes of URL, inside every common limit but not
-/// far inside, and it is a limit nobody chose.
+/// the honest place for: a basket at <see cref="OrderLimits.MaxLines"/>,
+/// spelled as repeated query parameters, runs to several kilobytes of URL —
+/// inside every common limit, but not far inside, and the margin is nobody's
+/// decision.
 /// </para>
 /// <para>
 /// <b>Not two parallel arrays.</b> The cheap alternative was to keep the GET
@@ -121,8 +122,9 @@ internal sealed class QuoteRequestValidator : AbstractValidator<QuoteRequest>
             // this predicate runs before the per-line rules: two lines at
             // int.MaxValue threw OverflowException and answered 500 where the
             // whole point of this validator is a 400. Widening makes the rule
-            // total over every int the wire can bind, and a hundred lines of
-            // int.MaxValue is nowhere near long's range.
+            // total over every int the wire can bind: a basket bounded by
+            // MaxLines, every line of it at int.MaxValue, is nowhere near
+            // long's range.
             .Must(lines => lines
                 .GroupBy(line => line.ProductId)
                 .All(product => product.Sum(line => (long)line.Quantity) <= OrderLimits.MaxQuantity))

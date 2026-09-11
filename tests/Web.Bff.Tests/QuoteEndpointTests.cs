@@ -133,8 +133,8 @@ public sealed class QuoteEndpointTests : IAsyncLifetime
 
         // Asserted at the wire as well, because the merge's second job is
         // upstream and invisible from the response: it is what keeps a caller
-        // from spending Catalog's id ceiling on one product repeated a hundred
-        // times.
+        // from spending Catalog's id ceiling on one product repeated as many
+        // times as OrderLimits.MaxLines allows.
         _catalog.Calls.Single().ProductIds.ShouldBe([Chair.ToString()]);
     }
 
