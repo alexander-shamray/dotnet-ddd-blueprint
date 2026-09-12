@@ -107,6 +107,13 @@ def compare_subject(walked: list[Path], listed: list[Path]) -> list[str]:
     tree, and every assertion made from it is worth nothing. A project the walk
     finds and the solution does not list is one CI never compiles, so its
     output location has never been exercised by anything.
+
+    **The first says the walk did not find it rather than that it is not on
+    disk**, because those are different and only one of them is knowable from
+    here. A project listed at a path outside `SOURCE_ROOTS` is on disk and
+    absent from this walk, and a diagnostic asserting the file is missing sends
+    whoever reads it to look in the wrong place — while the case that matters,
+    a gate no longer covering a tree, is the same either way.
     """
     if not walked and not listed:
         roots = " and ".join(f"{name}/" for name in SOURCE_ROOTS)
@@ -116,12 +123,14 @@ def compare_subject(walked: list[Path], listed: list[Path]) -> list[str]:
             f"gate reporting on nothing rather than a tree with nothing wrong"]
 
     findings: list[str] = []
+    roots = " or ".join(f"{name}/" for name in SOURCE_ROOTS)
 
     for path in sorted(set(listed) - set(walked)):
         findings.append(
-            f"Platform.slnx lists {path.as_posix()}, which is not on disk. This walk "
-            f"is reading a tree the solution does not describe, so its other findings "
-            f"are about a different repository")
+            f"Platform.slnx lists {path.as_posix()}, which the walk over {roots} did "
+            f"not find: the file is missing, or it sits outside the roots this gate "
+            f"walks. Either way the solution describes a tree this walk is not "
+            f"reading, so its other findings are about part of the repository")
 
     for path in sorted(set(walked) - set(listed)):
         findings.append(

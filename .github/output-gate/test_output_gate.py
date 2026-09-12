@@ -219,7 +219,31 @@ class Subject(TemporaryRepository):
         code, output = run(self.root)
 
         self.assertEqual(code, 1)
-        self.assertIn("which is not on disk", output)
+        self.assertIn("the walk over src/ or tests/ did not find", output)
+
+    def test_a_project_outside_the_walked_roots_is_not_called_missing(self) -> None:
+        """On disk, and outside this walk — two different things to be told.
+
+        A solution entry under a root `SOURCE_ROOTS` does not name is still a
+        subject failure, and it is the one the checkout-reading tests below
+        exist for. What it is not is a missing file, and a diagnostic saying so
+        sends whoever reads it to look in the wrong place.
+        """
+        tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain"})
+        outside = self.root / "samples/Catalog.Sample"
+        outside.mkdir(parents=True)
+        (outside / "Catalog.Sample.csproj").write_text("<Project />", encoding="utf-8")
+        (self.root / "Platform.slnx").write_text(
+            '<Solution>\n  <Project Path="src/Services/Catalog/Catalog.Domain/'
+            'Catalog.Domain.csproj" />\n  <Project Path="samples/Catalog.Sample/'
+            'Catalog.Sample.csproj" />\n</Solution>\n', encoding="utf-8")
+
+        code, output = run(self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("samples/Catalog.Sample/Catalog.Sample.csproj", output)
+        self.assertIn("did not find", output)
+        self.assertNotIn("is not on disk", output)
 
     def test_a_project_moved_without_the_solution_following_it_fails(self) -> None:
         """Reconciled by path, so a move is visible where a stem is not.
@@ -236,7 +260,7 @@ class Subject(TemporaryRepository):
         code, output = run(self.root)
 
         self.assertEqual(code, 1)
-        self.assertIn("not on disk", output)
+        self.assertIn("did not find", output)
         self.assertIn("absent from Platform.slnx", output)
 
     def test_a_subject_mismatch_suppresses_the_other_findings(self) -> None:
