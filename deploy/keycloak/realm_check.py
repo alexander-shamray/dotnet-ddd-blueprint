@@ -50,6 +50,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -152,6 +153,25 @@ BROWSER_CLIENT = "web-app"
 # subject the flags are meant to be judged against.
 MOBILE_CLIENT = "mobile-app"
 
+# The two entries Keycloak accepts in `webOrigins` that are not origins, named
+# because the check below has to tell them apart rather than refuse both alike.
+# `*` answers every page on the internet; `+` means the origins this client's
+# own redirect URIs imply, which is a real setting on a client redirected to an
+# http(s) URL and an empty one on a client redirected to a custom scheme.
+ORIGIN_WILDCARD = "*"
+ORIGIN_FROM_REDIRECTS = "+"
+
+# The schemes a redirect URI has to be on for `+` to derive anything from it. A
+# browser sends a browser origin, and no page is served from `blueprint://`.
+WEB_SCHEMES = ("http://", "https://")
+
+# Dropped from the canonical origin when the scheme implies them, because a
+# browser drops them: `https://id.example.com:443` is never what arrives in an
+# `Origin` header, so a realm entry spelling it matches nothing. Keycloak
+# compares that header as text and has no opinion about a custom scheme's
+# port, so only the two web schemes have a default to drop.
+DEFAULT_PORTS = {"http": "80", "https": "443"}
+
 # A REALM REPRESENTATION CARRIES EVERY CONFIDENTIAL CLIENT'S SECRET, and this
 # gate needs none of them. The admin API answers `secret` for each such client
 # to a caller with realm-read rights, §14.1's own export carries one, and this
@@ -179,7 +199,7 @@ REDACTED = "<redacted by realm_check>"
 # A projection inverts that. `judged` builds a new document out of the named
 # fields below, so what the checks hold has no credential in it to leak — not a
 # redacted one, none — and a Keycloak version that adds a new secret-bearing
-# field changes nothing here. An allow-list of twelve keys is also the honest
+# field changes nothing here. The three tuples below are also the honest
 # statement of what this gate reads.
 #
 # `revokeRefreshToken` and `refreshTokenMaxReuse` joined the realm fields with
@@ -199,10 +219,18 @@ REDACTED = "<redacted by realm_check>"
 # `publicClient` flipped to `false` is a confidential-client posture the app
 # cannot actually keep (it ships with no secret it can hide), and a dropped
 # `commerce-api` scope is a token with no audience or permission claim.
+#
+# `webOrigins` joined last and on the same terms, and it is the one field here
+# whose ABSENCE is the defect rather than a widening. Every other key above
+# describes something a wrong value would let an attacker do; this one decides
+# whether the client's own token exchange completes at all, and Keycloak's
+# default is to grant nothing. A client that authenticates from a page — a
+# browser SPA, or a packaged app's WebView — and declares no origin gets a
+# token the browser then discards unread.
 REALM_FIELDS = ("accessTokenLifespan", "revokeRefreshToken", "refreshTokenMaxReuse")
 CLIENT_FIELDS = ("clientId", "standardFlowEnabled", "implicitFlowEnabled",
                  "directAccessGrantsEnabled", "publicClient", "redirectUris",
-                 "defaultClientScopes")
+                 "defaultClientScopes", "webOrigins")
 CLIENT_ATTRIBUTES = ("use.refresh.tokens", "access.token.lifespan",
                      "pkce.code.challenge.method")
 
@@ -492,8 +520,10 @@ def check_realm(realm: dict, kind: str, lifetime: int) -> list[str]:
     problems += check_implicit_flow(clients)
     if named:
         problems += check_browser_client(named[0], kind)
+        problems += check_web_origins(named[0], BROWSER_CLIENT)
     if mobile:
         problems += check_mobile_client(mobile[0])
+        problems += check_web_origins(mobile[0], MOBILE_CLIENT)
         problems += check_refresh_token_rotation(realm)
     return problems
 
@@ -762,6 +792,152 @@ def check_mobile_client(client: dict) -> list[str]:
             "missing carries no audience and no permission claim, and every "
             "request it makes is refused with nothing in this file's own "
             "checks to say why")
+    return problems
+
+
+def canonical_origin(text: object) -> str | None:
+    """The origin a browser would send for this text, or `None` if it is not one.
+
+    `Gateway.Api/Program.cs` arrived here from six review rounds of enumerating
+    the ways a string can fail to be an origin — blank, `*`, unparseable, a
+    trailing slash, a path, a default port — and replaced all six with one
+    equality against the canonical form, because the ways a string can BE an
+    origin are finite and the ways it can fail are not. This is that equality
+    in Python, for the same reason: Keycloak compares the `Origin` header as
+    text, so an entry that is not character-for-character what a browser sends
+    matches nothing and grants nothing.
+
+    A custom scheme passes, which is the one place this parts company with the
+    gateway's version, and the difference is in what consumes the value rather
+    than in taste. `WithOrigins` feeds ASP.NET Core's own matcher and the
+    gateway refuses anything but http(s) at startup; a realm entry is a string
+    Keycloak compares, and a packaged WebView really does send
+    `capacitor://localhost`. Refusing it here would refuse the origin this
+    whole obligation exists for.
+    """
+    if not isinstance(text, str):
+        return None
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc or parts.username is not None:
+        return None
+
+    scheme = parts.scheme.lower()
+    host = parts.netloc.lower()
+    default = DEFAULT_PORTS.get(scheme)
+    if default is not None and host.endswith(f":{default}"):
+        host = host[: -len(default) - 1]
+
+    canonical = f"{scheme}://{host}"
+    return canonical if canonical == text else None
+
+
+def redirects_imply_a_browser_origin(client: dict) -> bool:
+    """Whether `+` would derive anything from this client's own redirect URIs."""
+    redirects = client.get("redirectUris")
+    if not isinstance(redirects, list):
+        return False
+    return any(isinstance(uri, str) and uri.lower().startswith(WEB_SCHEMES) for uri in redirects)
+
+
+def check_web_origins(client: dict, client_id: str) -> list[str]:
+    """The origin the client's own page sends, which is not its redirect URI.
+
+    Two fields, two hops, and conflating them is how this obligation went
+    missing. `redirectUris` is where Keycloak sends the authorization code — a
+    system-browser redirect back into the app, and `blueprint://auth/callback`
+    is right for it. `webOrigins` decides whose script Keycloak will let READ a
+    token response, and the exchange is a second request the page makes itself:
+    from `https://localhost` or `capacitor://localhost` in a packaged WebView,
+    and from the site's own origin in a browser. Getting the first right says
+    nothing about the second.
+
+    The failure it catches produces no error anywhere, which is why it wants a
+    gate rather than a test. `application/x-www-form-urlencoded` is
+    CORS-safelisted and a public client sends no `Authorization` header, so
+    there is no preflight to fail: the request goes out, Keycloak mints a
+    token, and the browser discards the response because no
+    `Access-Control-Allow-Origin` came back with it. The authorization code is
+    spent, `fetch` rejects with a `TypeError`, and the server, the suite and CI
+    all stay green. It was read out of the realm rather than observed on a
+    device —
+    https://github.com/alexander-shamray/blueprint-frontend/issues/6.
+
+    THE OBLIGATION IS ASSERTED AND THE VALUES ARE NOT, which is a decision
+    rather than a shortcut. What a packaged app's browser origin actually is comes
+    out of `capacitor.config.ts` in the other repository — `androidScheme` and
+    `iosScheme`, both of which that repository is reconsidering as this is
+    written — so a literal pair here would pin this gate to another repo's
+    current default and fail a realm that had been corrected rather than one
+    that had drifted. What this gate can see without owning that file is the
+    shape, and the shape is where all three silent failures live: nothing
+    granted, everything granted, and an entry no browser will ever send.
+
+    It judges both named clients rather than the native one alone. The
+    obligation belongs to the token exchange and not to a platform: `web-app`
+    runs the same exchange from a browser, satisfies this today, and would
+    break the same silent way if someone cleared the field in a console.
+    Keycloak's own built-in clients are not judged, here or anywhere in this
+    file — `account` and `account-console` ship with no origins and need none.
+    """
+    problems: list[str] = []
+    origins = client.get("webOrigins")
+
+    if origins is None:
+        return [
+            f"client {client_id!r} declares no webOrigins. Keycloak answers a "
+            "token request with no Access-Control-Allow-Origin unless the "
+            "client grants one, and a browser discards a response it may not "
+            "read — so the exchange succeeds, the authorization code is spent, "
+            "and the sign-in fails with nothing on either side saying why"
+        ]
+    if not isinstance(origins, list):
+        return [
+            f"client {client_id!r} has a webOrigins that is not an array. "
+            "Keycloak serialises this field as one in an export and in an "
+            "admin-API answer alike, so anything else is a hand-edited realm "
+            "rather than a configured one"
+        ]
+    if not origins:
+        return [
+            f"client {client_id!r} declares an empty webOrigins, which grants "
+            "CORS to nothing at all. That is the absent field above written "
+            "out, and it is worse for reading in a console as though the "
+            "question had been answered"
+        ]
+
+    if ORIGIN_WILDCARD in origins:
+        problems.append(
+            f"client {client_id!r} declares {ORIGIN_WILDCARD!r} as a web "
+            "origin, which answers every page on the internet with "
+            "Access-Control-Allow-Origin: *. The token endpoint still demands "
+            "an authorization code and its PKCE verifier, so this is a "
+            "widening rather than an exploit — but it is one no client here "
+            "needs, and naming the origins costs a line")
+
+    if ORIGIN_FROM_REDIRECTS in origins and not redirects_imply_a_browser_origin(client):
+        problems.append(
+            f"client {client_id!r} declares {ORIGIN_FROM_REDIRECTS!r} as a web "
+            "origin, which means the origins its own redirectUris imply — and "
+            "none of this client's redirectUris is on a web scheme, so it "
+            "implies none. At runtime that is an empty webOrigins; in a "
+            "console it reads as a setting")
+
+    malformed = [index for index, origin in enumerate(origins)
+                 if origin not in (ORIGIN_WILDCARD, ORIGIN_FROM_REDIRECTS)
+                 and canonical_origin(origin) is None]
+    if malformed:
+        problems.append(
+            f"client {client_id!r} has a webOrigins entry that is not a "
+            f"browser origin at index {', '.join(str(i) for i in malformed)}. "
+            "One is a scheme, a host, and a port only when it is not the "
+            "scheme's default — exactly as a browser serialises it — because "
+            "Keycloak compares the Origin header as text and anything else "
+            "matches nothing. The value is deliberately not echoed: userinfo "
+            "survives the authority form, and a guard that rejects a "
+            "credential must not be the thing that publishes it")
     return problems
 
 

@@ -32,13 +32,15 @@ import realm_check
 
 
 def browser(**overrides) -> dict:
-    """A compliant deployed `web-app`: no refresh token, standard flow, no password grant."""
+    """A compliant deployed `web-app`: no refresh token, standard flow, no password
+    grant, and an origin its own token exchange can be read from."""
     client = {
         "clientId": realm_check.BROWSER_CLIENT,
         "standardFlowEnabled": True,
         "implicitFlowEnabled": False,
         "directAccessGrantsEnabled": False,
         "publicClient": True,
+        "webOrigins": ["https://spa.example"],
         "attributes": {"use.refresh.tokens": "false"},
     }
     client.update(overrides)
@@ -47,7 +49,8 @@ def browser(**overrides) -> dict:
 
 def mobile(**overrides) -> dict:
     """A compliant `mobile-app`: refresh token, standard flow, no password grant,
-    PKCE-only authentication, and the fixed redirect URI and default scope."""
+    PKCE-only authentication, the fixed redirect URI and default scope, and the
+    packaged WebView's own two browser origins."""
     client = {
         "clientId": realm_check.MOBILE_CLIENT,
         "standardFlowEnabled": True,
@@ -55,6 +58,7 @@ def mobile(**overrides) -> dict:
         "directAccessGrantsEnabled": False,
         "publicClient": True,
         "redirectUris": ["blueprint://auth/callback"],
+        "webOrigins": ["https://localhost", "capacitor://localhost"],
         "defaultClientScopes": [
             "web-origins", "acr", "profile", "roles", "basic", "commerce-api", "email"],
         "attributes": {"use.refresh.tokens": "true", "pkce.code.challenge.method": "S256"},
@@ -370,6 +374,118 @@ class TheMobileClient(Fixture):
         credential baked into the binary rather than a real one."""
         client = mobile(publicClient=False)
         self.assertIn("publicClient", self.one(realm(browser(), client)))
+
+
+class TheWebOrigins(Fixture):
+    """The CORS grant the token exchange needs, which is not the redirect URI.
+
+    Every case here is one silence at a different depth — the field absent, the
+    field empty, the field holding something no browser will ever send — and
+    none of the three produces an error anywhere. Keycloak mints the token and
+    the browser discards it unread, so this gate is the only thing in the
+    system positioned to see them.
+    """
+
+    def test_an_absent_web_origins_is_caught(self):
+        """Keycloak's default grants nothing, so silence is the violation."""
+        client = mobile()
+        del client["webOrigins"]
+        self.assertIn("declares no webOrigins", self.one(realm(browser(), client)))
+
+    def test_an_empty_web_origins_is_caught(self):
+        """The state the shipped realm was actually in when this was written."""
+        self.assertIn("empty webOrigins", self.one(realm(browser(), mobile(webOrigins=[]))))
+
+    def test_the_browser_client_is_judged_on_it_too(self):
+        """The obligation belongs to the token exchange and not to a platform.
+
+        `web-app` runs the same exchange from a browser and satisfies this
+        already; what the case pins is that it would be caught breaking the
+        same silent way, rather than that the native client is special.
+        """
+        self.assertIn(realm_check.BROWSER_CLIENT,
+                      self.one(realm(browser(webOrigins=[]), mobile())))
+
+    def test_a_wildcard_is_caught(self):
+        self.assertIn("Access-Control-Allow-Origin: *",
+                      self.one(realm(browser(), mobile(webOrigins=["*"]))))
+
+    def test_plus_derives_nothing_from_a_custom_scheme_redirect(self):
+        """Granting nothing while reading as answered is the worst of the three."""
+        self.assertIn("implies none", self.one(realm(browser(), mobile(webOrigins=["+"]))))
+
+    def test_plus_is_accepted_where_the_redirect_uris_do_imply_an_origin(self):
+        """Which is why `+` is judged against the client rather than banned.
+
+        `web-app`'s redirects are http(s) URLs, so `+` really does resolve to
+        origins there — refusing it outright would fail a deployed realm that
+        was configured correctly.
+        """
+        spa = browser(webOrigins=["+"], redirectUris=["https://spa.example/*"])
+        self.assertEqual(self.problems(realm(spa, mobile())), [])
+
+    def test_a_custom_scheme_origin_is_accepted(self):
+        """The one place this parts company with the gateway's identical guard.
+
+        `Cors:Origins` refuses a non-http(s) scheme at startup because
+        `WithOrigins` feeds ASP.NET Core's matcher; Keycloak compares a string,
+        and `capacitor://localhost` is what an iOS WebView sends.
+        """
+        self.assertEqual(
+            self.problems(realm(browser(), mobile(webOrigins=["capacitor://localhost"]))), [])
+
+    def test_a_trailing_slash_is_not_an_origin(self):
+        self.assertIn("index 0", self.one(realm(browser(), mobile(webOrigins=["https://localhost/"]))))
+
+    def test_a_path_is_not_an_origin(self):
+        self.assertIn(
+            "index 0", self.one(realm(browser(), mobile(webOrigins=["https://localhost/auth"]))))
+
+    def test_a_default_port_spelled_out_is_not_what_a_browser_sends(self):
+        """The seventh value, one repository over, that six earlier clauses all passed."""
+        self.assertIn(
+            "index 0", self.one(realm(browser(), mobile(webOrigins=["https://localhost:443"]))))
+
+    def test_a_port_the_scheme_does_not_imply_is_part_of_the_origin(self):
+        """The other half: dropping every port would refuse §14.1's own dev server."""
+        self.assertEqual(
+            self.problems(realm(browser(), mobile(webOrigins=["http://localhost:5173"]))), [])
+
+    def test_an_uppercased_host_is_not_what_a_browser_sends(self):
+        self.assertIn(
+            "index 0", self.one(realm(browser(), mobile(webOrigins=["https://LOCALHOST"]))))
+
+    def test_a_web_origins_that_is_not_an_array_is_refused(self):
+        self.assertIn("not an array",
+                      self.one(realm(browser(), mobile(webOrigins="https://localhost"))))
+
+    def test_a_non_string_entry_is_refused_rather_than_parsed(self):
+        self.assertIn("index 0", self.one(realm(browser(), mobile(webOrigins=[5]))))
+
+    def test_every_malformed_entry_is_named_and_the_valid_one_is_not(self):
+        found = self.one(realm(browser(), mobile(
+            webOrigins=["https://localhost", "https://localhost/", "not-an-origin"])))
+        self.assertIn("index 1, 2", found)
+
+    def test_the_offending_value_is_not_echoed(self):
+        """Userinfo survives the authority form, so the message carries an index.
+
+        `Gateway.Api/Program.cs` reached this the same way and says so: the
+        guard that rejects a credential must not be the thing that publishes
+        it, because an exception message reaches the logs where §13.4's
+        redactor cannot see an interpolated value.
+        """
+        withheld = self.MARKER
+        found = self.one(realm(browser(), mobile(
+            webOrigins=[f"https://demo:{withheld}@localhost"])))
+        self.assertIn("index 0", found)
+        self.assertNotIn(withheld, found)
+
+    # Referenced rather than written into the case above, on
+    # `WhatTheGateHolds`'s reasoning: §15.1's secret scan reads a
+    # credential-shaped name assigned a literal, and a userinfo password spelled
+    # at its use site is exactly that shape.
+    MARKER = "marker-withheld"
 
 
 class TheRefreshTokenRotation(Fixture):
@@ -954,7 +1070,8 @@ class WhatTheGateHolds(unittest.TestCase):
     Redacting the credential keys was the first answer and it was not enough:
     the object still held every other field of a realm, so the property rested
     on a deny-list staying complete as Keycloak grows fields. The projection
-    inverts it — twelve named keys survive and nothing else does.
+    inverts it — the keys `REALM_FIELDS`, `CLIENT_FIELDS` and
+    `CLIENT_ATTRIBUTES` name survive, and nothing else does.
     """
 
     # The three fixture values live here and are REFERENCED below rather than
@@ -979,6 +1096,7 @@ class WhatTheGateHolds(unittest.TestCase):
                 "standardFlowEnabled": True,
                 "implicitFlowEnabled": False,
                 "directAccessGrantsEnabled": False,
+                "webOrigins": ["https://spa.example"],
                 "secret": self.MARKERS["client"],
                 "protocolMappers": [{"name": "x"}],
                 # `realm_client` is the unlisted-attribute example the test
@@ -995,6 +1113,7 @@ class WhatTheGateHolds(unittest.TestCase):
                 "directAccessGrantsEnabled": False,
                 "publicClient": True,
                 "redirectUris": ["blueprint://auth/callback"],
+                "webOrigins": ["https://localhost", "capacitor://localhost"],
                 "defaultClientScopes": [
                     "web-origins", "acr", "profile", "roles", "basic", "commerce-api", "email"],
                 "attributes": {"use.refresh.tokens": "true",
@@ -1018,6 +1137,7 @@ class WhatTheGateHolds(unittest.TestCase):
         self.assertEqual(client["clientId"], realm_check.BROWSER_CLIENT)
         self.assertTrue(client["standardFlowEnabled"])
         self.assertEqual(client["attributes"]["use.refresh.tokens"], "false")
+        self.assertEqual(client["webOrigins"], ["https://spa.example"])
         self.assertEqual(
             realm_check.check_realm(held, realm_check.DEPLOYED, 300), [])
 
