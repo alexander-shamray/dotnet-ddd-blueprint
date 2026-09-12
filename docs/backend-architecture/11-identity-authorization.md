@@ -213,6 +213,22 @@ Validation is cheap; assume the network is hostile.
 > `mobile-app` existed; `web-app` is unaffected, for the reason already given
 > above — it holds none for a rotation rule to bind.
 >
+> **The native client needs a CORS grant as well, and it is a hop this
+> section had not named.** The authorization request leaves the app for the
+> system browser and returns through `blueprint://auth/callback`, which is
+> what `redirectUris` is for. The token exchange is a **second** request, made
+> by the app's own page straight to Keycloak, and `webOrigins` is the only
+> thing deciding whether the script that made it may read the answer. Keycloak
+> grants none by default and OAuth's form encoding is CORS-safelisted, so a
+> client declaring no origin does not fail anywhere a log would show it: the
+> token is minted, the browser discards it unread, and the authorization code
+> is spent. `mobile-app` therefore declares the packaged app's browser origins,
+> and `realm_check.py` holds every client it names to declaring one — the
+> obligation and not the values, because what those origins are is settled by
+> the sibling repository's Capacitor configuration rather than here.
+> [ADR-046](adr/ADR-046-each-client-declares-a-browser-origin-and-the-gate-asserts-the-shape.md)
+> is the decision; the Compose export is where the literal values live.
+>
 > This client was added to the realm by a backend pull request in service of
 > the Angular/Ionic reference client's native build, specified in the sibling
 > `blueprint-frontend` repository's

@@ -54,20 +54,41 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   required and has no default: §11.2 documents the password grant as a local
   affordance a deployed realm turns off, and §14.1's documented login *is* that
   grant.
+- **Both named clients declare a browser origin.** Keycloak grants CORS to
+  none by default, and a client that runs its token exchange from a page
+  cannot read its own token response without one — silently, because the
+  request is CORS-safelisted and nothing preflights. The entries are judged
+  for shape and not for value: non-empty, no `*`, no `+` on a client whose
+  redirect URIs imply no origin, and each remaining entry equal to the
+  canonical origin a browser would send
+  ([ADR-046](../../docs/backend-architecture/adr/ADR-046-each-client-declares-a-browser-origin-and-the-gate-asserts-the-shape.md)).
+- **`mobile-app`'s own shape**, and the realm's refresh-token rotation behind
+  it — cited rather than enumerated here, because
+  [ADR-044](../../docs/backend-architecture/adr/ADR-044-the-native-client-holds-a-refresh-token-and-the-realm-rotates-it.md)
+  argues each of them and `check_mobile_client` is the list.
 
 ## What it does not check
 
+- **Whether a declared browser origin is the right one.** The shape is checkable
+  from here and the value is not: what a packaged app's browser origin actually
+  is comes out of `capacitor.config.ts` in the `blueprint-frontend`
+  repository, which this one neither owns nor can read. A realm naming an
+  origin the app does not send passes this gate and fails on the device. What
+  closes that gap is the round trip nothing has run yet — a packaged build
+  reaching the stack — and it is the sibling repository's open task, not a
+  check this file can grow.
 - **`ClockSkew`.** It is the other half of ADR-033's 330 and it is not a realm
   setting at all — it is `Common.Web`'s, pinned by `JwtAuthenticationTests`.
   An operator told to configure a realm `ClockSkew` would go looking for
   something that does not exist.
 - **Everything else in the realm — and it does not merely decline to check
-  it, it does not hold it.** What the gate judges is a projection of six named
-  fields, so the audience mapper, the permission vocabulary, the client scopes,
-  the two development logins and every client secret are not in the object at
-  all. Those belong to `tests/Common.Web.Tests/RealmImportTests.cs`, which is
-  not superseded. The projection is also why no message here can leak a
-  credential: there is none to leak.
+  it, it does not hold it.** What the gate judges is a projection of the keys
+  `REALM_FIELDS`, `CLIENT_FIELDS` and `CLIENT_ATTRIBUTES` name, so the audience
+  mapper, the permission vocabulary, the client scopes, the two development
+  logins and every client secret are not in the object at all. Those belong
+  to `tests/Common.Web.Tests/RealmImportTests.cs`, which is not superseded.
+  The projection is also why no message here can leak a credential: there is
+  none to leak.
 - **A realm with more clients than the ceiling.** The client list is read in
   one request asking for far more than any realm this platform will have, and a
   response *at* that ceiling stops the run rather than being truncated.
