@@ -292,9 +292,13 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              the restore, bin for the compile, because a
                              restore alone writes every obj entry — since "no
                              obj/ under src/" is also what a checkout nobody
-                             touched looks like. Its suite runs in the fast
-                             job and the gate behind the build, the split the
-                             gate cannot avoid
+                             touched looks like. It covers `bin/` and `obj/`
+                             and says so: §4.1's wider "nothing a build wrote"
+                             needs a before to compare against, so the CI step
+                             beside this one asks git instead, which is sound
+                             there and nowhere else. Its suite runs in the
+                             fast job and the gate behind the build, the split
+                             the gate cannot avoid
 deploy/canary/               §15.5's rollout — the ladder as JSON, the weight
                              arithmetic and the promote/rollback verdict as
                              tested stdlib Python, and one file that reads

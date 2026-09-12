@@ -187,6 +187,14 @@ restored and stopped. `--no-restore` on the build is fine once a restore has
 happened; what is not fine is reading the result as a verdict on a tree nobody
 built, and the gate refuses that case by name rather than passing it.
 
+**What it does not cover is the rest of §4.1's sentence**, and that is
+deliberate. The gate refuses a `bin/` or `obj/` under either root, which holds
+on any working tree; "nothing a build wrote" is wider, and checking it needs a
+before to compare against. CI has one — the checkout — so a step beside the
+gate asks `git status --porcelain --ignored -- src tests` instead. There is no
+local equivalent, because run here it would report whatever you are in the
+middle of writing.
+
 **The closure gate and the locality gate need a pull request**, so their live
 runs take a number and a `gh` session that CI has and a checkout does not:
 

@@ -172,15 +172,23 @@ tree a gate reads are the same tree, and that a directory left out of a skip
 list is a gate reading too much rather than a gate reading a build.
 
 **That `src/` and `tests/` hold nothing a build wrote is checked rather than
-asserted**, by `.github/output-gate/` behind the solution build in CI. It needs
-checking because `Directory.Build.props` does not fully cause it: what the
-outcome actually rests on, and why it is held by a gate rather than by a second
-MSBuild property, is argued in that file's own Output comment. The gate asserts
-the positive half too, because the negative one is weaker than it looks — a
-tree with no `obj/` under `src/` is also what a checkout nobody has touched
-looks like, so every project must be found under `artifacts/obj/` and
-`artifacts/bin/` too, the first written by a restore and the second only by a
-compile.
+asserted**, behind the solution build in CI, and it takes two checks because
+the sentence has two halves. `.github/output-gate/` refuses a `bin/` or `obj/`
+anywhere under either root — the residue the redirect is about, and a claim
+true of any working tree, so the gate runs anywhere. That the trees are
+*otherwise* untouched needs a before to compare against, so it is a workflow
+step rather than part of the gate: the checkout supplies the before, and
+anything git can then see under `src/` or `tests/` is something the restore or
+the build put there.
+
+It needs checking at all because `Directory.Build.props` does not fully cause
+it: what the outcome rests on, and why it is held by a gate rather than by a
+second MSBuild property, is argued in that file's own Output comment. The gate
+asserts the positive half too, because the negative one is weaker than it
+looks: a tree with no `obj/` under `src/` is also what a checkout nobody has
+touched looks like, so every project must be found under `artifacts/obj/` and
+`artifacts/bin/` as well, the first written by a restore and the second only by
+a compile.
 
 `.slnx` is the XML solution format, supported by the SDK from .NET 9 and by
 Visual Studio 2022 17.13 onward. The `global.json` pin below already puts every

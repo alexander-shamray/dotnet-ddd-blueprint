@@ -448,8 +448,36 @@ jobs:
       # What the outcome rests on, and why it is held by a gate rather than by
       # a second MSBuild property, is argued in `Directory.Build.props`' Output
       # comment, which owns that decision. None of it is repeated here.
-      - name: The build wrote nothing into src/ or tests/
+      - name: No build output landed beside the source
         run: python .github/output-gate/output_gate.py
+
+      # The other half of §4.1, and the half only CI can check. The gate above
+      # is portable: it refuses `bin/` and `obj/` anywhere under the source
+      # trees, which is the residue the redirect is about, and it holds on any
+      # working tree whatever else the developer has in flight. §4.1's sentence
+      # is wider than that — *nothing* a build wrote — and the wider claim needs
+      # a before as well as an after.
+      #
+      # Here there is one. `actions/checkout` left these trees byte-identical to
+      # the commit and nothing between it and this line may touch them, so
+      # anything git can see is something the restore or the build put there: a
+      # generated source file, an output directory under a name the gate does
+      # not know, or a tracked file rewritten in place. `--ignored` because
+      # build output is ignored by construction, and the case that hides is the
+      # one worth catching.
+      #
+      # A step rather than part of the gate, because the gate cannot know what
+      # the tree looked like first. Run locally this check would fail on the
+      # developer's own work in progress, which is a gate nobody would keep —
+      # so it lives where the precondition is true and nowhere else.
+      - name: The build left src/ and tests/ byte-identical
+        run: |
+          wrote="$(git status --porcelain --ignored -- src tests)"
+          if [ -n "$wrote" ]; then
+            echo "The restore or the build wrote into a source tree:"
+            echo "$wrote"
+            exit 1
+          fi
 
       # THREE STAGES, and PR-25 is what made them three (§15.1's UT → IT).
       #

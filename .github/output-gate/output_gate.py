@@ -1,14 +1,27 @@
 #!/usr/bin/env python3
-"""Fail the build when it has written into `src/` or `tests/`.
+"""Fail the build when it has left output directories beside the source.
 
-Section 4.1 states it as a property of the tree: `src/` and `tests/` hold
-source, and nothing a build wrote. `Directory.Build.props` is what makes that
-true, and its `Output` comment is where it is argued — which SDK default the
-outcome actually rests on, and why pinning that property here would have been
-the worse trade. This gate keeps the outcome true and deliberately carries
-none of that reasoning: a second copy is a second thing to reconcile when the
-SDK moves, and citing the owner instead is `docs/change-locality.md` section
-2's whole point.
+Section 4.1 states the invariant as a property of the tree: `src/` and
+`tests/` hold source, and nothing a build wrote. **This gate checks the half
+of that sentence which is true of any working tree** — that no `bin/` or
+`obj/` exists under either root, which is the residue the `artifacts/`
+redirect is about and the only kind this repository has ever grown. The other
+half, that the trees are otherwise untouched, needs a *before* to compare
+against and is therefore asserted in `ci.yml` beside this gate's own step,
+where `actions/checkout` supplies one. Run here it would fail on whatever the
+developer has in flight, which is a gate nobody would keep.
+
+**Saying so is the point rather than a disclaimer.** A gate whose name claims
+more than it checks is the failure this repository keeps paying for, and the
+honest split is one portable check that holds everywhere plus one stronger
+check where its precondition is real.
+
+`Directory.Build.props` is what makes the invariant true, and its `Output`
+comment is where it is argued — which SDK default the outcome actually rests
+on, and why pinning that property here would have been the worse trade. This
+gate keeps the outcome true and deliberately carries none of that reasoning:
+a second copy is a second thing to reconcile when the SDK moves, and citing
+the owner instead is `docs/change-locality.md` section 2's whole point.
 
 What belongs to this file is the shape of the check, and it has three parts.
 
