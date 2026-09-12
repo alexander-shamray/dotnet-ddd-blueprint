@@ -167,6 +167,23 @@ ORIGIN_FROM_REDIRECTS = "+"
 # served from `blueprint://`.
 WEB_SCHEME_NAMES = ("http", "https")
 
+# What a host may contain once a browser has finished with it, for the two
+# schemes a browser normalises. THE SET IS THE POINT: three review rounds each
+# found one more spelling that survived the previous round's fix — a port, then
+# an IPv4 shorthand and an IDN, then a percent escape — because each fix named
+# the spelling it had just been shown. A gate that enumerates what is wrong
+# loses to a generator of wrong things, which is the argument `Gateway.Api`
+# already makes about origins one repository over. So this names what is
+# RIGHT, and every spelling outside it is refused whether or not anyone has
+# thought of it yet.
+#
+# Deliberately narrower than WHATWG, which permits more than this in a domain.
+# It has to admit every host a realm will really name — a DNS name, a service
+# name, `localhost`, a dotted quad — and refusing anything else costs an
+# operator one hand-edit, where admitting a spelling a browser rewrites costs
+# a sign-in that fails with nothing anywhere saying why.
+HOST_CHARACTERS = re.compile(r"[a-z0-9._-]+")
+
 # A redirect URI's scheme, when it has one at all. The alternative reading of
 # a URI with none is what this pattern exists to keep visible: Keycloak
 # resolves a RELATIVE redirect against the client's `rootUrl` before taking an
@@ -848,13 +865,22 @@ def canonical_origin(text: object) -> str | None:
 
     The stdlib has no WHATWG host parser and this gate may not add a
     dependency, so the answer is to REFUSE what cannot be canonicalised here
-    rather than to canonicalise it: a host that is an IP literal must already
-    be the form `ipaddress` prints, a host that looks like an IPv4 attempt and
-    is not one is refused outright, and a non-ASCII host is refused because
-    the punycode a browser sends is the spelling the realm needs. Refusing is
-    the safe direction — a realm rejected here is a realm whose origin can be
-    rewritten by hand into the form a browser sends, where the alternative is
-    a gate that passes an origin matching nothing.
+    rather than to canonicalise it: an IP literal must already be the form
+    `ipaddress` prints, a host that looks like an IPv4 attempt and is not one
+    is refused outright, a non-ASCII host is refused because the punycode a
+    browser sends is the spelling the realm needs, and on a special scheme the
+    host must be drawn from `HOST_CHARACTERS`. Refusing is the safe direction —
+    a realm rejected here is a realm whose origin can be rewritten by hand into
+    the form a browser sends, where the alternative is a gate that passes an
+    origin matching nothing.
+
+    **`HOST_CHARACTERS` is a set and the others are spellings, and that
+    difference is the lesson rather than a detail.** The port fix, the IPv4 and
+    IDN fix and the percent-escape fix each arrived in its own review round,
+    each naming the spelling it had just been shown — which is enumerating what
+    is wrong against something that generates wrong things faster than a list
+    grows. The set names what is right instead, so the fourth spelling is
+    already refused.
     """
     if not isinstance(text, str):
         return None
@@ -875,6 +901,8 @@ def canonical_origin(text: object) -> str | None:
     if not host.isascii():
         return None
 
+    scheme = parts.scheme.lower()
+
     if ":" in host:
         # An IPv6 literal, which an origin brackets and `hostname` does not.
         try:
@@ -882,7 +910,14 @@ def canonical_origin(text: object) -> str | None:
                 return None
         except ValueError:
             return None
-    elif host.rsplit(".", 1)[-1].isdigit() or host.lower().startswith("0x"):
+    elif scheme in WEB_SCHEME_NAMES and not HOST_CHARACTERS.fullmatch(host):
+        # A browser normalises the host of a special scheme before sending it —
+        # percent escapes are decoded, among other things — so anything outside
+        # the set above is a spelling that arrives in an `Origin` header as
+        # something else. A custom scheme's host is opaque and is left alone.
+        return None
+
+    if ":" not in host and (host.rsplit(".", 1)[-1].isdigit() or host.startswith("0x")):
         # WHATWG parses a host whose last label is numeric as IPv4 and
         # serialises it as a dotted quad, so anything reaching here that is an
         # IPv4 attempt has to be that quad already. `ipaddress` refuses
@@ -894,7 +929,6 @@ def canonical_origin(text: object) -> str | None:
         except ValueError:
             return None
 
-    scheme = parts.scheme.lower()
     authority = f"[{host}]" if ":" in host else host
     if port is not None and port != DEFAULT_PORTS.get(scheme):
         authority = f"{authority}:{port}"
@@ -930,7 +964,17 @@ def redirects_cannot_imply_an_origin(client: dict) -> bool:
     argument is that it asserts only what it can see.
     """
     redirects = client.get("redirectUris")
-    if not isinstance(redirects, list) or not redirects:
+    # Absent and empty are not "cannot tell" — they are the answer. Keycloak
+    # drops `+` and derives from what is left, and what is left is nothing, so
+    # a client declaring `+` and no redirect at all is the empty webOrigins
+    # this obligation was filed about, reached by a second route. The first
+    # draft folded both into the conservative branch and let them through.
+    if redirects is None or (isinstance(redirects, list) and not redirects):
+        return True
+    # Malformed stays conservative: a `redirectUris` that is not an array is a
+    # hand-edited realm, and what Keycloak would make of it is not this gate's
+    # to predict.
+    if not isinstance(redirects, list):
         return False
     for uri in redirects:
         if not isinstance(uri, str):

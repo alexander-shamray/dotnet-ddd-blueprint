@@ -549,6 +549,51 @@ class TheWebOrigins(Fixture):
         self.assertIn("index 0", self.one(realm(browser(), mobile(
             webOrigins=["http://[0:0:0:0:0:0:0:1]"]))))
 
+    def test_a_percent_escape_in_a_special_scheme_host_is_refused(self):
+        """A browser decodes it, so the realm holds a string it never sends."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://%6cocalhost"]))))
+
+    def test_a_host_outside_the_permitted_set_is_refused_whatever_it_is(self):
+        """The set is what closes the class, rather than one more named spelling."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://local_host!.example"]))))
+
+    def test_a_custom_scheme_host_is_left_opaque(self):
+        """The rule is scheme-aware: a browser normalises no host it does not own.
+
+        Without this case the set above reads as a global ban on percent
+        escapes, and the next reader would apply it to the one scheme this
+        whole obligation exists to serve.
+        """
+        self.assertEqual(self.problems(realm(browser(), mobile(
+            webOrigins=["capacitor://%6cocalhost"]))), [])
+
+    def test_a_service_name_and_a_dotted_domain_still_pass(self):
+        """The other half of the set: it has to admit what a realm really names."""
+        self.assertEqual(self.problems(realm(
+            browser(webOrigins=["https://id.example.com"]),
+            mobile(webOrigins=["http://keycloak-svc:8080"]))), [])
+
+    # `+` beside no redirect URI at all derives nothing, which is the same
+    # empty grant reached by a second route. The first draft folded absent and
+    # empty into the conservative branch and let both through.
+
+    def test_plus_with_no_redirect_uris_at_all_is_caught(self):
+        client = browser(webOrigins=["+"])
+        client.pop("redirectUris", None)
+        self.assertIn("they imply none", self.one(realm(client, mobile())))
+
+    def test_plus_with_an_empty_redirect_uri_list_is_caught(self):
+        self.assertIn("they imply none", self.one(realm(
+            browser(webOrigins=["+"], redirectUris=[]), mobile())))
+
+    def test_a_malformed_redirect_uri_list_stays_conservative(self):
+        """Not an array is a hand-edited realm, and what Keycloak makes of it
+        is not this gate's to predict — so `+` is not judged on it."""
+        self.assertEqual(self.problems(realm(
+            browser(webOrigins=["+"], redirectUris="not-an-array"), mobile())), [])
+
     def test_the_offending_value_is_not_echoed(self):
         """Userinfo survives the authority form, so the message carries an index.
 
