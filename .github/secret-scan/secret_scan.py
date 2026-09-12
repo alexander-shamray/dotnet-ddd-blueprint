@@ -50,23 +50,32 @@ DEFAULT_ALLOWED = GATE_DIR / "allowed"
 # excluded because this gate is deliberately about the tree and not the history,
 # and scanning the pack would be a claim to a coverage it does not have.
 #
-# `artifacts` is where §4.1 puts build output, and naming it is what keeps this
-# list complete rather than nearly so. `obj` and `bin` happen to match two of
-# the four subdirectories under it; `publish` and `package` are build output by
-# the same argument and match neither, so without this entry a `dotnet publish`
-# or `dotnet pack` run before the gate would put a rendered appsettings in
-# front of a scanner that has no business reading one. The `obj` and `bin`
-# entries stay for a checkout made before the output moved.
+# Every name here is matched by basename at every depth, which is right for all
+# of them: `obj`, `bin` and `__pycache__` occur nested by nature, and a rule
+# that only caught the topmost one would be a skip list in name only.
 SKIP_DIRS = frozenset({
     ".git",
     ".vs",
     ".idea",
-    "artifacts",
     "obj",
     "bin",
     "node_modules",
     "__pycache__",
     "TestResults",
+})
+
+# Declined at the repository root and nowhere else, which is the distinction the
+# set above cannot express. §4.1 puts build output in one `artifacts/` directory
+# at the top of the tree, so that is the only path where the name means output —
+# `obj` and `bin` match two of the directories under it and the rest match
+# neither, so without this entry a `dotnet publish` or `dotnet pack` run before
+# the gate would put a rendered appsettings in front of a scanner that has no
+# business reading one. Anywhere else the name means whatever somebody called
+# their code, and a basename match would take a source tree out of this gate's
+# reach without saying so: exactly the silent narrowing CLAUDE.md names as this
+# repository's most-repeated failure, arriving through the fix for it.
+SKIP_ROOT_DIRS = frozenset({
+    "artifacts",
 })
 
 # A file is binary when its first block holds a NUL. That is a heuristic and it
@@ -618,8 +627,10 @@ def walk(root: Path) -> list[Path]:
     plain checkout with nothing installed.
     """
     found: list[Path] = []
+    root_path = Path(root)
     for directory, subdirectories, filenames in os.walk(root):
-        subdirectories[:] = sorted(name for name in subdirectories if name not in SKIP_DIRS)
+        skip = SKIP_DIRS | SKIP_ROOT_DIRS if Path(directory) == root_path else SKIP_DIRS
+        subdirectories[:] = sorted(name for name in subdirectories if name not in skip)
         for name in sorted(filenames):
             found.append(Path(directory) / name)
     return found
