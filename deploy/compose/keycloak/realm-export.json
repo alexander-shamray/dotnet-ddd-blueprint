@@ -1031,7 +1031,7 @@
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [ "blueprint://auth/callback" ],
-      "webOrigins": [],
+      "webOrigins": [ "https://localhost", "capacitor://localhost" ],
       "defaultClientScopes": [ "web-origins", "acr", "profile", "roles", "basic", "commerce-api", "email" ],
       "attributes": {
         "realm_client": "false",
