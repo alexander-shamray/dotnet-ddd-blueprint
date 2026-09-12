@@ -91,7 +91,16 @@ docs/superpowers/            one frozen spec + plan per PR, written before it
 global.json                  SDK pin (§4.4)
 .config/dotnet-tools.json    dotnet-ef, pinned to the EF Core version —
                              `dotnet tool restore` is the whole setup
-Directory.Build.props        shared MSBuild settings, ADR-019's analyser policy
+Directory.Build.props        shared MSBuild settings, ADR-019's analyser
+                             policy, and §4.1's artifacts/ output location —
+                             the SDK reads UseArtifactsOutput from this file
+                             and nowhere else, so a project file that spells
+                             it is read too late and does nothing
+artifacts/                   every build's output, git-ignored: bin, obj,
+                             publish and package, one subdirectory per
+                             project. Not in the committed tree; listed
+                             because it is the half of §4.1 that explains why
+                             the walks under src/ carry no build output
 Directory.Packages.props     central package management, exact pins
 Platform.slnx                the solution, and the only list of its projects
 coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)

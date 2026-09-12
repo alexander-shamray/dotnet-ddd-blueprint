@@ -4,12 +4,18 @@
 .claude/settings.local.json
 
 # .NET — the solution described in docs/backend-architecture/ lands here.
+#
+# artifacts/ is where every build writes, per Directory.Build.props's Output
+# group: one directory at the root rather than a bin/ and an obj/ beside each
+# of the thirty-odd project files. The bin/ and obj/ rules below are no longer
+# what keeps output out of a commit — they are what keeps a checkout that
+# predates that change from committing what it already has on disk.
+artifacts/
 [Bb]in/
 [Oo]bj/
 [Dd]ebug/
 [Rr]elease/
 [Tt]est[Rr]esults/
-artifacts/
 *.user
 *.suo
 *.userprefs
