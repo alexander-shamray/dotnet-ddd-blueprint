@@ -220,6 +220,18 @@ jobs:
         working-directory: .github/coverage
         run: python -m unittest
 
+      # The output gate's suite lands here for the coverage reporter's reason
+      # and splits from its gate for the one reason neither of those has: the
+      # gate reads what a build left behind, so it cannot run until the build
+      # job has built something, while its suite builds every tree it walks and
+      # needs no SDK at all. Splitting them costs a job boundary and buys the
+      # suite a failure ahead of the fork — which matters most for the tests
+      # that read this checkout rather than a fixture, because those are the
+      # ones that go red when the gate stops looking at a source tree.
+      - name: Test the output gate
+        working-directory: .github/output-gate
+        run: python -m unittest
+
       - name: Every deployable is matched by a path filter
         run: python .github/pipeline-gate/pipeline_gate.py filters
 
@@ -423,6 +435,22 @@ jobs:
       - run: dotnet restore Platform.slnx
 
       - run: dotnet build Platform.slnx --no-restore -c Release
+
+      # §4.1's "src/ and tests/ hold source, and nothing a build wrote", turned
+      # from a property somebody measured once into one CI re-measures. It runs
+      # HERE — immediately behind the build and ahead of the three stages —
+      # because the restore above is what writes `project.assets.json` and the
+      # build is what writes the rest, so this is the first moment the question
+      # has an answer and the last one before anything else touches the tree.
+      #
+      # What it is actually holding is an SDK default rather than a line in
+      # `Directory.Build.props`: `UseArtifactsOutput` moves
+      # `MSBuildProjectExtensionsPath` as well as the intermediate output, and
+      # that is the half that keeps a restore from leaving an `obj/` beside
+      # every `.csproj`. The gate's own docstring argues why pinning the
+      # property instead would have been the worse trade.
+      - name: The build wrote nothing into src/ or tests/
+        run: python .github/output-gate/output_gate.py
 
       # THREE STAGES, and PR-25 is what made them three (§15.1's UT → IT).
       #
