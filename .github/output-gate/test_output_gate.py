@@ -6,7 +6,8 @@ that argument cannot survive is a walk that reads no tree: every assertion the
 gate makes is satisfied by an empty set, and an empty set is exactly what a
 renamed source root, a moved solution file or a typo in `SOURCE_ROOTS`
 produces. So most of what follows is about the subject rather than the verdict
-— a green result has to be a claim about 33 projects and not about none.
+— a green result has to be a claim about the projects this repository holds
+and not about none of them.
 
 The last class of test reads the real repository instead of a fixture, because
 the subject is the one thing a fixture cannot check: a tree this gate does not
@@ -25,16 +26,19 @@ from pathlib import Path
 import output_gate
 
 
-def tree(root: Path, projects: dict[str, str], built: list[str] | None = None,
-         listed: list[str] | None = None) -> None:
+def tree(root: Path, projects: dict[str, str], restored: list[str] | None = None,
+         built: list[str] | None = None, listed: list[str] | None = None) -> None:
     """A repository in miniature: some projects, a solution, some output.
 
     `projects` maps a project name to the directory it lives in, relative to
-    the root. `built` names the projects that have an `artifacts/obj/` entry
-    and defaults to all of them; `listed` names the ones the solution carries
-    and defaults to the same. The two defaults are what makes a test that
-    overrides one of them a test about exactly that difference.
+    the root. `restored` names the projects with an `artifacts/obj/` entry and
+    `built` those with an `artifacts/bin/` one; `listed` names the ones the
+    solution carries. All three default to every project, which is what makes a
+    test that overrides one of them a test about exactly that difference — and
+    what lets `restored` and `built` be set apart to reproduce a tree that has
+    been restored and not compiled.
     """
+    restored = list(projects) if restored is None else restored
     built = list(projects) if built is None else built
     listed = list(projects) if listed is None else listed
 
@@ -43,8 +47,10 @@ def tree(root: Path, projects: dict[str, str], built: list[str] | None = None,
         project_directory.mkdir(parents=True, exist_ok=True)
         (project_directory / f"{name}.csproj").write_text("<Project />", encoding="utf-8")
 
-    for name in built:
+    for name in restored:
         (root / "artifacts" / "obj" / name).mkdir(parents=True, exist_ok=True)
+    for name in built:
+        (root / "artifacts" / "bin" / name).mkdir(parents=True, exist_ok=True)
 
     entries = "".join(
         f'  <Project Path="{projects[name]}/{name}.csproj" />\n' for name in listed)
@@ -81,7 +87,7 @@ class CleanTree(TemporaryRepository):
 
         self.assertEqual(code, 0)
         # The count is in the success line because a gate that says only "OK"
-        # says the same thing whether it looked at 33 projects or at none.
+        # says the same thing whether it looked at every project or at none.
         self.assertIn("2 project(s)", output)
 
     def test_a_directory_merely_named_like_output_elsewhere_is_not_a_finding(self) -> None:
@@ -195,6 +201,24 @@ class Subject(TemporaryRepository):
         self.assertEqual(code, 1)
         self.assertIn("which is not on disk", output)
 
+    def test_a_project_moved_without_the_solution_following_it_fails(self) -> None:
+        """Reconciled by path, so a move is visible where a stem is not.
+
+        The two views hold the same project name and different directories. A
+        gate comparing names alone sees one set and reports nothing, which is
+        the defect that keeps a solution and a tree silently out of step.
+        """
+        tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain"})
+        (self.root / "Platform.slnx").write_text(
+            '<Solution>\n  <Project Path="src/Catalog/Catalog.Domain/'
+            'Catalog.Domain.csproj" />\n</Solution>\n', encoding="utf-8")
+
+        code, output = run(self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("not on disk", output)
+        self.assertIn("absent from Platform.slnx", output)
+
     def test_a_subject_mismatch_suppresses_the_other_findings(self) -> None:
         """Three reports of one defect is a worse report than one.
 
@@ -205,7 +229,7 @@ class Subject(TemporaryRepository):
         tree(self.root,
              {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain",
               "Payments.Domain": "src/Services/Payments/Payments.Domain"},
-             built=[], listed=["Catalog.Domain"])
+             restored=[], built=[], listed=["Catalog.Domain"])
         (self.root / "src/Services/Catalog/Catalog.Domain/obj").mkdir()
 
         code, output = run(self.root)
@@ -226,10 +250,69 @@ class Subject(TemporaryRepository):
         self.assertEqual(code, 0, output)
 
 
+class DuplicateNames(TemporaryRepository):
+    """Two projects, one artefacts entry, and a lookup that cannot say which."""
+
+    def test_two_projects_sharing_a_stem_fail(self) -> None:
+        tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain"})
+        second = self.root / "src/Services/Payments/Catalog.Domain"
+        second.mkdir(parents=True)
+        (second / "Catalog.Domain.csproj").write_text("<Project />", encoding="utf-8")
+        (self.root / "Platform.slnx").write_text(
+            '<Solution>\n  <Project Path="src/Services/Catalog/Catalog.Domain/'
+            'Catalog.Domain.csproj" />\n  <Project Path="src/Services/Payments/'
+            'Catalog.Domain/Catalog.Domain.csproj" />\n</Solution>\n', encoding="utf-8")
+
+        code, output = run(self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("more than one project", output)
+        self.assertIn("src/Services/Payments/Catalog.Domain/Catalog.Domain.csproj", output)
+
+    def test_a_duplicate_cannot_borrow_the_other_project_s_artefacts(self) -> None:
+        """The defect the name check exists to stop, stated as a test.
+
+        Both projects resolve to one `artifacts/obj/` and `artifacts/bin/`
+        entry, so a gate that looked output up by name would find it present
+        for both and report a project whose output it never located.
+        """
+        tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain"})
+        second = self.root / "src/Services/Payments/Catalog.Domain"
+        second.mkdir(parents=True)
+        (second / "Catalog.Domain.csproj").write_text("<Project />", encoding="utf-8")
+        (self.root / "Platform.slnx").write_text(
+            '<Solution>\n  <Project Path="src/Services/Catalog/Catalog.Domain/'
+            'Catalog.Domain.csproj" />\n  <Project Path="src/Services/Payments/'
+            'Catalog.Domain/Catalog.Domain.csproj" />\n</Solution>\n', encoding="utf-8")
+
+        code, output = run(self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("1 finding(s)", output)
+        self.assertNotIn("does not exist", output)
+
+
 class BuildRan(TemporaryRepository):
     """The positive half: the output is somewhere, and it is there."""
 
-    def test_a_tree_nobody_built_fails_rather_than_passing_cleanly(self) -> None:
+    def test_a_tree_nobody_touched_fails_rather_than_passing_cleanly(self) -> None:
+        tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain",
+                         "Catalog.Domain.Tests": "tests/Catalog.Domain.Tests"},
+             restored=[], built=[])
+
+        code, output = run(self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("no restore has run here", output)
+
+    def test_a_restored_but_uncompiled_tree_fails(self) -> None:
+        """The finding this check was rewritten for.
+
+        `dotnet restore Platform.slnx` creates every `artifacts/obj/<Project>/`
+        and no `artifacts/bin/` entry at all — measured on this repository — so
+        a gate asking only about `obj` reports a fully built solution to anyone
+        who has restored and stopped there.
+        """
         tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain",
                          "Catalog.Domain.Tests": "tests/Catalog.Domain.Tests"},
              built=[])
@@ -239,17 +322,27 @@ class BuildRan(TemporaryRepository):
         self.assertEqual(code, 1)
         self.assertIn("no build has run here", output)
 
-    def test_no_build_is_one_finding_and_not_one_per_project(self) -> None:
+    def test_nothing_run_at_all_is_one_finding_and_not_one_per_project(self) -> None:
         """A different defect from a project the build skipped, worded as one."""
         tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain",
                          "Catalog.Domain.Tests": "tests/Catalog.Domain.Tests",
                          "Gateway.Api": "src/Gateway/Gateway.Api"},
-             built=[])
+             restored=[], built=[])
 
         code, output = run(self.root)
 
         self.assertEqual(code, 1)
         self.assertIn("1 finding(s)", output)
+
+    def test_a_single_project_the_restore_skipped_is_named(self) -> None:
+        tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain",
+                         "Catalog.Domain.Tests": "tests/Catalog.Domain.Tests"},
+             restored=["Catalog.Domain"])
+
+        code, output = run(self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("artifacts/obj/Catalog.Domain.Tests/", output)
 
     def test_a_single_project_the_build_skipped_is_named(self) -> None:
         tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain",
@@ -259,7 +352,7 @@ class BuildRan(TemporaryRepository):
         code, output = run(self.root)
 
         self.assertEqual(code, 1)
-        self.assertIn("artifacts/obj/Catalog.Domain.Tests/", output)
+        self.assertIn("artifacts/bin/Catalog.Domain.Tests/", output)
 
 
 class ThisRepository(unittest.TestCase):
@@ -274,18 +367,25 @@ class ThisRepository(unittest.TestCase):
         listed = output_gate.solution_projects(output_gate.REPO_ROOT / "Platform.slnx")
         self.assertTrue(listed, "Platform.slnx lists no projects")
 
-        for name, path in sorted(listed.items()):
+        for path in listed:
             self.assertIn(
                 path.parts[0], output_gate.SOURCE_ROOTS,
-                f"{name} is under {path.parts[0]}/, which output_gate.SOURCE_ROOTS does "
-                f"not name - the gate walks past it and reports on the rest")
+                f"{path.as_posix()} is under {path.parts[0]}/, which "
+                f"output_gate.SOURCE_ROOTS does not name - the gate walks past it and "
+                f"reports on the rest")
 
     def test_the_walk_and_the_solution_agree_about_this_checkout(self) -> None:
         """The gate's own subject check, run against the repository itself."""
         walked = output_gate.walked_projects(output_gate.REPO_ROOT)
         listed = output_gate.solution_projects(output_gate.REPO_ROOT / "Platform.slnx")
 
-        self.assertEqual(sorted(walked), sorted(listed))
+        self.assertEqual(walked, listed)
+
+    def test_this_repository_has_no_two_projects_sharing_a_name(self) -> None:
+        """The precondition every lookup below the subject check relies on."""
+        walked = output_gate.walked_projects(output_gate.REPO_ROOT)
+
+        self.assertEqual(output_gate.find_duplicate_names(walked), [])
 
     def test_the_gitignore_still_ignores_what_this_gate_refuses(self) -> None:
         """The gate reports residue; `.gitignore` is why it is never committed.

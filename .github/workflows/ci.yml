@@ -438,17 +438,16 @@ jobs:
 
       # §4.1's "src/ and tests/ hold source, and nothing a build wrote", turned
       # from a property somebody measured once into one CI re-measures. It runs
-      # HERE — immediately behind the build and ahead of the three stages —
-      # because the restore above is what writes `project.assets.json` and the
-      # build is what writes the rest, so this is the first moment the question
-      # has an answer and the last one before anything else touches the tree.
+      # HERE — behind both the restore and the build, ahead of the three test
+      # stages — because it reads what the two of them left: the restore writes
+      # one half of what would otherwise land beside a `.csproj` and the build
+      # the other, so this is the first moment the question has an answer and
+      # the last one before anything else touches the tree. It is also why the
+      # gate wants both steps above it rather than just the second.
       #
-      # What it is actually holding is an SDK default rather than a line in
-      # `Directory.Build.props`: `UseArtifactsOutput` moves
-      # `MSBuildProjectExtensionsPath` as well as the intermediate output, and
-      # that is the half that keeps a restore from leaving an `obj/` beside
-      # every `.csproj`. The gate's own docstring argues why pinning the
-      # property instead would have been the worse trade.
+      # What the outcome rests on, and why it is held by a gate rather than by
+      # a second MSBuild property, is argued in `Directory.Build.props`' Output
+      # comment, which owns that decision. None of it is repeated here.
       - name: The build wrote nothing into src/ or tests/
         run: python .github/output-gate/output_gate.py
 

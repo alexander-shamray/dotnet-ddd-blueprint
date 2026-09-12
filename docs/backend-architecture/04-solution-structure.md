@@ -172,14 +172,15 @@ tree a gate reads are the same tree, and that a directory left out of a skip
 list is a gate reading too much rather than a gate reading a build.
 
 **That `src/` and `tests/` hold nothing a build wrote is checked rather than
-asserted**, by `.github/output-gate/` behind every CI build, and the reason it
-needs checking is that `Directory.Build.props` does not fully cause it. Two
-lines there ask for the *output* to move; what also moves is
-`MSBuildProjectExtensionsPath`, the property that decides where a restore
-writes `project.assets.json` — an SDK default this repository neither sets nor
-can hold. The gate asserts both halves, because the negative one is weaker than
-it looks: a tree with no `obj/` under `src/` is also what a checkout nobody has
-built looks like, so every project must be found in `artifacts/obj/` as well.
+asserted**, by `.github/output-gate/` behind the solution build in CI. It needs
+checking because `Directory.Build.props` does not fully cause it: what the
+outcome actually rests on, and why it is held by a gate rather than by a second
+MSBuild property, is argued in that file's own Output comment. The gate asserts
+the positive half too, because the negative one is weaker than it looks — a
+tree with no `obj/` under `src/` is also what a checkout nobody has touched
+looks like, so every project must be found under `artifacts/obj/` and
+`artifacts/bin/` too, the first written by a restore and the second only by a
+compile.
 
 `.slnx` is the XML solution format, supported by the SDK from .NET 9 and by
 Visual Studio 2022 17.13 onward. The `global.json` pin below already puts every

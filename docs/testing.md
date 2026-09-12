@@ -176,13 +176,16 @@ dotnet build Platform.slnx
 py -3.12 .github/output-gate/output_gate.py
 ```
 
-The restore is in the list rather than assumed. It is what writes
-`project.assets.json` and the generated `.nuget.g.props`, which are the files
-that used to make an `obj/` appear beside a `.csproj` without anything being
-compiled at all — so a run with no restore behind it leaves the gate's main
-question untouched. `--no-restore` on the build is fine once one has happened;
-what is not fine is reading the result as a verdict on a tree nobody built,
-and the gate refuses that case by name rather than passing it.
+Both lines are in the list rather than assumed, because the gate asks a
+separate question of each. The restore writes `project.assets.json` and the
+generated `.nuget.g.props`, which are what would otherwise put an `obj/` beside
+a `.csproj` with nothing compiled at all; the build writes everything else. So
+the gate looks for each project under `artifacts/obj/` *and* under
+`artifacts/bin/`: a restore alone creates every `obj` entry and no `bin` entry,
+so asking only the first would report a fully built solution to anyone who
+restored and stopped. `--no-restore` on the build is fine once a restore has
+happened; what is not fine is reading the result as a verdict on a tree nobody
+built, and the gate refuses that case by name rather than passing it.
 
 **The closure gate and the locality gate need a pull request**, so their live
 runs take a number and a `gh` session that CI has and a checkout does not:

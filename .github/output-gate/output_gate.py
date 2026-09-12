@@ -2,46 +2,39 @@
 """Fail the build when it has written into `src/` or `tests/`.
 
 Section 4.1 states it as a property of the tree: `src/` and `tests/` hold
-source, and nothing a build wrote. `Directory.Build.props` is what makes it
-true — one `artifacts/` directory at the repository root takes `bin/`, `obj/`
-and `publish/` for every project — and this gate is what keeps it true, because
-the claim rests on a default the repository does not own.
+source, and nothing a build wrote. `Directory.Build.props` is what makes that
+true, and its `Output` comment is where it is argued — which SDK default the
+outcome actually rests on, and why pinning that property here would have been
+the worse trade. This gate keeps the outcome true and deliberately carries
+none of that reasoning: a second copy is a second thing to reconcile when the
+SDK moves, and citing the owner instead is `docs/change-locality.md` section
+2's whole point.
 
-**The default is wider than its name, and that is the whole reason for a
-gate.** `UseArtifactsOutput` moves `MSBuildProjectExtensionsPath` as well as
-the intermediate output, so `project.assets.json` and the generated
-`.nuget.g.props` land in `artifacts/obj/<Project>/` too and a restore leaves
-nothing beside a `.csproj` either. Measured on the SDK `global.json` pins:
+What belongs to this file is the shape of the check, and it has three parts.
 
-    dotnet msbuild <any>.csproj -getProperty:MSBuildProjectExtensionsPath
-    -> <repo>/artifacts/obj/<Project>/
-
-Nothing in `Directory.Build.props` asks for that, and nothing in this
-repository can hold a future SDK to it.
-
-**Setting `MSBuildProjectExtensionsPath` explicitly was the other option and is
-the worse one.** It would restate a path the SDK already derives — a second
-place to be wrong about one value — and NuGet resolves it at restore time and
-again at build time, failing on an assets file it cannot find if the two
-disagree. That buys no coverage at all: the property would be pinned and the
-outcome still unmeasured. A gate costs a second on every run where the default
-holds, and says so on the day it stops.
-
-**It proves a build ran before it reports that one wrote nothing.** "No `obj/`
-under `src/`" is satisfied by a checkout nobody has built, which is the single
-state a green result must not cover, so every project must also have its
-`artifacts/obj/<Project>/`. That is the positive half of the same claim: the
-output is somewhere, and it is there. It is also why this gate runs behind the
-build rather than in the fast job with the licence gate — it reads what a build
-did, so a restore and a compile are in front of it either way.
+**It proves a restore and a build both ran before reporting that neither wrote
+here.** "No `obj/` under `src/`" is satisfied by a checkout nobody has
+touched, which is the single state a pass must not cover — so every project
+must also be found under `artifacts/obj/` *and* under `artifacts/bin/`. The
+two are one assertion only by accident: a restore alone creates every
+`artifacts/obj/<Project>/` and no `artifacts/bin/` at all, measured on this
+repository, so `obj` answers *did the restore's output land in `artifacts/`*
+and `bin` answers *did anything compile*. Asking only the first would print
+that every project was built after a bare `dotnet restore`.
 
 **The subject is checked rather than assumed.** A walk that finds no project
-satisfies every assertion below, and a gate that quietly stops looking at the
+satisfies every assertion above, and a gate that quietly stops looking at the
 newest tree is this repository's most-repeated failure. So the projects found
-on disk under `src/` and `tests/` are compared with the ones `Platform.slnx`
-lists, in both directions: a project on disk and not in the solution is one
-`dotnet build Platform.slnx` never built, and a project in the solution and not
-on disk is a tree this walk is not reading.
+on disk under `src/` and `tests/` are reconciled with the ones
+`Platform.slnx` lists, in both directions.
+
+**Reconciled by path, because the artefacts layout keys on the name.**
+`UseArtifactsOutput` pivots a project's output on `MSBuildProjectName`, which
+is the `.csproj` stem — so two projects whose files share a stem share one
+`artifacts/obj/` entry, and a gate keying its two views on the stem as well
+would let the listed project stand in for an unlisted one and report a subject
+it never looked at. Paths reconcile; a duplicate stem is refused on its own
+terms, before anything is looked up by name.
 
     python .github/output-gate/output_gate.py
 """
@@ -51,6 +44,7 @@ import argparse
 import os
 import sys
 import xml.etree.ElementTree as ElementTree
+from collections import Counter
 from pathlib import Path
 
 GATE_DIR = Path(__file__).resolve().parent
@@ -66,15 +60,14 @@ SOURCE_ROOTS = ("src", "tests")
 # set — `[Bb]in/` and `[Oo]bj/` — rather than a second opinion about it.
 OUTPUT_DIRECTORY_NAMES = frozenset({"bin", "obj"})
 
+# The two `artifacts/` subdirectories a project must appear under, and what
+# each one establishes. Ordered, because a project missing from both should be
+# reported against the earlier stage rather than twice.
+ARTIFACT_STAGES = (("obj", "restore"), ("bin", "build"))
 
-def solution_projects(solution: Path) -> dict[str, Path]:
-    """Every project `Platform.slnx` lists, keyed by MSBuild project name.
 
-    The key is the file stem because that is what the artefacts layout pivots
-    on: `UseArtifactsOutput` puts a project's output under
-    `artifacts/obj/$(MSBuildProjectName)/`, and `MSBuildProjectName` is the
-    `.csproj` filename without its extension. Keying on anything else would
-    make the lookup below a guess.
+def solution_projects(solution: Path) -> list[Path]:
+    """Every project `Platform.slnx` lists, as repository-relative paths.
 
     Stdlib `ElementTree` rather than `defusedxml`, on the licence gate's
     argument one directory over and for the same reason: no dependency, and the
@@ -84,7 +77,7 @@ def solution_projects(solution: Path) -> dict[str, Path]:
     """
     root = ElementTree.parse(solution).getroot()
 
-    projects: dict[str, Path] = {}
+    projects: list[Path] = []
     for element in root.iter("Project"):
         path = element.get("Path")
         if not path:
@@ -93,31 +86,28 @@ def solution_projects(solution: Path) -> dict[str, Path]:
         # backslashes by anything that has been through a Windows tool. Both
         # spell the same project, and a gate that reads only one of them
         # reports a whole solution missing from disk.
-        relative = Path(path.replace("\\", "/"))
-        projects[relative.stem] = relative
-    return projects
+        projects.append(Path(path.replace("\\", "/")))
+    return sorted(set(projects))
 
 
-def walked_projects(repo_root: Path) -> dict[str, Path]:
-    """Every `.csproj` on disk under the source roots, keyed the same way."""
-    projects: dict[str, Path] = {}
+def walked_projects(repo_root: Path) -> list[Path]:
+    """Every `.csproj` on disk under the source roots, spelled the same way."""
+    projects: list[Path] = []
     for source_root in SOURCE_ROOTS:
-        for csproj in sorted((repo_root / source_root).rglob("*.csproj")):
-            projects[csproj.stem] = csproj.relative_to(repo_root)
-    return projects
+        for csproj in (repo_root / source_root).rglob("*.csproj"):
+            projects.append(csproj.relative_to(repo_root))
+    return sorted(projects)
 
 
-def compare_subject(walked: dict[str, Path], listed: dict[str, Path]) -> list[str]:
+def compare_subject(walked: list[Path], listed: list[Path]) -> list[str]:
     """The two views of what this gate is looking at, reconciled.
 
     Both directions are findings, and they are different defects. A project the
     solution lists and the walk cannot find means the walk is reading the wrong
     tree, and every assertion made from it is worth nothing. A project the walk
-    finds and the solution does not list is one CI never compiles, so its output
-    location has never been exercised by anything.
+    finds and the solution does not list is one CI never compiles, so its
+    output location has never been exercised by anything.
     """
-    findings: list[str] = []
-
     if not walked and not listed:
         roots = " and ".join(f"{name}/" for name in SOURCE_ROOTS)
         return [
@@ -125,19 +115,79 @@ def compare_subject(walked: dict[str, Path], listed: dict[str, Path]) -> list[st
             f"lists none. Every check below passes over an empty set, which is a "
             f"gate reporting on nothing rather than a tree with nothing wrong"]
 
-    for name in sorted(set(listed) - set(walked)):
-        findings.append(
-            f"Platform.slnx lists {listed[name].as_posix()}, which is not on disk. "
-            f"This walk is reading a tree the solution does not describe, so its "
-            f"other findings are about a different repository")
+    findings: list[str] = []
 
-    for name in sorted(set(walked) - set(listed)):
+    for path in sorted(set(listed) - set(walked)):
         findings.append(
-            f"{walked[name].as_posix()} is on disk and absent from Platform.slnx. "
+            f"Platform.slnx lists {path.as_posix()}, which is not on disk. This walk "
+            f"is reading a tree the solution does not describe, so its other findings "
+            f"are about a different repository")
+
+    for path in sorted(set(walked) - set(listed)):
+        findings.append(
+            f"{path.as_posix()} is on disk and absent from Platform.slnx. "
             f"`dotnet build Platform.slnx` never builds it, so nothing has ever "
             f"measured where its output lands")
 
     return findings
+
+
+def find_duplicate_names(walked: list[Path]) -> list[str]:
+    """Two projects cannot share a stem, because their output would collide.
+
+    This is a defect in the repository before it is a problem for the gate:
+    `UseArtifactsOutput` pivots on `MSBuildProjectName`, so a shared stem means
+    a shared `artifacts/obj/` and `artifacts/bin/` entry. It is checked here
+    rather than left to the SDK because everything below this line looks a
+    project up by name, and a name that means two projects makes those lookups
+    answer for whichever one it happens to find.
+    """
+    counted = Counter(path.stem for path in walked)
+
+    findings: list[str] = []
+    for name in sorted(name for name, count in counted.items() if count > 1):
+        sharing = ", ".join(
+            path.as_posix() for path in walked if path.stem == name)
+        findings.append(
+            f"{name} is the MSBuild project name of more than one project: {sharing}. "
+            f"They share one artifacts/obj/ and artifacts/bin/ entry, so neither this "
+            f"gate nor the SDK can tell their output apart")
+    return findings
+
+
+def find_missing_output(artifacts: Path, walked: list[Path]) -> list[str]:
+    """Every walked project appears under `artifacts/obj/` and `artifacts/bin/`.
+
+    This is the assertion that makes a green result mean something. Without it
+    the gate passes on a fresh checkout, on a failed build, and on a build of
+    some other solution — three states in which `src/` holds no output for the
+    uninteresting reason.
+
+    The two stages are asked separately because a tree can be in between them.
+    `dotnet restore` writes every `artifacts/obj/<Project>/` and not one
+    `artifacts/bin/` entry, so a gate asking only about `obj` reports a fully
+    built solution to anyone who has run restore and nothing else.
+    """
+    names = sorted(path.stem for path in walked)
+
+    for directory, stage in ARTIFACT_STAGES:
+        missing = [name for name in names if not (artifacts / directory / name).is_dir()]
+        if not missing:
+            continue
+
+        if len(missing) == len(names):
+            return [
+                f"artifacts/{directory}/ has an entry for no project at all: no "
+                f"{stage} has run here. Run `dotnet restore Platform.slnx` and "
+                f"`dotnet build Platform.slnx` first - this gate reads what they "
+                f"leave behind, and a tree nobody built holds output nowhere"]
+
+        return [
+            f"artifacts/{directory}/{name}/ does not exist, though the project does. "
+            f"The {stage} skipped it, or its output went somewhere this gate is not "
+            f"looking" for name in missing]
+
+    return []
 
 
 def find_residue(repo_root: Path) -> list[str]:
@@ -164,45 +214,22 @@ def find_residue(repo_root: Path) -> list[str]:
     return findings
 
 
-def find_missing_output(artifacts: Path, walked: dict[str, Path]) -> list[str]:
-    """Every walked project must have an `artifacts/obj/<Project>/`.
-
-    This is the assertion that makes a green result mean something. Without it
-    the gate passes on a fresh checkout, on a failed build, and on a build of
-    some other solution — three states in which `src/` holds no output for the
-    uninteresting reason.
-    """
-    obj = artifacts / "obj"
-    missing = sorted(name for name in walked if not (obj / name).is_dir())
-    if not missing:
-        return []
-
-    if len(missing) == len(walked):
-        return [
-            f"artifacts/obj/ has an entry for none of the {len(walked)} project(s): no "
-            f"build has run here. Run `dotnet build Platform.slnx` first - this gate "
-            f"reads what a build did, and a tree nobody built holds no output anywhere"]
-
-    findings: list[str] = []
-    for name in missing:
-        findings.append(
-            f"artifacts/obj/{name}/ does not exist, though {walked[name].as_posix()} "
-            f"does. The build skipped that project, or its output went somewhere this "
-            f"gate is not looking")
-    return findings
-
-
 def audit(repo_root: Path) -> list[str]:
     """Every finding, in the order a reader can act on them.
 
     The subject comes first on purpose: a mismatch there changes what the other
-    two checks were even about, so reporting them alongside would be three
-    findings where there is one.
+    checks were even about, so reporting them alongside would be three findings
+    where there is one. A duplicate name comes second for the narrower version
+    of the same reason — every lookup after it is by name.
     """
     walked = walked_projects(repo_root)
     listed = solution_projects(repo_root / "Platform.slnx")
 
     findings = compare_subject(walked, listed)
+    if findings:
+        return findings
+
+    findings = find_duplicate_names(walked)
     if findings:
         return findings
 
@@ -229,8 +256,8 @@ def main(argv: list[str] | None = None) -> int:
     roots = " and ".join(f"{name}/" for name in SOURCE_ROOTS)
     # Output stays ASCII. A gate whose job is to report a failure must not be the
     # thing that fails, and stdout encoding on a runner is not ours to assume.
-    print(f"Output gate: {len(projects)} project(s) under {roots}. Every one built into "
-          f"artifacts/obj/, and neither tree holds a bin/ or obj/ of its own.")
+    print(f"Output gate: {len(projects)} project(s) under {roots}. Every one restored "
+          f"and built into artifacts/, and neither tree holds a bin/ or obj/ of its own.")
     return 0
 
 
