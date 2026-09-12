@@ -412,7 +412,7 @@ class TheWebOrigins(Fixture):
 
     def test_plus_derives_nothing_from_a_custom_scheme_redirect(self):
         """Granting nothing while reading as answered is the worst of the three."""
-        self.assertIn("implies none", self.one(realm(browser(), mobile(webOrigins=["+"]))))
+        self.assertIn("they imply none", self.one(realm(browser(), mobile(webOrigins=["+"]))))
 
     def test_plus_is_accepted_where_the_redirect_uris_do_imply_an_origin(self):
         """Which is why `+` is judged against the client rather than banned.
@@ -466,6 +466,50 @@ class TheWebOrigins(Fixture):
         found = self.one(realm(browser(), mobile(
             webOrigins=["https://localhost", "https://localhost/", "not-an-origin"])))
         self.assertIn("index 1, 2", found)
+
+    # Four spellings the first draft of `canonical_origin` let through, because
+    # it compared the raw `netloc` and `urlsplit` does not look at a port until
+    # `.port` is read. Copilot found them on PR #203; each is a string no
+    # browser can produce, passing a check whose whole subject is what a
+    # browser produces.
+
+    def test_a_non_numeric_port_is_refused(self):
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://localhost:not-a-port"]))))
+
+    def test_a_port_above_the_range_is_refused(self):
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://localhost:70000"]))))
+
+    def test_a_bare_trailing_colon_is_refused(self):
+        """A browser sends no port rather than an empty one."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://localhost:"]))))
+
+    def test_a_zero_padded_port_is_refused(self):
+        """`:0443` parses as 443 and is not how 443 is spelled — nor is it sent."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://localhost:0443"]))))
+
+    def test_an_ipv6_literal_origin_is_accepted(self):
+        """The brackets an origin carries and `hostname` strips are put back.
+
+        Rebuilding the authority is what refuses the four cases above, and this
+        is the case that rebuilding could have broken silently: refusing every
+        IPv6 origin would have looked exactly like the fix working.
+        """
+        self.assertEqual(self.problems(realm(browser(), mobile(
+            webOrigins=["http://[::1]:8080"]))), [])
+
+    def test_a_relative_redirect_is_not_evidence_that_plus_derives_nothing(self):
+        """Keycloak resolves a relative redirect against the client's `rootUrl`.
+
+        So `+` beside `redirectUris: ["/*"]` is an ordinary configuration whose
+        origin this gate cannot see, and the first draft failed it — refusing a
+        realm that was correct. The gate holds no `rootUrl` and does not guess.
+        """
+        spa = browser(webOrigins=["+"], redirectUris=["/*"])
+        self.assertEqual(self.problems(realm(spa, mobile())), [])
 
     def test_the_offending_value_is_not_echoed(self):
         """Userinfo survives the authority form, so the message carries an index.

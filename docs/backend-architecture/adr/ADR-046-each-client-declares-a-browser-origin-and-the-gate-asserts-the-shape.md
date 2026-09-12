@@ -16,11 +16,11 @@ different hops, and treating the first as though it covered the second is how
 the native client shipped unable to sign anybody in. The authorization request
 leaves the app for the system browser and returns through
 `blueprint://auth/callback`, which `redirectUris` correctly names. The **token
-exchange is a second request, made by the app's own page** — from
-`https://localhost` on Android or `capacitor://localhost` on iOS — straight to
-Keycloak, and `webOrigins` is the only thing that decides whether the script
-that made it may read the answer. `mobile-app` declared none, so Keycloak
-granted none.
+exchange is a second request, made by the app's own page** — from the
+WebView's own loopback origin, which differs by platform and is the Compose
+export's to state — straight to Keycloak, and `webOrigins` is the only thing
+that decides whether the script that made it may read the answer. `mobile-app`
+declared none, so Keycloak granted none.
 
 **Nothing in the system could report it, which is what makes it a gate's job
 rather than a test's.** The request carries
@@ -68,18 +68,16 @@ correctly; accepting it everywhere would accept, on the native client, a value
 that grants exactly as much as the empty array this record exists to refuse and
 reads in a console as though the question had been answered.
 
-**The canonical-origin equality is `Gateway.Api`'s, brought over deliberately.**
-`Program.cs` reached it after six review rounds spent enumerating the ways a
-string can fail to be an origin — blank, `*`, unparseable, a trailing slash, a
-path — and the seventh value found was `https://spa.example:443`, which every
-one of those clauses permits and no browser ever sends. One equality against
-the canonical form replaced the lot, because the ways a string can *be* an
-origin are finite and the ways it can fail are not. Keycloak compares the
-`Origin` header as text, so the same reasoning holds here for the same reason.
-The one difference is that a custom scheme passes: `WithOrigins` feeds ASP.NET
-Core's matcher and the gateway refuses anything but http(s) at startup, where a
-realm entry is a string, and `capacitor://localhost` is what an iOS WebView
-actually sends.
+**The canonical-origin equality is `Gateway.Api`'s, brought over
+deliberately.** That guard decides the same question by one equality against a
+canonical form rather than by enumerating the ways a string can fail to be an
+origin, and its own comment in `Program.cs` argues why — the ways a string can
+*be* an origin are finite and the ways it can fail are not. Keycloak compares
+the `Origin` header as text, so the reasoning transfers intact. The one
+difference is that a custom scheme passes: `WithOrigins` feeds ASP.NET Core's
+matcher, so the gateway refuses anything but http(s) at startup, where a realm
+entry is a string Keycloak compares and the iOS WebView's scheme is one it
+will be handed.
 
 **Consequences.**
 
@@ -87,10 +85,10 @@ actually sends.
   widening is smaller than it reads.** CORS decides whether a *script* may read
   a response, never whether a request may be made — the token endpoint still
   demands an authorization code and its PKCE verifier, neither of which an
-  attacker's page has. `https://localhost` is the WebView origin of every
-  Capacitor app on an Android device, which sounds like the objection and is
-  not one: another app on that device can already make the identical request
-  from native code, where CORS has never applied. What the grant adds is that a
+  attacker's page has. The Android loopback origin is shared by every
+  Capacitor app on a device, which sounds like the objection and is not one:
+  another app on that device can already make the identical request from
+  native code, where CORS has never applied. What the grant adds is that a
   page at that origin may read the answer, and on a packaged device the page
   there is this app's own.
 - **The gate cannot tell a right origin from a wrong one, and says so.** A
@@ -105,9 +103,9 @@ actually sends.
   calling the **gateway** from its WebView needs either that guard relaxed —
   which pairs a custom scheme with `AllowCredentials()` and is not an obvious
   yes — or `iosScheme: 'https'` in the sibling repository, so that both
-  platforms present `https://localhost`. **This record covers the realm hop
-  only**, and reading it as having settled the gateway hop is the mistake the
-  two hops' similarity invites.
+  platforms present the same http(s) loopback origin. **This record covers the
+  realm hop only**, and reading it as having settled the gateway hop is the
+  mistake the two hops' similarity invites.
 - **`web-app` is now judged on an obligation it already satisfied**, which is
   the point rather than an accident: the obligation belongs to the token
   exchange and not to a platform, and a console click clearing that field would

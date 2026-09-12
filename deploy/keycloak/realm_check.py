@@ -162,15 +162,25 @@ ORIGIN_WILDCARD = "*"
 ORIGIN_FROM_REDIRECTS = "+"
 
 # The schemes a redirect URI has to be on for `+` to derive anything from it. A
-# browser sends a browser origin, and no page is served from `blueprint://`.
-WEB_SCHEMES = ("http://", "https://")
+# browser sends the origin of the page that made the request, and no page is
+# served from `blueprint://`.
+WEB_SCHEME_NAMES = ("http", "https")
+
+# A redirect URI's scheme, when it has one at all. The alternative reading of
+# a URI with none is what this pattern exists to keep visible: Keycloak
+# resolves a RELATIVE redirect against the client's `rootUrl` before taking an
+# origin from it, so `/*` on a client with a `rootUrl` is a perfectly ordinary
+# configuration whose origin this gate cannot see. Matching the scheme rather
+# than the prefix is what lets `check_web_origins` tell "provably derives
+# nothing" from "cannot tell", and refuse only the first.
+REDIRECT_SCHEME = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):")
 
 # Dropped from the canonical origin when the scheme implies them, because a
 # browser drops them: `https://id.example.com:443` is never what arrives in an
 # `Origin` header, so a realm entry spelling it matches nothing. Keycloak
 # compares that header as text and has no opinion about a custom scheme's
 # port, so only the two web schemes have a default to drop.
-DEFAULT_PORTS = {"http": "80", "https": "443"}
+DEFAULT_PORTS = {"http": 80, "https": 443}
 
 # A REALM REPRESENTATION CARRIES EVERY CONFIDENTIAL CLIENT'S SECRET, and this
 # gate needs none of them. The admin API answers `secret` for each such client
@@ -807,39 +817,86 @@ def canonical_origin(text: object) -> str | None:
     text, so an entry that is not character-for-character what a browser sends
     matches nothing and grants nothing.
 
+    **The authority is rebuilt rather than compared as it arrived**, and the
+    first draft of this function compared it as it arrived. `urlsplit` does not
+    look at the port until `.port` is read, so against a raw `netloc` all four
+    of `:not-a-port`, `:70000`, a bare trailing colon and a zero-padded `:0443`
+    compared equal to themselves and passed — four spellings no browser can
+    send, through a check whose entire purpose is that only what a browser
+    sends gets through. Reading `.port` is what refuses the first two;
+    rebuilding the authority from `hostname` and `port` is what refuses the
+    other two, because surviving a round trip through the parser is the
+    property "already canonical" actually means.
+
     A custom scheme passes, which is the one place this parts company with the
     gateway's version, and the difference is in what consumes the value rather
     than in taste. `WithOrigins` feeds ASP.NET Core's own matcher and the
     gateway refuses anything but http(s) at startup; a realm entry is a string
-    Keycloak compares, and a packaged WebView really does send
-    `capacitor://localhost`. Refusing it here would refuse the origin this
-    whole obligation exists for.
+    Keycloak compares, and a packaged WebView really does present one.
+    Refusing it here would refuse the origin this whole obligation exists for —
+    and it is also why the default port is looked up by scheme rather than
+    assumed, since a custom scheme implies none.
     """
     if not isinstance(text, str):
         return None
     try:
         parts = urlsplit(text)
+        port = parts.port
     except ValueError:
         return None
-    if not parts.scheme or not parts.netloc or parts.username is not None:
+    if not parts.scheme or parts.username is not None:
+        return None
+
+    host = parts.hostname
+    if not host:
         return None
 
     scheme = parts.scheme.lower()
-    host = parts.netloc.lower()
-    default = DEFAULT_PORTS.get(scheme)
-    if default is not None and host.endswith(f":{default}"):
-        host = host[: -len(default) - 1]
+    # An IPv6 literal is bracketed in an origin and unbracketed by `hostname`.
+    authority = f"[{host}]" if ":" in host else host
+    if port is not None and port != DEFAULT_PORTS.get(scheme):
+        authority = f"{authority}:{port}"
 
-    canonical = f"{scheme}://{host}"
+    canonical = f"{scheme}://{authority}"
     return canonical if canonical == text else None
 
 
-def redirects_imply_a_browser_origin(client: dict) -> bool:
-    """Whether `+` would derive anything from this client's own redirect URIs."""
+def redirects_cannot_imply_an_origin(client: dict) -> bool:
+    """True only where `+` PROVABLY derives nothing from this client.
+
+    The question is deliberately asked in the direction that fails silent
+    rather than the direction that fails loud, and the first draft asked the
+    other one. It tested whether any redirect URI *started with* `http://` or
+    `https://` and reported `+` as empty whenever none did — which is wrong on
+    the ordinary Keycloak configuration this gate will meet in a deployed
+    realm, because a relative redirect like `/*` is resolved against the
+    client's `rootUrl` before an origin is taken from it. That client is
+    correctly configured and would have been failed by this gate.
+
+    So a URI with no scheme is not evidence of anything and returns False:
+    this gate does not hold `rootUrl` and will not guess at what it resolves
+    to. What remains provable is the case this obligation was filed about — a
+    client every one of whose redirect URIs is absolute and on a scheme no
+    page is served from, where `+` resolves to nothing at all while reading in
+    a console as though the question had been answered.
+
+    The cost is one case knowingly let through: a redirect of `https://` with
+    no host after it satisfies the web-scheme test and yields no usable origin
+    either. Mirroring Keycloak's resolution properly would catch it, and was
+    refused — it means projecting `rootUrl`, reimplementing a resolution this
+    repository does not own, and being wrong about it in a gate whose entire
+    argument is that it asserts only what it can see.
+    """
     redirects = client.get("redirectUris")
-    if not isinstance(redirects, list):
+    if not isinstance(redirects, list) or not redirects:
         return False
-    return any(isinstance(uri, str) and uri.lower().startswith(WEB_SCHEMES) for uri in redirects)
+    for uri in redirects:
+        if not isinstance(uri, str):
+            return False
+        scheme = REDIRECT_SCHEME.match(uri)
+        if scheme is None or scheme.group(1).lower() in WEB_SCHEME_NAMES:
+            return False
+    return True
 
 
 def check_web_origins(client: dict, client_id: str) -> list[str]:
@@ -850,9 +907,9 @@ def check_web_origins(client: dict, client_id: str) -> list[str]:
     system-browser redirect back into the app, and `blueprint://auth/callback`
     is right for it. `webOrigins` decides whose script Keycloak will let READ a
     token response, and the exchange is a second request the page makes itself:
-    from `https://localhost` or `capacitor://localhost` in a packaged WebView,
-    and from the site's own origin in a browser. Getting the first right says
-    nothing about the second.
+    from the WebView's own loopback origin in a packaged app — which differs by
+    platform and is the realm export's to state — and from the site's own
+    origin in a browser. Getting the first right says nothing about the second.
 
     The failure it catches produces no error anywhere, which is why it wants a
     gate rather than a test. `application/x-www-form-urlencoded` is
@@ -917,13 +974,13 @@ def check_web_origins(client: dict, client_id: str) -> list[str]:
             "widening rather than an exploit — but it is one no client here "
             "needs, and naming the origins costs a line")
 
-    if ORIGIN_FROM_REDIRECTS in origins and not redirects_imply_a_browser_origin(client):
+    if ORIGIN_FROM_REDIRECTS in origins and redirects_cannot_imply_an_origin(client):
         problems.append(
-            f"client {client_id!r} declares {ORIGIN_FROM_REDIRECTS!r} as a web "
-            "origin, which means the origins its own redirectUris imply — and "
-            "none of this client's redirectUris is on a web scheme, so it "
-            "implies none. At runtime that is an empty webOrigins; in a "
-            "console it reads as a setting")
+            f"client {client_id!r} declares {ORIGIN_FROM_REDIRECTS!r} as a "
+            "browser origin, which means the origins its own redirectUris "
+            "imply — and every one of them is absolute and on a scheme no page "
+            "is served from, so they imply none. At runtime that is an empty "
+            "webOrigins; in a console it reads as a setting")
 
     malformed = [index for index, origin in enumerate(origins)
                  if origin not in (ORIGIN_WILDCARD, ORIGIN_FROM_REDIRECTS)
