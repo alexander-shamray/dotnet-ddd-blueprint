@@ -4,9 +4,11 @@
 # restore failure pointing at nothing. .git is excluded for size alone.
 #
 # `artifacts` is where that debris now lands, per Directory.Build.props's
-# Output group; it is the entry doing the work, and it covers the publish and
-# package outputs that a bare `**/obj` never did. The bin/ and obj/ rules stay
-# for a checkout that predates that change and still has them on disk.
+# Output group. No COPY line takes the repository root, so this entry shrinks
+# the context the daemon is sent rather than keeping anything out of an image.
+# The bin/ and obj/ rules are the ones that do the second job: the COPY lines
+# take whole source directories, and a checkout predating that change still
+# has those trees inside them.
 .git
 artifacts
 **/bin

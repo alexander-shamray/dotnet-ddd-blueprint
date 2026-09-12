@@ -16,11 +16,10 @@
   <!--
     Build output leaves the source trees. Without this the SDK writes `bin/` and
     `obj/` beside every `.csproj`, so `src/` and `tests/` hold two things at
-    once: the sixty-odd files a reader is looking for, and the several thousand
-    a build put there. One `artifacts/` directory at the repository root holds
-    all of it instead — `artifacts/bin`, `artifacts/obj`, `artifacts/publish`
-    and `artifacts/package`, one subdirectory per project — and `src/` is then
-    what its name says: code, project files and the prose beside them.
+    once: the files a reader is looking for, and everything a build put there.
+    One `artifacts/` directory at the repository root holds all of it instead,
+    in the shape §4.1 draws, and `src/` is then what its name says: code,
+    project files and the prose beside them.
 
     `UseArtifactsOutput` is only read from this file. The SDK computes the
     output paths before it imports a project's own properties, so the same two
@@ -34,13 +33,12 @@
     the SDK's search order to predict. `MSBuildThisFileDirectory` carries its
     own trailing separator, so `artifacts` appends directly.
 
-    Two consumers depend on this path and neither is MSBuild. `.gitignore` and
-    `.dockerignore` each exclude `artifacts/` — the second matters because
-    §14.1's build context is the repository root, and a host-restored
-    `artifacts/obj` copied into a Linux image is the same restore failure the
-    old `**/obj` exclusion existed to prevent. The `bin/` and `obj/` rules stay
-    in both files: nothing writes there any more, but a checkout that predates
-    this change still has them on disk.
+    Consumers outside MSBuild depend on this path, and each argues its own case
+    in the file that holds it: `.gitignore` and `.dockerignore` exclude
+    `artifacts/`, and `.github/secret-scan/secret_scan.py` declines to walk it.
+    Naming them here is a pointer to where the reasons live, not a second copy
+    of them — a list that is a copy goes stale on the next consumer, and a
+    reader who trusts it never opens the file that is right.
   -->
   <PropertyGroup Label="Output">
     <UseArtifactsOutput>true</UseArtifactsOutput>

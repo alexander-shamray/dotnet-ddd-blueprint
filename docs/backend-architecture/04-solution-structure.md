@@ -140,8 +140,9 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │                                       Stdlib Python, no restore — it renders
 │                                       a service from Catalog at run time
 │
-├── artifacts/                          Every build's output, one subdirectory
-│                                       per project: bin, obj, publish, package.
+├── artifacts/                          Every build's output: bin, obj and
+│                                       publish take a subdirectory per project,
+│                                       package groups by configuration.
 │                                       Generated and git-ignored, and drawn
 │                                       here because it is the reason src/ and
 │                                       tests/ above hold source alone
@@ -158,10 +159,9 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 ```
 
 **`src/` and `tests/` hold source, and nothing a build wrote.** A project
-directory carrying its own `bin/` and `obj/` buries the handful of files a
-reader came for under several thousand it has no interest in, and every gate
-that walks a source tree pays for it again in a skip list that silently decides
-what the gate reads.
+directory carrying its own `bin/` and `obj/` buries the files a reader came for
+under the ones a build wrote, and every gate that walks a source tree pays for
+it again in a skip list that silently decides what the gate reads.
 
 Moving the output retires none of those lists, and expecting it to is the way
 to get this wrong: a gate that walks the repository root has to decline

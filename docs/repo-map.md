@@ -96,9 +96,8 @@ Directory.Build.props        shared MSBuild settings, ADR-019's analyser
                              the SDK reads UseArtifactsOutput from this file
                              and nowhere else, so a project file that spells
                              it is read too late and does nothing
-artifacts/                   every build's output, git-ignored: bin, obj,
-                             publish and package, one subdirectory per
-                             project. Not in the committed tree; listed
+artifacts/                   every build's output, git-ignored, in the shape
+                             §4.1 draws. Not in the committed tree; listed
                              because it is the half of §4.1 that explains why
                              the walks under src/ carry no build output
 Directory.Packages.props     central package management, exact pins
