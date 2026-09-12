@@ -731,6 +731,29 @@ class Walking(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("1 file(s)", out)
 
+    def test_every_shape_of_build_output_is_skipped_at_the_path_it_really_takes(self):
+        """The subject is the walk's reach, not one directory name.
+
+        §4.1 puts build output under `artifacts/`, in four subdirectories, and
+        two of them are called something other than `obj` or `bin`. A test that
+        planted one file in one `obj/` would pass on a list that had silently
+        stopped covering `publish` and `package` — so each real path is planted
+        separately and the file count is what says the walk declined it.
+        """
+        for relative in ("artifacts/obj/Catalog.Api/debug",
+                         "artifacts/bin/Catalog.Api/debug",
+                         "artifacts/publish/Catalog.Api/release",
+                         "artifacts/package/release"):
+            with self.subTest(relative), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                planted = root / relative
+                planted.mkdir(parents=True)
+                (planted / "appsettings.json").write_text(f"aws={AWS_ID}\n", encoding="utf-8")
+                (root / "kept.txt").write_text("nothing here\n", encoding="utf-8")
+                code, out, _ = run(root)
+                self.assertEqual(code, 0)
+                self.assertIn("1 file(s)", out)
+
 
 class RealRepository(unittest.TestCase):
     def test_the_repository_passes_its_own_gate(self):

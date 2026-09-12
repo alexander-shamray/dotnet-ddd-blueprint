@@ -49,10 +49,19 @@ DEFAULT_ALLOWED = GATE_DIR / "allowed"
 # reviewed, so a finding in one is a finding nobody would act on; `.git` is
 # excluded because this gate is deliberately about the tree and not the history,
 # and scanning the pack would be a claim to a coverage it does not have.
+#
+# `artifacts` is where §4.1 puts build output, and naming it is what keeps this
+# list complete rather than nearly so. `obj` and `bin` happen to match two of
+# the four subdirectories under it; `publish` and `package` are build output by
+# the same argument and match neither, so without this entry a `dotnet publish`
+# or `dotnet pack` run before the gate would put a rendered appsettings in
+# front of a scanner that has no business reading one. The `obj` and `bin`
+# entries stay for a checkout made before the output moved.
 SKIP_DIRS = frozenset({
     ".git",
     ".vs",
     ".idea",
+    "artifacts",
     "obj",
     "bin",
     "node_modules",
