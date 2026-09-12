@@ -6,11 +6,17 @@
 # .NET — the solution described in docs/backend-architecture/ lands here.
 #
 # artifacts/ is where every build writes, per Directory.Build.props's Output
-# group: one directory at the root rather than a bin/ and an obj/ beside each
-# of the thirty-odd project files. The bin/ and obj/ rules below are no longer
-# what keeps output out of a commit — they are what keeps a checkout that
-# predates that change from committing what it already has on disk.
-artifacts/
+# group: one directory at the root rather than a bin/ and an obj/ beside every
+# project file. The bin/ and obj/ rules below are no longer what keeps output
+# out of a commit — they are what keeps a checkout that predates that change
+# from committing what it already has on disk.
+#
+# The leading slash is the whole of the pattern's reach. Without it git matches
+# the name at every depth, so a source directory somebody called artifacts/
+# would go untracked without a word — and §4.1 puts generated output at the
+# root and nowhere else. The rules below take the depth deliberately, because a
+# checkout predating the move has those directories beside each project.
+/artifacts/
 [Bb]in/
 [Oo]bj/
 [Dd]ebug/
