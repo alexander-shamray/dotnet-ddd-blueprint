@@ -511,6 +511,44 @@ class TheWebOrigins(Fixture):
         spa = browser(webOrigins=["+"], redirectUris=["/*"])
         self.assertEqual(self.problems(realm(spa, mobile())), [])
 
+    # Six host spellings a browser rewrites before it sends them, which the
+    # rebuilt authority still passed because `urlsplit` is not a WHATWG host
+    # parser. Copilot found them on PR #203 round two, one field left of the
+    # port cases above and the same defect: a string no browser can send,
+    # passing a check whose whole subject is what a browser sends.
+
+    def test_an_ipv4_shorthand_is_refused(self):
+        """A browser serialises this as a dotted quad, so the realm never matches."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://127.1"]))))
+
+    def test_an_octet_with_a_leading_zero_is_refused(self):
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://010.0.0.1"]))))
+
+    def test_a_bare_integer_host_is_refused(self):
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://2130706433"]))))
+
+    def test_a_dotted_quad_is_accepted(self):
+        """The other half: refusing every IPv4 host would pass all three above."""
+        self.assertEqual(self.problems(realm(browser(), mobile(
+            webOrigins=["https://127.0.0.1"]))), [])
+
+    def test_a_unicode_host_is_refused_because_a_browser_sends_punycode(self):
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://\u00fcnicode.example"]))))
+
+    def test_the_punycode_a_browser_would_send_is_accepted(self):
+        """Which is what makes the refusal above a spelling rule, not a ban."""
+        self.assertEqual(self.problems(realm(browser(), mobile(
+            webOrigins=["https://xn--nicode-2ya.example"]))), [])
+
+    def test_an_expanded_ipv6_literal_is_refused(self):
+        """`0:0:0:0:0:0:0:1` is `::1` once a browser has serialised it."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["http://[0:0:0:0:0:0:0:1]"]))))
+
     def test_the_offending_value_is_not_echoed(self):
         """Userinfo survives the authority form, so the message carries an index.
 

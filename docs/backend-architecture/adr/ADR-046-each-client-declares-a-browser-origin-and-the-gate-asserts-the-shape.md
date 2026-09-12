@@ -50,13 +50,13 @@ gives for every other setting on this client.
 **The values stay out of the predicate because this repository cannot see
 them.** A packaged app's browser origin is whatever `capacitor.config.ts` says —
 `androidScheme` and `iosScheme` — and that file is in `blueprint-frontend`,
-which is reconsidering both settings as this is written (its issue #7 is a
-choice between `androidScheme: 'http'`, `cleartext`, and TLS on the Compose
-stack, and each answer moves the origin). A gate pinning the literal pair
-would fail a realm that had been *corrected* rather than one that had drifted,
-and the correction would arrive as a red gate in this repository for a change
-made in another. What can be judged without owning that file is the shape, and
-all three ways this fails silently are shape: nothing granted, everything
+which this repository neither owns nor reads. Either setting moving moves the
+origin, and nothing here would know. A gate pinning the literal pair would
+therefore fail a realm that had been *corrected* rather than one that had
+drifted, and the correction would arrive as a red gate in this repository for
+a change made in another. What can be judged without owning that file is the
+shape, and all three ways this fails silently are shape: nothing granted,
+everything
 granted, and an entry no browser will ever send.
 
 **`+` is judged against the client rather than refused outright**, because it
@@ -93,10 +93,11 @@ will be handed.
   there is this app's own.
 - **The gate cannot tell a right origin from a wrong one, and says so.** A
   realm naming an origin the app does not actually send passes this check and
-  fails on the device exactly as before. That gap closes only with the round
-  trip nothing has yet run — a packaged build reaching the stack — which is the
-  sibling repository's open plan task, and this record does not pretend to
-  substitute for it.
+  fails on the device exactly as before. Nothing this gate can read closes
+  that gap: only a packaged build reaching the stack establishes that the
+  origin in the realm is the origin the app sends, and that round trip belongs
+  to `blueprint-frontend`. This record asserts the shape and does not pretend
+  to substitute for it.
 - **The iOS origin cannot be given to the gateway, and this record does not
   take that decision.** `Gateway.Api` refuses a `Cors:Origins` entry whose
   scheme is not http(s), at startup and on purpose. So a packaged iOS build

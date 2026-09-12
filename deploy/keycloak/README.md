@@ -73,10 +73,10 @@ py -3.12 deploy/keycloak/realm_check.py check --kind local
   from here and the value is not: what a packaged app's browser origin actually
   is comes out of `capacitor.config.ts` in the `blueprint-frontend`
   repository, which this one neither owns nor can read. A realm naming an
-  origin the app does not send passes this gate and fails on the device. What
-  closes that gap is the round trip nothing has run yet — a packaged build
-  reaching the stack — and it is the sibling repository's open task, not a
-  check this file can grow.
+  origin the app does not send passes this gate and fails on the device. Only
+  a packaged build reaching the stack establishes the two are the same, and
+  that round trip belongs to the sibling repository rather than to a check
+  this file could grow.
 - **`ClockSkew`.** It is the other half of ADR-033's 330 and it is not a realm
   setting at all — it is `Common.Web`'s, pinned by `JwtAuthenticationTests`.
   An operator told to configure a realm `ClockSkew` would go looking for

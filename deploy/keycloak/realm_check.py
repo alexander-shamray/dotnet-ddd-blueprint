@@ -46,6 +46,7 @@ runs before anything is built.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import re
 import sys
@@ -836,6 +837,24 @@ def canonical_origin(text: object) -> str | None:
     Refusing it here would refuse the origin this whole obligation exists for —
     and it is also why the default port is looked up by scheme rather than
     assumed, since a custom scheme implies none.
+
+    **This is not a WHATWG URL canonicaliser, and the host checks below are
+    where that shows.** A browser rewrites a host before it sends it: `127.1`
+    is serialised `127.0.0.1`, a Unicode domain is serialised as punycode, and
+    `0:0:0:0:0:0:0:1` is serialised `::1`. Rebuilding through `urlsplit` alone
+    reproduced none of that, so six host spellings no browser can send were
+    passing a function whose entire claim is that only what a browser sends
+    passes — the same defect as the port cases above, one field to the left.
+
+    The stdlib has no WHATWG host parser and this gate may not add a
+    dependency, so the answer is to REFUSE what cannot be canonicalised here
+    rather than to canonicalise it: a host that is an IP literal must already
+    be the form `ipaddress` prints, a host that looks like an IPv4 attempt and
+    is not one is refused outright, and a non-ASCII host is refused because
+    the punycode a browser sends is the spelling the realm needs. Refusing is
+    the safe direction — a realm rejected here is a realm whose origin can be
+    rewritten by hand into the form a browser sends, where the alternative is
+    a gate that passes an origin matching nothing.
     """
     if not isinstance(text, str):
         return None
@@ -851,8 +870,31 @@ def canonical_origin(text: object) -> str | None:
     if not host:
         return None
 
+    # A browser sends punycode, never the Unicode form, so the Unicode form is
+    # a spelling the realm can never match. `hostname` has already lowercased.
+    if not host.isascii():
+        return None
+
+    if ":" in host:
+        # An IPv6 literal, which an origin brackets and `hostname` does not.
+        try:
+            if str(ipaddress.IPv6Address(host)) != host:
+                return None
+        except ValueError:
+            return None
+    elif host.rsplit(".", 1)[-1].isdigit() or host.lower().startswith("0x"):
+        # WHATWG parses a host whose last label is numeric as IPv4 and
+        # serialises it as a dotted quad, so anything reaching here that is an
+        # IPv4 attempt has to be that quad already. `ipaddress` refuses
+        # shorthand, leading zeros and bare integers, which is exactly the set
+        # a browser would rewrite.
+        try:
+            if str(ipaddress.IPv4Address(host)) != host:
+                return None
+        except ValueError:
+            return None
+
     scheme = parts.scheme.lower()
-    # An IPv6 literal is bracketed in an origin and unbracketed by `hostname`.
     authority = f"[{host}]" if ":" in host else host
     if port is not None and port != DEFAULT_PORTS.get(scheme):
         authority = f"{authority}:{port}"
@@ -923,13 +965,13 @@ def check_web_origins(client: dict, client_id: str) -> list[str]:
     https://github.com/alexander-shamray/blueprint-frontend/issues/6.
 
     THE OBLIGATION IS ASSERTED AND THE VALUES ARE NOT, which is a decision
-    rather than a shortcut. What a packaged app's browser origin actually is comes
-    out of `capacitor.config.ts` in the other repository — `androidScheme` and
-    `iosScheme`, both of which that repository is reconsidering as this is
-    written — so a literal pair here would pin this gate to another repo's
-    current default and fail a realm that had been corrected rather than one
-    that had drifted. What this gate can see without owning that file is the
-    shape, and the shape is where all three silent failures live: nothing
+    rather than a shortcut. What a packaged app's browser origin actually is
+    comes out of `capacitor.config.ts` in the other repository —
+    `androidScheme` and `iosScheme` — which this one neither owns nor reads, so
+    a literal pair here would pin this gate to another repository's setting and
+    fail a realm that had been corrected rather than one that had drifted. What
+    this gate can see without owning that file is the shape, and the shape is
+    where all three silent failures live: nothing
     granted, everything granted, and an entry no browser will ever send.
 
     It judges both named clients rather than the native one alone. The
