@@ -269,6 +269,31 @@ class DuplicateNames(TemporaryRepository):
         self.assertIn("more than one project", output)
         self.assertIn("src/Services/Payments/Catalog.Domain/Catalog.Domain.csproj", output)
 
+    def test_two_stems_differing_only_in_case_fail(self) -> None:
+        """The pair a case-sensitive check passes in CI and nowhere else.
+
+        `artifacts/obj/Catalog.Domain` and `artifacts/obj/catalog.domain` are
+        two directories on the Linux runner and one on Windows or a default
+        macOS install, so comparing stems exactly would have let the collision
+        through the gate and left it for a local build to discover.
+        """
+        tree(self.root, {"Catalog.Domain": "src/Services/Catalog/Catalog.Domain"})
+        second = self.root / "src/Services/Payments/catalog.domain"
+        second.mkdir(parents=True)
+        (second / "catalog.domain.csproj").write_text("<Project />", encoding="utf-8")
+        (self.root / "Platform.slnx").write_text(
+            '<Solution>\n  <Project Path="src/Services/Catalog/Catalog.Domain/'
+            'Catalog.Domain.csproj" />\n  <Project Path="src/Services/Payments/'
+            'catalog.domain/catalog.domain.csproj" />\n</Solution>\n', encoding="utf-8")
+
+        code, output = run(self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("more than one project", output)
+        # Both spellings are named, because the pair is the finding and a
+        # reader looking for one of them must find it here.
+        self.assertIn("Catalog.Domain / catalog.domain", output)
+
     def test_a_duplicate_cannot_borrow_the_other_project_s_artefacts(self) -> None:
         """The defect the name check exists to stop, stated as a test.
 

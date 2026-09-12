@@ -141,17 +141,28 @@ def find_duplicate_names(walked: list[Path]) -> list[str]:
     rather than left to the SDK because everything below this line looks a
     project up by name, and a name that means two projects makes those lookups
     answer for whichever one it happens to find.
+
+    **Compared case-insensitively, because the collision is the filesystem's
+    rather than MSBuild's.** `Catalog.Domain` and `catalog.domain` are two
+    directories under `artifacts/obj/` on the Linux runner and one directory on
+    Windows and on a default macOS install — so a case-sensitive check passes
+    in CI on exactly the pair that collides on the machines this repository is
+    developed on, which is the worst direction for this to fail in. `casefold`
+    rather than `lower`, since it is the comparison the language asks for.
     """
-    counted = Counter(path.stem for path in walked)
+    counted = Counter(path.stem.casefold() for path in walked)
 
     findings: list[str] = []
-    for name in sorted(name for name, count in counted.items() if count > 1):
-        sharing = ", ".join(
-            path.as_posix() for path in walked if path.stem == name)
+    for folded in sorted(name for name, count in counted.items() if count > 1):
+        colliding = [path for path in walked if path.stem.casefold() == folded]
+        spellings = sorted({path.stem for path in colliding})
+        named = " / ".join(spellings) if len(spellings) > 1 else spellings[0]
+        sharing = ", ".join(path.as_posix() for path in colliding)
         findings.append(
-            f"{name} is the MSBuild project name of more than one project: {sharing}. "
-            f"They share one artifacts/obj/ and artifacts/bin/ entry, so neither this "
-            f"gate nor the SDK can tell their output apart")
+            f"{named} is the MSBuild project name of more than one project: {sharing}. "
+            f"They share one artifacts/obj/ and artifacts/bin/ entry on any filesystem "
+            f"that ignores case, so neither this gate nor the SDK can tell their output "
+            f"apart")
     return findings
 
 
