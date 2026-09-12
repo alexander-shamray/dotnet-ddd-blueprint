@@ -165,6 +165,36 @@ order-of-magnitude miss.
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
 > stage gate is what makes that visible.
 
+**The output gate needs a build in front of it**, and its step does not say
+so because the build is the line above it in the same job. Run on its own it
+reads a tree, so what it reports is about whichever build ran last — or, on a
+fresh clone, about none:
+
+```bash
+dotnet restore Platform.slnx
+dotnet build Platform.slnx
+py -3.12 .github/output-gate/output_gate.py
+```
+
+Both lines are in the list rather than assumed, because the gate asks a
+separate question of each. The restore writes `project.assets.json` and the
+generated `.nuget.g.props`, which are what would otherwise put an `obj/` beside
+a `.csproj` with nothing compiled at all; the build writes everything else. So
+the gate looks for each project under `artifacts/obj/` *and* under
+`artifacts/bin/`: a restore alone creates every `obj` entry and no `bin` entry,
+so asking only the first would report a fully built solution to anyone who
+restored and stopped. `--no-restore` on the build is fine once a restore has
+happened; what is not fine is reading the result as a verdict on a tree nobody
+built, and the gate refuses that case by name rather than passing it.
+
+**What it does not cover is the rest of §4.1's sentence**, and that is
+deliberate. The gate refuses a `bin/` or `obj/` under either root, which holds
+on any working tree; "nothing a build wrote" is wider, and checking it needs a
+before to compare against. CI has one — the checkout — so a step beside the
+gate asks `git status --porcelain --ignored -- src tests` instead. There is no
+local equivalent, because run here it would report whatever you are in the
+middle of writing.
+
 **The closure gate and the locality gate need a pull request**, so their live
 runs take a number and a `gh` session that CI has and a checkout does not:
 
