@@ -152,8 +152,9 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │                                       which is §12.9's "coverage of the domain
 │                                       layer specifically" as an artefact
 ├── Directory.Build.props               Shared MSBuild settings, and the file
-│                                       that puts output in artifacts/ — the SDK
-│                                       reads UseArtifactsOutput from here only
+│                                       that puts output in artifacts/ — the
+│                                       only early-enough place for it, argued
+│                                       in the file's own Output comment
 ├── Directory.Packages.props            Central package version management
 └── Platform.slnx
 ```

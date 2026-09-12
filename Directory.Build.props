@@ -21,10 +21,15 @@
     in the shape §4.1 draws, and `src/` is then what its name says: code,
     project files and the prose beside them.
 
-    `UseArtifactsOutput` is only read from this file. The SDK computes the
-    output paths before it imports a project's own properties, so the same two
-    lines written in a `.csproj` are read too late and silently do nothing —
-    which is why they are here and why a new project needs no line at all.
+    `UseArtifactsOutput` has to be set here rather than in a project, and the
+    build says so rather than shrugging. The SDK computes the output paths
+    before a project's own properties are imported, so the same two lines in a
+    `.csproj` arrive too late to move the intermediate output — and rather than
+    ignore them it fails the build with **NETSDK1199**, on the argument that a
+    path silently depending on whether a `Directory.Build.props` happened to
+    exist would be worse than an error. `Directory.Build.props` and the command
+    line are the two places early enough, which is why they are here and why a
+    new project needs no line at all.
 
     `ArtifactsPath` is spelled out rather than left to its default. The default
     derives from whichever `Directory.Build.props` set `UseArtifactsOutput`,

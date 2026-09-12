@@ -92,10 +92,10 @@ global.json                  SDK pin (§4.4)
 .config/dotnet-tools.json    dotnet-ef, pinned to the EF Core version —
                              `dotnet tool restore` is the whole setup
 Directory.Build.props        shared MSBuild settings, ADR-019's analyser
-                             policy, and §4.1's artifacts/ output location —
-                             the SDK reads UseArtifactsOutput from this file
-                             and nowhere else, so a project file that spells
-                             it is read too late and does nothing
+                             policy, and §4.1's artifacts/ output location,
+                             which has to be set here — the file's own Output
+                             comment argues why, and what the build does to a
+                             project that tries it anyway
 artifacts/                   every build's output, git-ignored, in the shape
                              §4.1 draws. Not in the committed tree; listed
                              because it is the half of §4.1 that explains why
