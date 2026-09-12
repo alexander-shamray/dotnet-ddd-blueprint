@@ -118,8 +118,16 @@ def compare_subject(walked: list[Path], listed: list[Path]) -> list[str]:
     Both directions are findings, and they are different defects. A project the
     solution lists and the walk cannot find means the walk is reading the wrong
     tree, and every assertion made from it is worth nothing. A project the walk
-    finds and the solution does not list is one CI never compiles, so its
-    output location has never been exercised by anything.
+    finds and the solution does not list means the solution has stopped being
+    an independent inventory, so the reconciliation itself no longer
+    establishes anything.
+
+    **Not that CI never compiles it**, which is what this said and is false:
+    MSBuild builds the `ProjectReference` closure, so a listed project
+    referencing an unlisted one compiles it and leaves it an `artifacts/`
+    entry like any other. That case reaches the checks below and passes them,
+    which is exactly why the diagnostic must not send a reader looking for a
+    skipped build.
 
     **The first says the walk did not find it rather than that it is not on
     disk**, because those are different and only one of them is knowable from
@@ -147,9 +155,11 @@ def compare_subject(walked: list[Path], listed: list[Path]) -> list[str]:
 
     for path in sorted(set(walked) - set(listed)):
         findings.append(
-            f"{path.as_posix()} is on disk and absent from Platform.slnx. "
-            f"`dotnet build Platform.slnx` never builds it, so nothing has ever "
-            f"measured where its output lands")
+            f"{path.as_posix()} is on disk and absent from Platform.slnx. The "
+            f"solution has stopped being an independent inventory of what this walk "
+            f"should find, so reconciling the two establishes nothing - and whether "
+            f"a build reaches this project at all now rests on some listed project "
+            f"referencing it")
 
     return findings
 
