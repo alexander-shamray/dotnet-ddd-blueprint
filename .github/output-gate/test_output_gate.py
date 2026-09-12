@@ -19,11 +19,31 @@ from __future__ import annotations
 
 import io
 import contextlib
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 import output_gate
+
+
+def check_ignore(path: str) -> subprocess.CompletedProcess[str]:
+    """Ask git whether it would ignore one path in this checkout.
+
+    `--no-index` so the answer is the rules' rather than the index's, and `-v`
+    so a failure can name the rule that matched instead of leaving a reader to
+    find it. Exit 0 is ignored, 1 is not, and anything else is git failing —
+    which the assertions report rather than read as an answer.
+
+    The encoding is pinned rather than left to `text=True`, which takes the
+    console code page on Windows: a rule this could not decode would raise
+    from the wrong place, or come back short, in a helper whose whole job is
+    to be believed.
+    """
+    return subprocess.run(
+        ["git", "check-ignore", "--no-index", "-v", "--", path],
+        cwd=output_gate.REPO_ROOT, capture_output=True,
+        encoding="utf-8", errors="replace", check=False)
 
 
 def tree(root: Path, projects: dict[str, str], restored: list[str] | None = None,
@@ -412,17 +432,59 @@ class ThisRepository(unittest.TestCase):
 
         self.assertEqual(output_gate.find_duplicate_names(walked), [])
 
-    def test_the_gitignore_still_ignores_what_this_gate_refuses(self) -> None:
-        """The gate reports residue; `.gitignore` is why it is never committed.
+    def test_git_really_ignores_what_this_gate_refuses(self) -> None:
+        """Asked of git, rather than of `.gitignore`'s text.
 
-        The two have to keep agreeing. If `.gitignore` stopped ignoring `obj/`,
-        the residue this gate fails on would arrive in a commit first, and the
-        gate would be reporting a defect a review had already merged.
+        The gate reports residue and `.gitignore` is why it is never
+        committed, so the two have to keep agreeing: if git stopped ignoring
+        `obj/`, the residue this gate fails on would arrive in a commit first
+        and the gate would be reporting a defect a review had already merged.
+
+        Reading the file for the substring `[Oo]bj/` looked like that check
+        and was not. The substring survives being commented out, and a later
+        negation overrides the rule while leaving it in place — both leave a
+        text assertion green with git tracking build output. `git check-ignore`
+        answers the question the invariant is about.
+
+        **The source file is the control, and it is what makes the other two
+        mean anything.** A `.gitignore` of `*` ignores every path offered to
+        it, so a test that only asks about paths it wants ignored passes on
+        the one rule that would ignore the whole repository.
+
+        The paths are given as files inside the directories rather than as the
+        directories themselves: `--no-index` leaves git unable to tell a bare
+        `.../obj` is a directory, so a trailing-slash rule does not match it.
+        Measured, and the reason each path below names a file.
+
+        **And the matching rule is asserted, not merely the verdict**, because
+        `.gitignore` also carries `[Dd]ebug/` and `[Rr]elease/` — so a path
+        under `obj/Debug/` comes back ignored with `[Oo]bj/` commented out,
+        and a test reading only the exit code would have reported an invariant
+        its neighbour was holding up. Found by commenting the rule out, which
+        is the only way that confound shows itself.
         """
-        ignored = (output_gate.REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+        for path, rule in (
+                ("src/Services/Catalog/Catalog.Domain/obj/project.assets.json", "[Oo]bj/"),
+                ("tests/Catalog.Domain.Tests/bin/Catalog.Domain.Tests.dll", "[Bb]in/")):
+            result = check_ignore(path)
+            self.assertEqual(
+                result.returncode, 0,
+                f"git does not ignore {path} (exit {result.returncode}). "
+                f"{result.stderr.strip() or 'No rule matched it.'} The gate refuses "
+                f"this directory and nothing stops it reaching a commit")
+            matched = result.stdout.split("\t")[0].rsplit(":", 1)[-1]
+            self.assertEqual(
+                matched, rule,
+                f"git ignores {path}, but by {matched!r} rather than {rule!r}. The "
+                f"rule this gate's residue check relies on is not the one doing the "
+                f"work, so removing it would go unnoticed here")
 
-        self.assertIn("[Bb]in/", ignored)
-        self.assertIn("[Oo]bj/", ignored)
+        control = "src/Services/Catalog/Catalog.Domain/Products/Product.cs"
+        result = check_ignore(control)
+        self.assertEqual(
+            result.returncode, 1,
+            f"git ignores {control}, matched by {result.stdout.strip()!r} - a rule "
+            f"that broad makes the two assertions above vacuous")
 
 
 if __name__ == "__main__":
