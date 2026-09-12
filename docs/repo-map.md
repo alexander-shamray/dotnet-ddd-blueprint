@@ -279,6 +279,20 @@ coverage.runsettings         the report filtered to `.*\.Domain\.dll$` (§12.9)
                              has a suite all the same, because it MERGES
                              across stages, and arithmetic that is quietly
                              wrong is worse than no figure
+.github/output-gate/         §4.1's "src/ and tests/ hold source, and nothing
+                             a build wrote", checked after every build. The
+                             only gate here whose subject is an SDK default
+                             rather than a file in this repository:
+                             `UseArtifactsOutput` moves
+                             `MSBuildProjectExtensionsPath` too, which is what
+                             keeps a restore from leaving an `obj/` beside
+                             every `.csproj`, and nothing here can hold a
+                             future SDK to it. It asserts the output is in
+                             `artifacts/` as well as absent from the source
+                             trees, because "no obj/ under src/" is what a
+                             checkout nobody built also looks like. Its suite
+                             runs in the fast job and the gate behind the
+                             build, the split the gate cannot avoid
 deploy/canary/               §15.5's rollout — the ladder as JSON, the weight
                              arithmetic and the promote/rollback verdict as
                              tested stdlib Python, and one file that reads

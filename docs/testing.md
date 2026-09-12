@@ -165,6 +165,25 @@ order-of-magnitude miss.
 > tests and exit **zero**; a mistyped `--filter` does exactly the same. The
 > stage gate is what makes that visible.
 
+**The output gate needs a build in front of it**, and its step does not say
+so because the build is the line above it in the same job. Run on its own it
+reads a tree, so what it reports is about whichever build ran last — or, on a
+fresh clone, about none:
+
+```bash
+dotnet restore Platform.slnx
+dotnet build Platform.slnx
+py -3.12 .github/output-gate/output_gate.py
+```
+
+The restore is in the list rather than assumed. It is what writes
+`project.assets.json` and the generated `.nuget.g.props`, which are the files
+that used to make an `obj/` appear beside a `.csproj` without anything being
+compiled at all — so a run with no restore behind it leaves the gate's main
+question untouched. `--no-restore` on the build is fine once one has happened;
+what is not fine is reading the result as a verdict on a tree nobody built,
+and the gate refuses that case by name rather than passing it.
+
 **The closure gate and the locality gate need a pull request**, so their live
 runs take a number and a `gh` session that CI has and a checkout does not:
 

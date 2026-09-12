@@ -38,6 +38,22 @@
     the SDK's search order to predict. `MSBuildThisFileDirectory` carries its
     own trailing separator, so `artifacts` appends directly.
 
+    Two lines and no third, and the third is the one worth writing down.
+    `UseArtifactsOutput` moves `MSBuildProjectExtensionsPath` as well as the
+    intermediate output — measured, not inferred from the name — so
+    `project.assets.json` and the generated `.nuget.g.props` land under
+    `artifacts/obj/<Project>/` too and a restore leaves nothing beside a
+    `.csproj` either. Setting that property here would restate a path the SDK
+    already derives, in a second place that can disagree with the first: NuGet
+    resolves it at restore time and again at build time, and a mismatch fails
+    the build on an assets file it cannot find.
+
+    What it would NOT do is make the outcome any more certain, which is the
+    whole of the argument. The property is the SDK's default and not this
+    file's decision, so the thing to hold is the result rather than the
+    setting: `.github/output-gate/` fails CI on the day a build writes into
+    `src/` or `tests/` again, whichever default moved underneath it.
+
     Consumers outside MSBuild depend on this path, and each argues its own case
     in the file that holds it: `.gitignore` and `.dockerignore` exclude
     `artifacts/`, and `.github/secret-scan/secret_scan.py` declines to walk it.
