@@ -20,7 +20,7 @@ WORKDIR /src
 #
 # **Every project in the transitive closure gets a line, and a missing one
 # fails four steps later rather than here.** dotnet restore walks the graph and
-# writes each project's own obj/project.assets.json; a csproj that is not
+# writes each project's own project.assets.json; a csproj that is not
 # present when it runs is simply not restored, and the --no-restore publish
 # below then fails with NETSDK1004 naming a project this file never mentions.
 # So a new ProjectReference anywhere in the chain is a line here too, and

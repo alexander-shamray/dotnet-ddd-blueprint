@@ -11,7 +11,7 @@ WORKDIR /src
 #
 # **Every project in the transitive closure gets a line, and a missing one
 # fails four steps later rather than here.** dotnet restore writes each
-# project's own obj/project.assets.json; a csproj absent when it runs is not
+# project's own project.assets.json; a csproj absent when it runs is not
 # restored, and the --no-restore publish then fails with NETSDK1004 naming a
 # project this file never mentions. **CI catches it since PR-25**: ci.yml's
 # `images` job builds every image a changed service ships, so a missing line
