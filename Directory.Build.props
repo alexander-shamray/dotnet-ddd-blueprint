@@ -14,6 +14,43 @@
   </PropertyGroup>
 
   <!--
+    Build output leaves the source trees. Without this the SDK writes `bin/` and
+    `obj/` beside every `.csproj`, so `src/` and `tests/` hold two things at
+    once: the files a reader is looking for, and everything a build put there.
+    One `artifacts/` directory at the repository root holds all of it instead,
+    in the shape §4.1 draws, and `src/` is then what its name says: code,
+    project files and the prose beside them.
+
+    `UseArtifactsOutput` has to be set here rather than in a project, and the
+    build says so rather than shrugging. The SDK computes the output paths
+    before a project's own properties are imported, so the same two lines in a
+    `.csproj` arrive too late to move the intermediate output — and rather than
+    ignore them it fails the build with **NETSDK1199**, on the argument that a
+    path silently depending on whether a `Directory.Build.props` happened to
+    exist would be worse than an error. `Directory.Build.props` and the command
+    line are the two places early enough, which is why they are here and why a
+    new project needs no line at all.
+
+    `ArtifactsPath` is spelled out rather than left to its default. The default
+    derives from whichever `Directory.Build.props` set `UseArtifactsOutput`,
+    which is this one, so the value is the same; saying it makes the location a
+    decision in the file that owns it rather than a fact a reader has to know
+    the SDK's search order to predict. `MSBuildThisFileDirectory` carries its
+    own trailing separator, so `artifacts` appends directly.
+
+    Consumers outside MSBuild depend on this path, and each argues its own case
+    in the file that holds it: `.gitignore` and `.dockerignore` exclude
+    `artifacts/`, and `.github/secret-scan/secret_scan.py` declines to walk it.
+    Naming them here is a pointer to where the reasons live, not a second copy
+    of them — a list that is a copy goes stale on the next consumer, and a
+    reader who trusts it never opens the file that is right.
+  -->
+  <PropertyGroup Label="Output">
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+  <!--
     The analyser policy of ADR-019. TreatWarningsAsErrors is what makes the
     other two lines mean anything: without it a violation is a message in a
     build log nobody reads, and the log is longest on the pull request that

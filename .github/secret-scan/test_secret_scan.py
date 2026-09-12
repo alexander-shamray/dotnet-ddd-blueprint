@@ -731,6 +731,48 @@ class Walking(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("1 file(s)", out)
 
+    def test_every_shape_of_build_output_is_skipped_at_the_path_it_really_takes(self):
+        """The subject is the walk's reach, not one directory name.
+
+        §4.1 puts build output under `artifacts/`, and the subdirectories it
+        draws are not all called `obj` or `bin`. A test that planted one file in
+        one `obj/` would pass on a list that had silently stopped covering
+        `publish` and `package` — so each real path is planted separately and
+        the file count is what says the walk declined it.
+        """
+        for relative in ("artifacts/obj/Catalog.Api/debug",
+                         "artifacts/bin/Catalog.Api/debug",
+                         "artifacts/publish/Catalog.Api/release",
+                         "artifacts/package/release"):
+            with self.subTest(relative), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                planted = root / relative
+                planted.mkdir(parents=True)
+                (planted / "appsettings.json").write_text(f"aws={AWS_ID}\n", encoding="utf-8")
+                (root / "kept.txt").write_text("nothing here\n", encoding="utf-8")
+                code, out, _ = run(root)
+                self.assertEqual(code, 0)
+                self.assertIn("1 file(s)", out)
+
+    def test_a_source_directory_called_artifacts_is_still_scanned(self):
+        """The subject is the depth the exclusion reaches, not the name it uses.
+
+        `artifacts` means build output at the repository root and nowhere else,
+        so a basename match — which is what every other entry in the skip list
+        is — would take any source directory somebody happened to call that out
+        of the gate's reach, silently. The planted secret is the assertion: a
+        gate that declines to read it reports a clean tree it never walked.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "src" / "Catalog.Api" / "artifacts"
+            nested.mkdir(parents=True)
+            (nested / "appsettings.json").write_text(f"aws={AWS_ID}\n", encoding="utf-8")
+            code, _, err = run(root)
+        self.assertEqual(code, 1)
+        self.assertIn("aws-access-key-id", err)
+        self.assertIn("artifacts", err)
+
 
 class RealRepository(unittest.TestCase):
     def test_the_repository_passes_its_own_gate(self):

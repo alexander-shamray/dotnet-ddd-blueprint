@@ -140,14 +140,36 @@ A monorepo makes cross-cutting changes and contract updates atomic and reviewabl
 │                                       Stdlib Python, no restore — it renders
 │                                       a service from Catalog at run time
 │
+├── artifacts/                          Every build's output: bin, obj and
+│                                       publish take a subdirectory per project,
+│                                       package groups by configuration.
+│                                       Generated and git-ignored, and drawn
+│                                       here because it is the reason src/ and
+│                                       tests/ above hold source alone
+│
 ├── coverage.runsettings                What `--collect:"Code Coverage"` measures:
 │                                       the report filtered to `.*\.Domain\.dll$`,
 │                                       which is §12.9's "coverage of the domain
 │                                       layer specifically" as an artefact
-├── Directory.Build.props               Shared MSBuild settings
+├── Directory.Build.props               Shared MSBuild settings, and the file
+│                                       that puts output in artifacts/ — the
+│                                       only early-enough place for it, argued
+│                                       in the file's own Output comment
 ├── Directory.Packages.props            Central package version management
 └── Platform.slnx
 ```
+
+**`src/` and `tests/` hold source, and nothing a build wrote.** A project
+directory carrying its own `bin/` and `obj/` buries the files a reader came for
+under the ones a build wrote, and every gate that walks a source tree pays for
+it again in a skip list that silently decides what the gate reads.
+
+Moving the output retires none of those lists, and expecting it to is the way
+to get this wrong: a gate that walks the repository root has to decline
+`artifacts/` by name, and one that walks `src/` still meets a checkout made
+before the move. What it does buy is that the tree a reader browses and the
+tree a gate reads are the same tree, and that a directory left out of a skip
+list is a gate reading too much rather than a gate reading a build.
 
 `.slnx` is the XML solution format, supported by the SDK from .NET 9 and by
 Visual Studio 2022 17.13 onward. The `global.json` pin below already puts every
