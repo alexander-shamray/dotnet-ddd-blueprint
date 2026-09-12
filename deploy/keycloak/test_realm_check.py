@@ -594,6 +594,35 @@ class TheWebOrigins(Fixture):
         self.assertEqual(self.problems(realm(
             browser(webOrigins=["+"], redirectUris="not-an-array"), mobile())), [])
 
+    # A character set closes the class of hosts that differ by a character, and
+    # these three differ by parse. `ends_in_a_number` is WHATWG's own test
+    # written out, after two approximations of it each missed a form.
+
+    def test_a_scoped_ipv6_literal_is_refused(self):
+        """`ipaddress` accepts a zone identifier and a URL cannot carry one."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://[fe80::1%25eth0]"]))))
+
+    def test_a_hexadecimal_final_label_is_refused(self):
+        """`127.0x1` is an IPv4 attempt: the prefix is on the label, not the host."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://127.0x1"]))))
+
+    def test_a_numeric_host_with_a_trailing_dot_is_refused(self):
+        """One trailing dot is dropped before the last label is read."""
+        self.assertIn("index 0", self.one(realm(browser(), mobile(
+            webOrigins=["https://127.1."]))))
+
+    def test_a_domain_whose_label_merely_starts_with_0x_is_accepted(self):
+        """The other half: `ends_in_a_number` reads the LAST label, not the first.
+
+        Without this case, a test that read the host rather than its final
+        label would refuse an ordinary domain and every negative above would
+        still pass.
+        """
+        self.assertEqual(self.problems(realm(browser(), mobile(
+            webOrigins=["https://0x.example"]))), [])
+
     def test_the_offending_value_is_not_echoed(self):
         """Userinfo survives the authority form, so the message carries an index.
 

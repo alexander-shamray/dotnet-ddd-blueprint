@@ -823,6 +823,34 @@ def check_mobile_client(client: dict) -> list[str]:
     return problems
 
 
+def ends_in_a_number(host: str) -> bool:
+    """WHATWG's test for whether a host is parsed as IPv4 rather than a domain.
+
+    Written out because approximating it failed twice. The first approximation
+    asked whether the last label `isdigit()` or the whole host began `0x`, and
+    it missed `127.0x1` — where the hex prefix is on the LAST LABEL rather than
+    the host — and `127.1.`, where one trailing dot leaves the last label empty
+    and the test looks at the wrong thing. Both are rewritten by a browser and
+    both were passing a check whose subject is what a browser sends.
+
+    The rule itself is short: drop one trailing empty label, then the host ends
+    in a number if the last label is all digits, or is a `0x` prefix followed
+    by hex digits or nothing at all. A host that ends in a number is parsed as
+    IPv4, and the caller then requires it to be the dotted quad `ipaddress`
+    prints.
+    """
+    labels = host.split(".")
+    if labels and labels[-1] == "":
+        labels = labels[:-1]
+    if not labels:
+        return False
+
+    last = labels[-1].lower()
+    if last.isdigit():
+        return True
+    return last.startswith("0x") and all(c in "0123456789abcdef" for c in last[2:])
+
+
 def canonical_origin(text: object) -> str | None:
     """The origin a browser would send for this text, or `None` if it is not one.
 
@@ -874,13 +902,17 @@ def canonical_origin(text: object) -> str | None:
     the form a browser sends, where the alternative is a gate that passes an
     origin matching nothing.
 
-    **`HOST_CHARACTERS` is a set and the others are spellings, and that
-    difference is the lesson rather than a detail.** The port fix, the IPv4 and
-    IDN fix and the percent-escape fix each arrived in its own review round,
-    each naming the spelling it had just been shown — which is enumerating what
-    is wrong against something that generates wrong things faster than a list
-    grows. The set names what is right instead, so the fourth spelling is
-    already refused.
+    **`HOST_CHARACTERS` is a set where the others were spellings, and the
+    round after it added this paragraph found two more.** The claim it made —
+    that naming what is right closes the class — was half true and is corrected
+    here rather than left standing. A character set does close the class of
+    hosts that differ by a *character*: the percent escape that prompted it,
+    and every other byte nobody has thought of. It says nothing about whether a
+    host drawn entirely from that set is canonical, and `127.0x1` and `127.1.`
+    are both spelled in it. **Whether a host is an IPv4 attempt is an algorithm
+    rather than an alphabet**, so `ends_in_a_number` above is WHATWG's own test
+    written out instead of approximated, which is the structural fix the set
+    was mistaken for.
     """
     if not isinstance(text, str):
         return None
@@ -906,9 +938,13 @@ def canonical_origin(text: object) -> str | None:
     if ":" in host:
         # An IPv6 literal, which an origin brackets and `hostname` does not.
         try:
-            if str(ipaddress.IPv6Address(host)) != host:
-                return None
+            address = ipaddress.IPv6Address(host)
         except ValueError:
+            return None
+        # `ipaddress` accepts a zone identifier and a URL may not carry one, so
+        # a scoped address round-trips through this function unchanged while
+        # being an origin no browser can send.
+        if address.scope_id is not None or str(address) != host:
             return None
     elif scheme in WEB_SCHEME_NAMES and not HOST_CHARACTERS.fullmatch(host):
         # A browser normalises the host of a special scheme before sending it —
@@ -917,12 +953,11 @@ def canonical_origin(text: object) -> str | None:
         # something else. A custom scheme's host is opaque and is left alone.
         return None
 
-    if ":" not in host and (host.rsplit(".", 1)[-1].isdigit() or host.startswith("0x")):
-        # WHATWG parses a host whose last label is numeric as IPv4 and
-        # serialises it as a dotted quad, so anything reaching here that is an
-        # IPv4 attempt has to be that quad already. `ipaddress` refuses
-        # shorthand, leading zeros and bare integers, which is exactly the set
-        # a browser would rewrite.
+    if ":" not in host and ends_in_a_number(host):
+        # A host WHATWG parses as IPv4 is serialised as a dotted quad, so one
+        # reaching here has to be that quad already. `ipaddress` refuses
+        # shorthand, leading zeros, hex octets, a trailing dot and bare
+        # integers, which is exactly the set a browser would rewrite.
         try:
             if str(ipaddress.IPv4Address(host)) != host:
                 return None
